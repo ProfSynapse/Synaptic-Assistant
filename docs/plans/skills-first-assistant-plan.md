@@ -46,6 +46,8 @@ A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** o
 | **Skill protocol** | Elixir behaviours + markdown files | Built-in skills = Elixir modules with `execute(flags, context)` callback. User-created skills = markdown files with YAML frontmatter. Both in same registry, same CLI interface. |
 | **Managed content search** | PostgreSQL FTS index | All normalized Drive-backed content + skill files indexed in `content_index` table with weighted tsvector. Grep-like search capability. |
 | **Voice** | OpenRouter STT + ElevenLabs TTS | OpenRouter for speech-to-text (audio via chat completions). ElevenLabs for text-to-speech (behind TTSClient behaviour). Phase 4. |
+| **Integration clients** | Req-first HTTP adapters behind behaviours | In Elixir, keep protocol control and API coverage by defaulting to thin HTTP clients. SDKs/wrappers are optional, replaceable accelerators only. |
+| **Integration onboarding** | Environment-driven credential model | New app integrations should be mostly config: add env vars, add one adapter behind a behaviour, then add skills. No orchestrator redesign. |
 | **File operations** | Non-destructive versioning | Pull -> Manipulate -> Archive -> Replace. Never delete. Full audit trail. |
 | **Error handling** | Circuit breakers + active alerting | Four-level limit hierarchy. OTP supervisors. Alerts to Google Chat/email with dedup. |
 | **Prompt caching** | Cache-friendly message ordering | Static sections (system prompt + 2 tool defs) first → cache breakpoint. Alphabetical skill sorting for consistent tool definitions. Sub-agents with same skill sets share cache. |
@@ -68,18 +70,18 @@ A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** o
 - [x] Language evaluation: Elixir vs TypeScript vs Python (resolved: Elixir)
 - [x] Sandbox evaluation: E2B vs alternatives vs none (resolved: no sandbox)
 - [x] Database evaluation: Postgres vs SQLite (resolved: Postgres)
-- [x] Memory search: pgvector vs FTS (resolved: FTS + tags + filters, pgvector deferred)
+- [x] Memory search: pgvector vs FTS (resolved: hybrid pgvector + FTS + structured filters)
 - [x] Voice providers: STT + TTS selection (resolved: OpenRouter STT + ElevenLabs TTS)
-- [ ] Elixir ecosystem audit: Verify maturity of Telegex, whatsapp_elixir, google_api_drive, goth
-- [ ] OpenRouter API: Document tool-calling format, streaming protocol, model fallback, prompt caching (cache_control breakpoints)
-- [ ] Google OAuth2 flow: Service account + domain-wide delegation setup for Drive/Gmail/Calendar
-- [ ] WhatsApp Business API: Evaluate if whatsapp_elixir exists or if HTTP wrapper needed
-- [ ] HubSpot API: Evaluate hubspotex maturity or plan HTTP wrapper
-- [ ] ElevenLabs API: Document TTS endpoints, streaming audio, voice selection, latency
-- [ ] OpenRouter STT: Document audio input format via chat completions API
-- [ ] MCP protocol: Study spec (2025-11-25) for skill interface inspiration
-- [ ] Railway deployment: Elixir/Phoenix release configuration, health checks, Postgres provisioning
-- [ ] Elixir best practices: Coding conventions, OTP patterns, testing patterns (in progress — task #12)
+- [x] Elixir ecosystem audit: Verify maturity of Telegex, whatsapp_elixir, google_api_drive, goth
+- [x] OpenRouter API: Document tool-calling format, streaming protocol, model fallback, prompt caching (cache_control breakpoints)
+- [x] Google OAuth2 flow: Service account + domain-wide delegation setup for Drive/Gmail/Calendar
+- [x] WhatsApp Business API: Evaluate if whatsapp_elixir exists or if HTTP wrapper needed
+- [x] HubSpot API: Evaluate hubspotex maturity or plan HTTP wrapper
+- [x] ElevenLabs API: Document TTS endpoints, streaming audio, voice selection, latency
+- [x] OpenRouter STT: Document audio input format via chat completions API (pending schema lock via contract test)
+- [x] MCP protocol: Study spec (2025-11-25) for skill interface inspiration
+- [x] Railway deployment: Elixir/Phoenix release configuration, health checks, Postgres provisioning
+- [x] Elixir best practices: Coding conventions, OTP patterns, testing patterns
 
 #### Questions Resolved
 - [x] Google API authentication: **Service account with domain-wide delegation**
@@ -101,7 +103,7 @@ A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** o
 | Component | Type | Purpose |
 |-----------|------|---------|
 | **Message Gateway** | Phoenix endpoint + GenServer adapters | Receive webhooks, normalize to common format |
-| **Channel Adapters** | GenServer per channel type | Telegram, Google Chat, WhatsApp, Voice — `ChannelAdapter` behaviour |
+| **Channel Adapters** | GenServer per channel type | Telegram, Google Chat, Slack, WhatsApp, Voice — `ChannelAdapter` behaviour |
 | **Orchestrator Engine** | GenServer per conversation | Manages orchestrator LLM calls, sub-agent dispatch, DAG execution |
 | **Sub-Agent Executor** | Task.Supervisor per conversation | Execute sub-agents as supervised async tasks with scoped context |
 | **Skill Registry** | ETS table + module discovery | Discover, register, look up skills. Domain/name/search queries for meta-tools |
@@ -118,16 +120,16 @@ A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** o
 | **Compaction Engine** | Oban worker + topic detection | Continuous incremental summary after each turn. Returns `topic_changed` boolean; if true, extracts memory entry (tags, importance) in same call. |
 | **Task Manager** | Skills (CRUD) + 4-table schema | Task tracking exposed as skills the LLM invokes via CLI commands (tasks.create, tasks.search, etc.) |
 | **File Version Manager** | GenServer | PULL -> MANIPULATE -> ARCHIVE -> REPLACE workflow |
-| **Integration Clients** | Modules per service | Google (Drive, Gmail, Calendar), HubSpot, OpenRouter (LLM + STT), ElevenLabs (TTS) |
+| **Integration Clients** | Modules per service | Google (Drive, Gmail, Calendar), HubSpot, OpenRouter (LLM + STT), ElevenLabs (TTS), Slack. Env-driven configuration with behaviour-based adapters. |
 | **Alert Router** | GenServer | Route errors to Google Chat webhooks / email with dedup + throttling |
 | **Scheduler** | Quantum + Oban | Cron triggers + reliable Postgres-backed job queue |
 
 #### System Architecture
 
 ```
-                    Telegram  Google Chat  WhatsApp  Voice (OpenRouter STT + ElevenLabs TTS)
-                       |          |          |          |
-                       v          v          v          v
+                      Telegram  Google Chat  Slack  WhatsApp  Voice (OpenRouter STT + ElevenLabs TTS)
+                        |          |         |       |          |
+                        v          v         v       v          v
                   +------------------------------------------+
                   |        Message Gateway (Phoenix)         |
                   |   Channel Adapters (GenServer each)      |
@@ -509,7 +511,7 @@ assistant/
 1. Project scaffold (mix phx.new, Ecto setup, Postgres on Railway)
 2. Core schemas + migrations (conversations, messages, memory, tasks, users)
 3. Skill behaviour + registry + executor with timeouts
-4. OpenRouter LLM client (chat completions + tool-calling + streaming + prompt caching)
+4. OpenRouter LLM client (chat completions + tool-calling + prompt caching; non-streaming default, streaming opt-in)
 5. Three meta-tools: get_skill + dispatch_agent + get_agent_results
 6. Orchestration engine with hybrid skill access (read-only direct, mutating via sub-agents)
 7. Sub-agent architecture: DAG scheduler, scoped context, CLI command execution
@@ -677,7 +679,7 @@ DEPLOY: Railway
 2. `feat: core schemas and migrations` — Conversations (+ summary fields), messages (+ tool trace columns), memory entries (+ tags, tsvector), memory entities, entity graph, tasks (4 tables), users, execution logs
 3. `feat: skill behaviour and registry` — Skill interface, ETS registry, domain/name/search queries
 4. `feat: skill executor with Task.Supervisor` — Supervised execution, timeouts
-5. `feat: OpenRouter LLM client` — Chat completions, tool-calling, streaming, prompt caching (cache_control)
+5. `feat: OpenRouter LLM client` — Chat completions, tool-calling, prompt caching (cache_control), non-streaming default with optional streaming mode
 6. `feat: three meta-tools (get_skill + dispatch_agent + get_agent_results)` — Progressive skill discovery with SKILL.md indexes + dot notation + .all suffix, agent coordination
 7. `feat: orchestration engine with hybrid skill access` — Orchestrator loop, read-only direct execution, context assembly, circuit breakers
 8. `feat: sub-agent architecture` — CLI command execution, DAG scheduler, scoped context

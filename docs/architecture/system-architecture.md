@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document defines the architecture for a headless, skills-first AI assistant built in Elixir on the BEAM VM. The system receives user messages from multiple channels (Google Chat, Telegram, WhatsApp, Voice), routes them through an LLM brain (OpenRouter) that selects and executes modular skills organized by domain (email, calendar, CRM, files, tasks, memory). OpenRouter provides LLM chat completions with tool calling, speech-to-text (STT), and embedding generation. ElevenLabs provides text-to-speech (TTS) via a thin Req-based HTTP wrapper behind a `TTSClient` behaviour. Skills run in-process as supervised OTP tasks — no external sandbox needed. Data is stored in PostgreSQL with hybrid retrieval (FTS + pgvector + structured filters) for memory and knowledge recall. File content is managed through a synced Google Drive mirror with normalized representations (docs -> markdown, sheets -> csv, slides -> markdown + assets). The skill interface follows MCP-inspired patterns (self-describing tools with JSON schemas) for future ecosystem compatibility.
+This document defines the architecture for a headless, skills-first AI assistant built in Elixir on the BEAM VM. The system receives user messages from multiple channels (Google Chat, Telegram, Slack, WhatsApp, Voice), routes them through an LLM brain (OpenRouter) that selects and executes modular skills organized by domain (email, calendar, CRM, files, tasks, memory). OpenRouter provides LLM chat completions with tool calling, speech-to-text (STT), and embedding generation. ElevenLabs provides text-to-speech (TTS) via a thin Req-based HTTP wrapper behind a `TTSClient` behaviour. Skills run in-process as supervised OTP tasks — no external sandbox needed. Data is stored in PostgreSQL with hybrid retrieval (FTS + pgvector + structured filters) for memory and knowledge recall. File content is managed through a synced Google Drive mirror with normalized representations (docs -> markdown, sheets -> csv, slides -> markdown + assets). The skill interface follows MCP-inspired patterns (self-describing tools with JSON schemas) for future ecosystem compatibility.
 
 The architecture leverages OTP supervision trees for fault tolerance, GenServer processes for conversation isolation, Oban for persistent job queuing, and Quantum for cron scheduling — all backed by PostgreSQL. The BEAM VM's concurrency model makes it uniquely suited for an agent orchestration system that must manage multiple concurrent conversations, skill executions, and external API interactions with built-in circuit breaking and fault recovery.
 
@@ -24,6 +24,7 @@ The architecture leverages OTP supervision trees for fault tolerance, GenServer 
 | Users | Human | Send/receive messages via channels |
 | Google Chat | Channel | Webhook-based messaging |
 | Telegram | Channel | Bot API (long-polling or webhook) |
+| Slack | Channel | Events API / webhook-based messaging |
 | WhatsApp | Channel | WhatsApp Business API webhooks |
 | Voice | Channel | STT input (OpenRouter) + TTS output (ElevenLabs) |
 | OpenRouter | AI Provider | Chat completions with tool calling, STT, embeddings |
@@ -43,9 +44,9 @@ The architecture leverages OTP supervision trees for fault tolerance, GenServer 
 Users
   |
   v
-[Google Chat] [Telegram] [WhatsApp] [Voice]
-  |              |           |          |
-  +------+-------+-----+-----+----+----+
+[Google Chat] [Telegram] [Slack] [WhatsApp] [Voice]
+  |              |         |        |          |
+  +------+-------+----+----+---+----+----+----+
          |             |          |
          v             v          v
     +------------------------------------+
@@ -72,10 +73,10 @@ The system is a single Elixir application (OTP release) with clearly separated i
 
 **Purpose**: Receive messages from all channels, normalize to common format, route responses back.
 
-**Implementation**: Phoenix endpoint for webhooks + channel-specific adapter modules implementing a shared `ChannelAdapter` behaviour.
+**Implementation**: Phoenix endpoint for webhooks + channel-specific adapter modules implementing a shared `ChannelAdapter` behaviour (pluggable chat interfaces).
 
 **Responsibilities**:
-- Accept inbound webhooks (Google Chat, Telegram, WhatsApp)
+- Accept inbound webhooks/events (Google Chat, Telegram, Slack, WhatsApp)
 - Normalize messages to `ConversationMessage` struct
 - Route outbound responses to correct channel adapter
 - Handle channel-specific formatting (markdown, cards, buttons)
@@ -85,6 +86,7 @@ The system is a single Elixir application (OTP release) with clearly separated i
 - `Assistant.Channels.Adapter` — ChannelAdapter behaviour (compile-time contract)
 - `Assistant.Channels.GoogleChat` — Google Chat adapter (GenServer)
 - `Assistant.Channels.Telegram` — Telegram Bot API adapter (GenServer)
+- `Assistant.Channels.Slack` — Slack Events API adapter (GenServer)
 - `Assistant.Channels.WhatsApp` — WhatsApp Business API adapter (GenServer)
 - `Assistant.Channels.Voice` — Voice I/O bridge: OpenRouter STT + ElevenLabs TTS (GenServer)
 - `Assistant.Channels.Message` — ConversationMessage struct
@@ -155,6 +157,14 @@ The system is a single Elixir application (OTP release) with clearly separated i
 **Purpose**: Clients for all external services.
 
 **Implementation**: Service modules using Req for HTTP, Goth for Google OAuth. Each integration is behind a behaviour for Mox testability.
+
+**Extensibility contract**: New app integrations are environment-driven and adapter-based — provide credentials/config via env vars, add a thin `Req` client behind a behaviour, then expose skills that call that client.
+
+**Responsibilities**:
+- Load per-provider credentials/config from environment at runtime
+- Enforce a consistent env-var naming convention for new integrations
+- Fail fast with clear startup errors when required integration env vars are missing
+- Keep provider-specific request/response mapping isolated in integration modules
 
 **Key modules**:
 - `Assistant.Integrations.Google.Auth` — OAuth2 via Goth (service account with domain-wide delegation)
@@ -962,7 +972,7 @@ end
 **Trade-offs**:
 - No active HubSpot library — custom HTTP client needed (subset only)
 - No ElevenLabs library — thin Req HTTP wrapper needed (small surface area: synthesize, stream, list voices)
-- Smaller AI/LLM ecosystem than TypeScript/Python (but sufficient — LangChain Elixir, ExLLM, ReqLLM exist)
+- Smaller AI/LLM ecosystem than TypeScript/Python (mitigated by Req-first HTTP clients behind behaviours)
 
 ### ADR-002: No Sandbox (In-Process Skill Execution)
 
@@ -1034,7 +1044,9 @@ end
 - Two API keys (OpenRouter + ElevenLabs) is manageable — no operational complexity compared to the three-provider alternative (separate STT, LLM, TTS)
 - If OpenRouter TTS becomes reliable later, swap the `TTSClient` implementation without changing the voice channel adapter
 
-**Client evaluation for LLM**: Evaluate LangChain for Elixir, ExLLM, and ReqLLM. Select based on: tool calling maturity, streaming support, OpenRouter compatibility, and error handling quality.
+**Client strategy for LLM/STT/TTS**: Use thin `Req` HTTP clients behind behaviours as the default path. Avoid hard dependency on third-party SDKs unless they provide clear, measured leverage without reducing API coverage or control.
+
+**LLM response mode policy**: Use non-streaming as the default execution mode for orchestrator and sub-agent loops. Enable streaming only for explicit UX paths that need partial-token rendering.
 
 **Fallback**: Raw HTTP via Req works if no library meets needs. All voice capabilities are behind behaviours for testability and provider swapping.
 
@@ -1244,6 +1256,8 @@ Railway Project
 |   +-- GOOGLE_SERVICE_ACCOUNT_JSON: (secret)
 |   +-- HUBSPOT_API_KEY: (secret)
 |   +-- TELEGRAM_BOT_TOKEN: (secret)
+|   +-- SLACK_BOT_TOKEN: (secret)
+|   +-- SLACK_SIGNING_SECRET: (secret)
 |   +-- WHATSAPP_API_KEY: (secret)
 |   +-- GOOGLE_CHAT_WEBHOOK_URL: (secret)
 |   +-- NOTIFICATION_EMAIL_FROM: (config)
@@ -1255,6 +1269,17 @@ Railway Project
 |
 +-- Database: PostgreSQL
 ```
+
+### Integration Credential Convention
+
+To keep onboarding new apps simple and consistent, new integrations should follow this runtime env-var pattern:
+
+- Credentials: `<APP>_API_KEY` (or provider-required token names)
+- Optional endpoint override: `<APP>_BASE_URL`
+- Optional defaults: `<APP>_MODEL`, `<APP>_VOICE_ID`, etc.
+- Staged rollout flag: `<APP>_ENABLED=true|false`
+
+This convention allows most new integrations to be added as configuration + one adapter module + skill definitions, without orchestrator changes.
 
 ### Dockerfile (Elixir Release)
 
@@ -1318,6 +1343,7 @@ assistant/
 |   |   |   +-- adapter.ex      # ChannelAdapter behaviour
 |   |   |   +-- telegram.ex     # Telegram adapter (GenServer)
 |   |   |   +-- google_chat.ex  # Google Chat adapter
+|   |   |   +-- slack.ex        # Slack adapter
 |   |   |   +-- whatsapp.ex     # WhatsApp adapter
 |   |   |   +-- voice.ex        # Voice adapter (OpenRouter STT + ElevenLabs TTS)
 |   |   |   +-- message.ex      # ConversationMessage struct
@@ -1603,7 +1629,7 @@ Aligned with the approved plan phasing.
 ### CODE Phase 3: Expand Skills + Channels
 
 **Deliverables**:
-- Telegram adapter, WhatsApp adapter
+- Telegram adapter, Slack adapter, WhatsApp adapter
 - Email skills (Gmail), Calendar skills, HubSpot skills
 - Notification/alerting system (Google Chat webhook + email)
 - Scheduler (Quantum cron + Oban jobs)
