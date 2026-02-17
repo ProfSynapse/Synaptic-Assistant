@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "WebFetch(domain:www.turing.com)",
+      "WebFetch(domain:jonroosevelt.com)",
+      "mcp__plugin_context7_context7__query-docs",
+      "WebFetch(domain:e2b.dev)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:hex.pm)",
+      "WebFetch(domain:developers.google.com)",
+      "WebFetch(domain:codieshub.com)",
+      "WebFetch(domain:elixirator.com)",
+      "WebFetch(domain:www.freshcodeit.com)",
+      "WebFetch(domain:openrouter.ai)",
+      "WebFetch(domain:news.ycombinator.com)",
+      "WebFetch(domain:hexdocs.pm)"
+    ]
+  }
+}
