@@ -240,7 +240,8 @@ ConversationSupervisor (DynamicSupervisor)
 |
 +-- Engine (GenServer, per conversation)
 |   +-- State: conversation_id, channel, user, message_history,
-|   |         turn_counter, skill_call_count, circuit_breaker_state
+|   |         turn_counter, skill_call_count, circuit_breaker_state,
+|   |         recent_memory_context, prompt_cache_keys
 |   |
 |   +-- handle_cast(:new_message, message)
 |   |   +-- Triggers agent loop via Orchestrator.Engine
@@ -271,25 +272,33 @@ User sends message
 Engine (GenServer) receives message
     |
     v
-Load conversation history from DB
+Load conversation history from DB (sliding window)
     |
     v
-Build messages array for OpenRouter
+Build execution context
 (system prompt + history + memory context + new message + available tools)
     |
     v
 +--- AGENT LOOP START ---+
 |                         |
-|  Call OpenRouter API    |
+|  Step A: Retrieve memory context
+|   - Hybrid memory search (FTS + pgvector + filters)
+|   - Reuse per-turn memory cache if query signature unchanged
+|                         |
+|  Step B: Prepare LLM payload
+|   - Static prefix cache key (identity/instructions/tool hints)
+|   - Conversation prefix cache key (history window + memory context)
+|                         |
+|  Step C: Call OpenRouter API
 |       |                 |
 |       v                 |
 |  Response type?         |
 |   |           |         |
 |   v           v         |
-|  text      tool_call    |
+|  text      tool_call / cmd
 |   |           |         |
 |   v           v         |
-|  DONE    Validate call  |
+|  DONE    Validate call/command
 |           |             |
 |           v             |
 |     Check circuit       |
@@ -299,11 +308,32 @@ Build messages array for OpenRouter
 |    OK      TRIPPED      |
 |    |         |          |
 |    v         v          |
+|  Is operation mutating? |
+|    |         |          |
+|   no        yes         |
+|    |         |          |
+|    |   Sentinel decision|
+|    |   (context-isolated|
+|    |    safety check)   |
+|    |      |      |      |
+|    |      v      v      |
+|    |    allow   deny    |
+|    |      |      |      |
+|    |      v      v      |
+|    |   Execute  Return  |
+|    |   skill/   refusal |
+|    |   dispatch +reason |
+|    v         v          |
 |  Execute   Error resp   |
-|  skill     + notify     |
-|  (in-proc)   |          |
-|    |         v          |
-|    v        DONE        |
+|  (in-proc  + notify     |
+|   or sub-    |          |
+|   agent)     v          |
+|    |        DONE        |
+|    v                    |
+|  Write-through caches   |
+|   - append turn buffer  |
+|   - update memory cache |
+|   - persist skill trace |
 |  Feed result            |
 |  back to LLM            |
 |    |                    |
@@ -317,6 +347,20 @@ Persist conversation to DB
     v
 Send response via channel adapter
 ```
+
+### 3.2.1 Caching Strategy in the Loop
+
+- **Conversation history cache (Engine state)**: Active conversation keeps a sliding message window in memory; DB is source of truth and used on cold start/restart.
+- **Prompt prefix caching (LLM provider)**: System/static instruction prefix and stable conversation prefix are sent with deterministic structure for high cache hit rate.
+- **Memory context cache (per turn)**: Memory retrieval result is cached for the turn and reused across loop iterations unless query intent changes.
+- **Embedding query cache (short TTL)**: Reuse query embeddings inside the same turn (and optionally short cross-turn TTL) to reduce duplicate embedding calls.
+
+### 3.2.2 Memory + Sentinel Integration Points
+
+- **Memory integration**: Memory retrieval runs before each LLM call in the loop; context builder merges conversation history + hybrid memory results.
+- **Sentinel integration**: Sentinel runs only on mutating/destructive actions (`*.create`, `*.update`, `*.delete`, `*.send`, file publish/move).
+- **Sub-agent integration**: Orchestrator runs sentinel before dispatching mutating sub-agent missions; sub-agents also run sentinel before executing mutating commands.
+- **Audit trail**: Sentinel decision + reason are recorded with the related execution entry for observability and review.
 
 ### 3.3 Circuit Breaker Configuration
 
@@ -1102,6 +1146,7 @@ Each boundary performs its own validation. No layer trusts upstream validation.
 - System prompt clearly delineates user input boundaries
 - Tool call parameters are validated against JSON schemas before execution
 - Skill descriptions are static (not user-influenced)
+- Sentinel gate evaluates all mutating/destructive actions in a context-isolated check before execution
 - Skills with destructive capabilities (file operations, email sending) require parameter validation
 - All Drive file operations go through the versioning workflow (archive-before-modify)
 - Webhook signature verification on all inbound channel messages

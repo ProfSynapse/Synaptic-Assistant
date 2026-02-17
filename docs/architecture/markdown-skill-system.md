@@ -174,7 +174,7 @@ email.send --to <addresses> --subject <text> --body <text> [--cc <addresses>] [-
 
 Send the email immediately via Gmail API. Return the message ID on success.
 Multiple recipients: --to alice@co.com bob@co.com
-Attachments are Google Drive file IDs (use drive.search to find them).
+Attachments are managed content file refs (use files.search to find them).
 
 ## Examples
 
@@ -340,12 +340,13 @@ skills/
 │   ├── create.md          # calendar.create
 │   ├── list.md            # calendar.list
 │   └── update.md          # calendar.update
-├── drive/
-│   ├── SKILL.md           # Domain index
-│   ├── read.md            # drive.read
-│   ├── update.md          # drive.update
-│   ├── list.md            # drive.list
-│   └── search.md          # drive.search
+├── files/
+│   ├── SKILL.md           # Domain index: "Unified content/storage management"
+│   ├── read.md            # files.read
+│   ├── write.md           # files.write
+│   ├── search.md          # files.search
+│   ├── move.md            # files.move
+│   └── sync.md            # files.sync
 ├── hubspot/
 │   ├── SKILL.md           # Domain index
 │   ├── contacts.md        # hubspot.contacts
@@ -355,11 +356,6 @@ skills/
 │   ├── SKILL.md           # Domain index
 │   ├── save.md            # memory.save
 │   └── search.md          # memory.search
-├── markdown/
-│   ├── SKILL.md           # Domain index
-│   ├── edit.md            # markdown.edit
-│   ├── create.md          # markdown.create
-│   └── search.md          # markdown.search
 ├── workflow/               # Meta-skills for workflow management
 │   ├── SKILL.md           # Domain index
 │   └── build.md           # workflow.build
@@ -403,7 +399,7 @@ Send, read, search, and draft emails via Gmail.
 ## Notes
 
 - All email operations use the Gmail API via OAuth2
-- Attachments are Google Drive file IDs (use drive.search to find them)
+- Attachments are managed content file refs (use files.search to find them)
 - Body text supports markdown formatting
 ```
 
@@ -1199,29 +1195,31 @@ end
 
 ---
 
-## 8. Markdown Content Search (PostgreSQL FTS)
+## 8. Managed Content Search (PostgreSQL FTS)
 
 ### 8.1 The Problem
 
-Google Drive API cannot search inside markdown file contents. Users need to search their Obsidian vault by content ("find notes about Q1 strategy"). The assistant must be able to grep markdown contents.
+Google Drive API cannot reliably search inside normalized content bodies. Users need to search managed content by meaning and text ("find notes about Q1 strategy"). The assistant must be able to grep normalized content.
 
-### 8.2 Solution: Index in PostgreSQL
+### 8.2 Solution: Index Normalized Content in PostgreSQL
 
-When markdown files are created or updated via Drive, their content is indexed in PostgreSQL FTS:
+When managed files are synced/updated via Drive, normalized content is indexed in PostgreSQL FTS:
 
 ```sql
-CREATE TABLE markdown_index (
+CREATE TABLE content_index (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   drive_file_id VARCHAR(255) NOT NULL UNIQUE,
   drive_file_name VARCHAR(500) NOT NULL,
   drive_folder_id VARCHAR(255),
   drive_folder_path TEXT,
+  canonical_type VARCHAR(20) NOT NULL,      -- doc/sheet/slide/binary
+  normalized_format VARCHAR(20) NOT NULL,   -- markdown/csv/markdown_assets/binary
   content TEXT NOT NULL,
-  frontmatter JSONB DEFAULT '{}',
+  metadata JSONB DEFAULT '{}',
   word_count INTEGER,
   search_vector tsvector GENERATED ALWAYS AS (
     setweight(to_tsvector('english', coalesce(drive_file_name, '')), 'A') ||
-    setweight(to_tsvector('english', coalesce(frontmatter->>'title', '')), 'A') ||
+    setweight(to_tsvector('english', coalesce(metadata->>'title', '')), 'A') ||
     setweight(to_tsvector('english', coalesce(content, '')), 'B')
   ) STORED,
   tags TEXT[] DEFAULT '{}',
@@ -1230,17 +1228,17 @@ CREATE TABLE markdown_index (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_markdown_search ON markdown_index USING gin(search_vector);
-CREATE INDEX idx_markdown_drive_file ON markdown_index(drive_file_id);
-CREATE INDEX idx_markdown_folder ON markdown_index(drive_folder_id);
-CREATE INDEX idx_markdown_tags ON markdown_index USING gin(tags);
-CREATE INDEX idx_markdown_frontmatter ON markdown_index USING gin(frontmatter);
+CREATE INDEX idx_content_search ON content_index USING gin(search_vector);
+CREATE INDEX idx_content_drive_file ON content_index(drive_file_id);
+CREATE INDEX idx_content_folder ON content_index(drive_folder_id);
+CREATE INDEX idx_content_tags ON content_index USING gin(tags);
+CREATE INDEX idx_content_metadata ON content_index USING gin(metadata);
 ```
 
 ### 8.3 Indexing Pipeline
 
 ```
-Markdown file created/updated on Drive
+Managed file created/updated on Drive
     |
     v
 Drive webhook or periodic sync (Oban job)
@@ -1249,29 +1247,29 @@ Drive webhook or periodic sync (Oban job)
 Download file content from Drive API
     |
     v
-Parse frontmatter (extract YAML, tags, title)
+Normalize content + extract metadata (title, tags, format)
     |
     v
-Upsert into markdown_index table
+Upsert into content_index table
     |
     v
 tsvector auto-generated by PostgreSQL
 ```
 
 ```elixir
-defmodule Assistant.Markdown.Indexer do
+defmodule Assistant.Files.ContentIndexer do
   def index_file(drive_file_id) do
     with {:ok, metadata} <- Drive.get_file_metadata(drive_file_id),
          {:ok, content} <- Drive.download_file_content(drive_file_id),
-         {:ok, frontmatter, _body} <- parse_frontmatter(content) do
+         {:ok, parsed_metadata, _body} <- parse_frontmatter(content) do
 
-      %MarkdownIndex{}
+      %ContentIndex{}
       |> Ecto.Changeset.change(%{
         drive_file_id: drive_file_id,
         drive_file_name: metadata.name,
         drive_folder_id: metadata.parents |> List.first(),
         content: content,
-        frontmatter: frontmatter,
+        metadata: parsed_metadata,
         word_count: content |> String.split(~r/\s+/) |> length(),
         tags: frontmatter["tags"] || [],
         last_indexed_at: DateTime.utc_now()
@@ -1655,9 +1653,9 @@ When a workflow with a `schedule` field is created via `workflow.build`, it is a
 | `Assistant.Skills.FlagValidator` | Helper | Common flag validation utilities |
 | `Assistant.Skills.Validator` | Validator | Validate skill markdown files |
 | `Assistant.Skills.Workflow.Build` | Handler | Create new workflows (compositions of skills) |
-| `Assistant.Markdown.Indexer` | Service | Index markdown content in PostgreSQL FTS |
-| `Assistant.Markdown.MarkdownIndex` | Schema | Ecto schema for markdown content index |
-| `Assistant.Workers.MarkdownIndexWorker` | Oban Worker | Async markdown indexing |
+| `Assistant.Files.ContentIndexer` | Service | Index normalized managed content in PostgreSQL FTS |
+| `Assistant.Files.ContentIndex` | Schema | Ecto schema for managed content index |
+| `Assistant.Workers.ContentIndexWorker` | Oban Worker | Async content indexing |
 | `Assistant.Scheduler.SkillScheduler` | Scheduler | Register scheduled skills with Quantum |
 | `Assistant.Workers.ScheduledSkillWorker` | Oban Worker | Execute scheduled skills |
 
@@ -1717,16 +1715,16 @@ lib/assistant/
   |   |   +-- drive/
   |   |   +-- hubspot/
   |   |   +-- memory/
-  |   |   +-- markdown/
+    |   |   +-- files/
   |   |   +-- workflow/
   |   |       +-- build.ex
   |
-  +-- markdown/
+    +-- files/
   |   +-- indexer.ex             # Content indexing (NEW)
-  |   +-- markdown_index.ex      # Ecto schema (NEW)
+    |   +-- content_index.ex       # Ecto schema (NEW)
   |
   +-- workers/
-      +-- markdown_index_worker.ex    # Async indexing (NEW)
+      +-- content_index_worker.ex     # Async indexing (NEW)
       +-- scheduled_skill_worker.ex   # Scheduled skill execution (NEW)
 
 priv/skills/                     # Skill definition files (one per action)
@@ -1817,7 +1815,7 @@ priv/skills/                     # Skill definition files (one per action)
 - Multi-command: LLM outputs 3 commands -> all execute in order -> all results returned
 - Help request: `tasks.search --help` -> returns markdown body, not execution
 - Custom skill creation: `workflow.build --name test_skill ...` -> file created -> registry hot-reloads
-- Markdown search: file indexed -> `markdown.search --query "..."` -> returns matches
+- Managed content search: file indexed -> `files.search --query "..."` -> returns matches
 - Scheduled skill: skill with `schedule` -> Quantum registers job -> fires on time
 - Handler validation: missing required flag -> handler returns clear error message
 
@@ -1865,7 +1863,7 @@ priv/skills/                     # Skill definition files (one per action)
 | Domain index | SKILL.md per domain folder | Bridges domain-level discovery and individual skill help; auto-generated for custom domain |
 | Skill registration | File-based with hot-reload (FileSystem watcher) | Runtime skill creation; no recompile needed |
 | Custom skills | Template-based (markdown body interpreted by LLM) | Users/assistant can create skills without Elixir code |
-| Markdown content search | PostgreSQL FTS index of Drive markdown content | Drive API cannot grep contents; FTS provides ranked search |
+| Managed content search | PostgreSQL FTS index of normalized Drive-backed content | Drive API cannot grep contents; FTS provides ranked search |
 | Handler interface | Single `execute(flags, context)` callback | All metadata in markdown; handlers are pure execution |
 | Scheduled skills | YAML `schedule` field -> Quantum cron | Declarative; only optional YAML field beyond name/description |
 | Skill naming | `domain.command` dot notation | Mirrors file path; unified addressing for invocation and discovery; globally unique by filesystem |

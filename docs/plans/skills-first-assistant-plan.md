@@ -23,7 +23,7 @@
 
 ## Summary
 
-A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** on the BEAM VM, hosted on **Railway**. The assistant receives messages from multiple channels (Google Chat, Telegram, WhatsApp, voice), routes them through an **orchestrator LLM** via **OpenRouter** that decomposes tasks and dispatches **sub-agents** to execute skills. The LLM interacts via **CLI commands** using **dot notation** (`email.send --to bob`, `tasks.search --status overdue`) — one tool call with one string parameter, parsed server-side. Skills are defined as **markdown files with minimal YAML frontmatter** (name + description only). The assistant can compose existing skills into **workflows** — repeatable multi-skill sequences (daily digest, weekly report). Progressive skill discovery via `get_skill` with **SKILL.md domain indexes** and `.all` suffix. The orchestrator can **directly invoke read-only skills** (`*.search`, `*.get`, `*.list`, `*.read`) for speed; only mutating skills require sub-agent delegation. Sub-agents receive scoped context and execute skills independently in serial/parallel based on a dependency DAG. Memory uses **PostgreSQL full-text search + tags + structured filters** (no pgvector in Phase 1). Continuous conversation compaction maintains context across turns using a small cheap model. All markdown content (Obsidian vault + skill files) is indexed in PostgreSQL FTS for grep-like search.
+A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** on the BEAM VM, hosted on **Railway**. The assistant receives messages from multiple channels (Google Chat, Telegram, WhatsApp, voice), routes them through an **orchestrator LLM** via **OpenRouter** that decomposes tasks and dispatches **sub-agents** to execute skills. The LLM interacts via **CLI commands** using **dot notation** (`email.send --to bob`, `tasks.search --status overdue`) — one tool call with one string parameter, parsed server-side. Skills are defined as **markdown files with minimal YAML frontmatter** (name + description only). The assistant can compose existing skills into **workflows** — repeatable multi-skill sequences (daily digest, weekly report). Progressive skill discovery via `get_skill` with **SKILL.md domain indexes** and `.all` suffix. The orchestrator can **directly invoke read-only skills** (`*.search`, `*.get`, `*.list`, `*.read`) for speed; only mutating skills require sub-agent delegation. Sub-agents receive scoped context and execute skills independently in serial/parallel based on a dependency DAG. Memory uses **PostgreSQL hybrid retrieval (FTS + pgvector + structured filters)**. Continuous conversation compaction maintains context across turns using a small cheap model. All managed content (Drive-backed normalized files + skill files) is indexed in PostgreSQL FTS for grep-like search.
 
 ---
 
@@ -33,8 +33,8 @@ A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** o
 |----------|--------|-----------|
 | **Language** | Elixir/Phoenix on BEAM VM | BEAM concurrency (GenServers, supervisors, "let it crash"), built-in scheduling, perfect for multi-integration multi-agent assistant. User preference. |
 | **Sandbox** | None (in-process skills) | Skills are API wrappers + file manipulation. No sandbox eliminates cost, cold start latency, credential complexity. MuonTrap for CLI isolation. Future-proofed via `isolation_level` field. |
-| **Database** | PostgreSQL (no pgvector Phase 1) | Railway native Postgres. Ecto ORM. FTS + tags + structured filters for memory search. pgvector deferred — additive migration path documented. |
-| **Memory search** | FTS + tags + structured filters | PostgreSQL tsvector/tsquery with GIN indexes, TEXT[] tags with GIN index, structured filters (category, importance, date, source). Simpler, no embedding cost per query. |
+| **Database** | PostgreSQL + pgvector | Railway native Postgres. Ecto ORM. Hybrid retrieval (FTS + vectors + structured filters) for memory/content search. |
+| **Memory search** | Hybrid (FTS + pgvector + filters) | PostgreSQL tsvector/tsquery + vector similarity + tags/metadata filters for robust keyword + semantic recall. |
 | **Orchestration** | Multi-agent (orchestrator + sub-agents) | Orchestrator plans and coordinates via JSON tool-calling (dispatch_agent, get_agent_results). Sub-agents execute skills via CLI commands. Context isolation prevents pollution. |
 | **CLI-first interface** | One tool, one string param | LLM outputs CLI commands in ```cmd blocks. Single `run` tool with `command` string parameter. Parsed server-side. Massive token savings vs JSON schemas. |
 | **Dot notation naming** | `domain.action` format | `email.send`, `tasks.search`, `memory.save`. Maps directly to file paths (`skills/email/send.md`). Progressive discovery via `get_skill`. |
@@ -44,7 +44,7 @@ A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** o
 | **Orchestrator read access** | Direct read-only skill execution | Orchestrator can directly invoke `*.search`, `*.get`, `*.list`, `*.read` skills for speed. Only mutating skills (`*.create`, `*.update`, `*.delete`, `*.send`) require sub-agent delegation. |
 | **Compaction** | Continuous (every turn) + topic-based memory extraction | Running summary: `summary(n) = LLM(summary(n-1), turn(n))` every turn (cheap model, 500 tokens, Oban async). Background memory agent detects topic shifts and extracts completed segments into searchable memory entries. Single continuous conversation model (no "conversation ends" event). |
 | **Skill protocol** | Elixir behaviours + markdown files | Built-in skills = Elixir modules with `execute(flags, context)` callback. User-created skills = markdown files with YAML frontmatter. Both in same registry, same CLI interface. |
-| **Markdown search** | PostgreSQL FTS index | All markdown content (Obsidian vault + skill files) indexed in `markdown_index` table with weighted tsvector. Grep-like search capability. Google Drive API for read/write. |
+| **Managed content search** | PostgreSQL FTS index | All normalized Drive-backed content + skill files indexed in `content_index` table with weighted tsvector. Grep-like search capability. |
 | **Voice** | OpenRouter STT + ElevenLabs TTS | OpenRouter for speech-to-text (audio via chat completions). ElevenLabs for text-to-speech (behind TTSClient behaviour). Phase 4. |
 | **File operations** | Non-destructive versioning | Pull -> Manipulate -> Archive -> Replace. Never delete. Full audit trail. |
 | **Error handling** | Circuit breakers + active alerting | Four-level limit hierarchy. OTP supervisors. Alerts to Google Chat/email with dedup. |
@@ -83,7 +83,7 @@ A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** o
 
 #### Questions Resolved
 - [x] Google API authentication: **Service account with domain-wide delegation**
-- [x] Obsidian vault access: **Google Drive API** — vault lives in Drive
+- [x] Managed content access: **Google Drive API** — Drive is the backing store for synced content
 - [x] First channel: **Google Chat** — already in workspace
 - [x] Orchestration pattern: **Multi-agent** — orchestrator delegates to sub-agents
 - [x] Tool surface: **Two meta-tools** — get_skill + dispatch_agent (+ get_agent_results)
@@ -109,7 +109,7 @@ A headless, **CLI-first multi-agent AI assistant** built in **Elixir/Phoenix** o
 | **Meta-Tools** | Modules (GetSkill, DispatchAgent, GetAgentResults) | Orchestrator's JSON tool interface — discovery + delegation |
 | **CLI Parser** | Module | Tokenize CLI command strings, resolve command+subcommand, validate flags against YAML schema |
 | **CLI Extractor** | Module | Detect ```cmd fenced blocks in LLM output, separate commands from text |
-| **Markdown Index** | PostgreSQL table + Oban worker | FTS index of all markdown content (Obsidian vault + skill files) for grep-like search |
+| **Content Index** | PostgreSQL table + Oban worker | FTS index of normalized managed content + skill files for grep-like search |
 | **Workflow Builder** | Meta-skill (`workflow.build`) | Assistant composes existing skills into workflow markdown files at runtime |
 | **FileSystem Watcher** | GenServer | Detect skill file changes, trigger registry hot-reload |
 | **Circuit Breakers** | GenServer + `:fuse` | Four-level: per-skill (30s), per-agent (5 calls), per-turn (8 agents / 30 calls), per-conversation (50/5min) |
@@ -198,9 +198,8 @@ Available skill domains:
   tasks       Task tracking (create, search, get, update, delete)
   calendar    Calendar management (create, list, update)
   memory      Long-term memory (save, search)
-  drive       Google Drive (search, read, update, list)
+  files       Unified content/storage (search, read, write, move, sync)
   hubspot     CRM (contacts, deals, notes)
-  markdown    Obsidian vault (edit, create, search)
   workflows   User-created workflows (daily_digest, weekly_report)
 
 Use: get_skill: {domain} for commands
@@ -262,11 +261,10 @@ workflows.daily_digest --lookback-hours=48
 |--------|--------|-------|
 | `email` | email.send, email.read, email.search, email.draft | Gmail API via service account |
 | `calendar` | calendar.create, calendar.list, calendar.update | Google Calendar API |
-| `drive` | drive.search, drive.read, drive.update, drive.list | Google Drive + file versioning |
-| `markdown` | markdown.edit, markdown.create, markdown.search | Obsidian vault on Google Drive |
+| `files` | files.search, files.read, files.write, files.move, files.sync | Unified content/storage over Drive-backed synced workspace |
 | `hubspot` | hubspot.contacts, hubspot.deals, hubspot.notes | HubSpot CRM API |
 | `tasks` | tasks.create, tasks.search, tasks.get, tasks.update, tasks.delete | PostgreSQL-backed task management |
-| `memory` | memory.save, memory.search | FTS + tags + structured filters |
+| `memory` | memory.save, memory.search | Hybrid retrieval (FTS + pgvector + filters) |
 | `workflow` | workflow.build | Meta-skill for creating workflows |
 | `workflows` | workflows.daily_digest, workflows.weekly_report, ... | Agentic workflows — sub-agent gets workflow.md as mission + scoped skills, executes adaptively |
 
@@ -373,16 +371,12 @@ assistant/
 │   │   │   │   ├── create.ex
 │   │   │   │   ├── list.ex
 │   │   │   │   └── update.ex
-│   │   │   ├── drive/          # Google Drive domain skills
+│   │   │   ├── files/          # Unified content/storage domain skills
 │   │   │   │   ├── read.ex
-│   │   │   │   ├── update.ex
-│   │   │   │   ├── list.ex
-│   │   │   │   └── search.ex
-│   │   │   ├── markdown/       # Obsidian/Markdown domain skills
-│   │   │   │   ├── edit.ex
-│   │   │   │   ├── create.ex
+│   │   │   │   ├── write.ex
 │   │   │   │   ├── search.ex
-│   │   │   │   └── frontmatter.ex
+│   │   │   │   ├── move.ex
+│   │   │   │   └── sync.ex
 │   │   │   ├── hubspot/        # HubSpot CRM domain skills
 │   │   │   │   ├── contacts.ex
 │   │   │   │   ├── deals.ex
@@ -527,7 +521,7 @@ assistant/
 13. Task management system (4-table schema + 5 skills)
 14. Memory skills (memory.save, memory.search)
 15. Notification/alerting system
-16. Remaining domain skills (email, calendar, HubSpot, markdown/Obsidian)
+16. Remaining domain skills (email, calendar, HubSpot, files advanced operations)
 17. Scheduler (Quantum cron + Oban workers)
 18. Telegram channel adapter
 19. Voice pipeline (OpenRouter STT + ElevenLabs TTS)
@@ -645,8 +639,8 @@ CODE Phase 2: Multi-Agent + Memory
     v
 CODE Phase 3: First Channel + Integrations
     |  - Google Chat adapter (webhook + bot)
-    |  - Google Drive + file versioning (service account)
-    |  - Basic domain skills: Drive, markdown
+  |  - Google Drive + synced content workflow (service account)
+  |  - Basic domain skills: files (read/write/search)
     |  - Notification/alerting system
     |
     v
@@ -688,17 +682,17 @@ DEPLOY: Railway
 7. `feat: orchestration engine with hybrid skill access` — Orchestrator loop, read-only direct execution, context assembly, circuit breakers
 8. `feat: sub-agent architecture` — CLI command execution, DAG scheduler, scoped context
 9. `feat: four-level circuit breaker system` — Per-skill, per-agent, per-turn, per-conversation limits
-10. `feat: memory system with FTS + tags` — Search module, tag conventions, structured filters, context builder
+10. `feat: memory system with hybrid retrieval` — FTS + pgvector + tag/metadata filters, context builder
 11. `feat: continuous compaction engine` — Oban worker, incremental fold, small model, summary versioning
 12. `feat: task management system` — 4-table schema, 5 skills (create, search, get, update, delete)
 13. `feat: memory skills` — memory.save, memory.search as skill modules
 14. `feat: Google Chat channel adapter` — Webhook endpoint, bot setup, message normalization
-15. `feat: Google Drive + file versioning` — Drive client (service account + goth), PULL/ARCHIVE/REPLACE
+15. `feat: Google Drive + synced content workflow` — Drive client (service account + goth), SYNC/NORMALIZE/ARCHIVE/PUBLISH
 16. `test: core invariant test suite` — File safety, loop limits, agent isolation, credential checks
 17. `feat: notification and alerting system` — Error routing, dedup, Google Chat webhook, email
 18. `feat: email and calendar skills` — Gmail + Calendar API integration
 19. `feat: HubSpot CRM skills` — Contacts, deals, notes
-20. `feat: markdown and Obsidian skills` — Edit, create, search, frontmatter
+20. `feat: files domain skills` — files.read, files.write, files.search, files.move, files.sync
 21. `feat: scheduler with Quantum and Oban` — Cron tasks, recurring task generation, job workers
 22. `feat: Telegram channel adapter` — Bot API webhook + responses
 23. `feat: voice pipeline` — OpenRouter STT + ElevenLabs TTS (behind TTSClient behaviour)
