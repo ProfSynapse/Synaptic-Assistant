@@ -71,7 +71,7 @@ and scheduled a review meeting for Thursday at 2pm."
 
 ## 2. Orchestrator Tool Surface
 
-The orchestrator LLM sees **three** tools:
+The orchestrator LLM sees **four** tools:
 
 ### 2.1 get_skill (Unchanged)
 
@@ -146,8 +146,11 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
       name: "get_agent_results",
       description: """
       Retrieve results from dispatched agents. Call this after dispatching \
-      agents to collect their outputs. Blocks until all specified agents \
-      have completed (or timed out).
+      agents to collect their outputs.
+
+      Supports non-blocking polling and bounded waits. Use this to check in \
+      on progress, inspect recent transcript tails, and decide whether to \
+      steer active agents.
 
       If called with no agent_ids, returns results for ALL dispatched agents \
       in the current turn.
@@ -159,9 +162,62 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
             "type" => "array",
             "items" => %{"type" => "string"},
             "description" => "IDs of specific agents to wait for. Omit to wait for all."
+          },
+          "mode" => %{
+            "type" => "string",
+            "enum" => ["non_blocking", "wait_any", "wait_all"],
+            "description" => "Polling strategy. non_blocking returns immediately. wait_any waits until any requested agent reaches a terminal state. wait_all waits until all requested agents reach terminal states. Default: non_blocking."
+          },
+          "wait_ms" => %{
+            "type" => "integer",
+            "description" => "Maximum wait in milliseconds for wait_any/wait_all modes. Default: 0 for non_blocking, 5000 for wait modes."
+          },
+          "include_transcript_tail" => %{
+            "type" => "boolean",
+            "description" => "Include each agent's recent transcript tail for progress inspection and steering decisions. Default: false."
+          },
+          "tail_lines" => %{
+            "type" => "integer",
+            "description" => "How many transcript lines to include when include_transcript_tail=true. Default: 10."
           }
         },
         "required" => []
+      }
+    }
+  end
+end
+```
+
+### 2.4 message_agent
+
+```elixir
+defmodule Assistant.Orchestrator.Tools.MessageAgent do
+  def tool_definition do
+    %{
+      name: "message_agent",
+      description: """
+      Send a control message to a running agent. Use this to steer execution,
+      clarify constraints, or request a checkpoint summary without restarting
+      the turn.
+      """,
+      parameters: %{
+        "type" => "object",
+        "properties" => %{
+          "agent_id" => %{
+            "type" => "string",
+            "description" => "Target running agent ID"
+          },
+          "message" => %{
+            "type" => "string",
+            "description" => "Steering instruction or clarification"
+          },
+          "priority" => %{
+            "type" => "string",
+            "enum" => ["normal", "high"],
+            "description" => "normal for guidance, high for urgent correction"
+          }
+        },
+        "required" => ["agent_id", "message"]
       }
     }
   end
@@ -176,22 +232,32 @@ end
     {
       "agent_id": "task_search",
       "status": "completed",
+      "is_terminal": true,
       "result": "Found 3 overdue tasks:\n1. Finalize Q1 report (due Feb 15)\n2. Review PR #42 (due Feb 10)\n3. Update client proposal (due Feb 12)",
       "tool_calls_used": 1,
-      "duration_ms": 2340
+      "duration_ms": 2340,
+      "transcript_tail": []
     },
     {
       "agent_id": "email_sender",
-      "status": "completed",
-      "result": "Email sent to bob@company.com with subject 'Overdue Tasks Report'",
+      "status": "running",
+      "is_terminal": false,
+      "result": "Draft prepared; sending pending confirmation",
       "tool_calls_used": 1,
-      "duration_ms": 1850
+      "duration_ms": 1850,
+      "transcript_tail": [
+        "planning: drafting concise report body",
+        "tool_call: email.send"
+      ]
     }
-  ]
+  ],
+  "done": false
 }
 ```
 
 Agent status values: `completed`, `failed`, `timeout`, `running`.
+
+Terminal statuses are: `completed`, `failed`, `timeout`.
 
 ---
 
@@ -248,6 +314,36 @@ Build sub-agent context:
     v
 Return result to orchestrator
 (via AgentSupervisor callback)
+```
+
+### 3.1A Event-Driven Lifecycle (Recommended)
+
+Model the runtime as event-driven, with polling as an inspection API (not the control plane):
+
+- `agent.dispatched` — orchestrator creates agent task
+- `agent.started` — sub-agent loop begins
+- `agent.progress` — tool call executed or transcript tail updated
+- `agent.message.received` — steering message delivered from orchestrator (`message_agent`)
+- `agent.completed` — terminal success (including accepted partial completion at tool ceiling)
+- `agent.failed` — terminal failure
+- `agent.timeout` — terminal timeout
+
+Orchestrator subscribes to these events and updates `dispatched_agents` state incrementally.
+`get_agent_results` reads current state snapshots; it does not need to block to drive progress.
+
+Suggested event payload shape:
+
+```json
+{
+  "event": "agent.completed",
+  "agent_id": "email_sender",
+  "turn_id": "turn_2026_02_17_001",
+  "timestamp": "2026-02-17T22:14:03Z",
+  "status": "completed",
+  "is_terminal": true,
+  "tool_calls_used": 2,
+  "result": "Email sent to bob@company.com"
+}
 ```
 
 ### 3.2 Sub-Agent Context Construction
@@ -508,7 +604,8 @@ The orchestrator's loop is fundamentally different from the original single-loop
             | + memory + orchestrator   |
             | tools (get_skill,         |
             | dispatch_agent,           |
-            | get_agent_results)        |
+            | get_agent_results,        |
+            | message_agent)            |
             +---------------------------+
                           |
                           v
@@ -522,8 +619,9 @@ The orchestrator's loop is fundamentally different from the original single-loop
      |      +-------------------+
      |       |        |        |
      |       v        v        v
-     |     text   get_skill  dispatch_agent /
-     |       |       |       get_agent_results
+    |     text   get_skill  dispatch_agent /
+    |       |       |       get_agent_results /
+    |       |       |       message_agent
      |       v       v              |
      |     DONE   Execute           v
      |     (send  locally     Execute agent
@@ -548,8 +646,9 @@ Your workflow:
 2. Call get_skill to discover relevant capabilities
 3. Decompose the request into sub-tasks
 4. Dispatch sub-agents via dispatch_agent (one per sub-task)
-5. Collect results via get_agent_results
-6. Synthesize a clear response for the user
+5. Poll progress via get_agent_results (non-blocking by default)
+6. Steer active agents via message_agent when needed
+7. Synthesize a clear response for the user once done criteria are met
 
 Rules:
 - You NEVER execute skills directly — always delegate to sub-agents
@@ -557,6 +656,8 @@ Rules:
 - For multi-step requests, identify dependencies and parallelize where possible
 - Agent missions should be specific and self-contained
 - Only give agents the skills they need (principle of least privilege)
+- Use non-blocking check-ins first; avoid long waits unless completion is imminent
+- If an agent drifts, steer it with message_agent before restarting work
 - If an agent fails, decide: retry with adjusted mission, skip, or report to user
 
 Available skill domains: {domain_list}
@@ -623,7 +724,9 @@ defmodule Assistant.Orchestrator.LoopState do
     dispatch: map(),           # Original dispatch params
     status: :pending | :running | :completed | :failed | :timeout,
     result: String.t() | nil,
+    transcript_tail: [String.t()],
     tool_calls_used: non_neg_integer(),
+    control_messages: [String.t()],
     started_at: DateTime.t() | nil,
     completed_at: DateTime.t() | nil,
     duration_ms: non_neg_integer() | nil
@@ -643,8 +746,8 @@ defmodule Assistant.Orchestrator.SubAgent do
   @default_timeout_ms 30_000
 
   @doc """
-  Execute a sub-agent mission. Returns the agent's final text response
-  or an error.
+  Execute a sub-agent mission. Returns a terminal result when complete,
+  failed, or timed out.
   """
   def execute(dispatch, dependency_results, orchestrator_context) do
     context = build_context(dispatch, dependency_results, orchestrator_context)
@@ -655,7 +758,7 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp run_sub_loop(messages, context, call_count, max_calls) do
     if call_count >= max_calls do
-      # Extract whatever the agent has accomplished so far
+      # Tool budget reached: return terminal partial completion
       {:ok, %{
         status: :completed,
         result: extract_last_text(messages) || "Reached tool call limit (#{max_calls}). Partial work completed.",
@@ -714,6 +817,29 @@ Each sub-agent has its own tool call limit (default: 5, configurable per dispatc
 **Why a low default**: Sub-agents should be focused. A sub-agent that needs more than 5 tool calls is likely doing too much — the orchestrator should have decomposed further. The limit prevents runaway sub-agents from consuming resources.
 
 **Configurable per dispatch**: Complex tasks (e.g., "search 3 sources and compile results") can specify `max_tool_calls: 10` or higher. The orchestrator decides based on the mission complexity.
+
+### 6.3 Completion Semantics (Terminal Result)
+
+A sub-agent is complete when it reaches a terminal status:
+
+- `completed`: mission finished (or partial completion accepted at tool-call ceiling)
+- `failed`: unrecoverable execution failure
+- `timeout`: scheduler timeout reached
+
+`running` is non-terminal and can be inspected with `get_agent_results` and steered with `message_agent`.
+
+Concrete completion trigger in the loop:
+
+- If the LLM returns a **text response** (and no tool calls), the agent emits `agent.completed` and becomes terminal.
+- If the loop hits `max_tool_calls`, the agent emits `agent.completed` with partial-result semantics.
+- If execution errors, emit `agent.failed`.
+- If scheduler timeout is reached, emit `agent.timeout`.
+
+The orchestrator should consider a turn complete when:
+
+1. Required agents are in terminal states,
+2. No additional retries/steering are needed for user intent, and
+3. It can synthesize a final user response (full success or partial + explicit gaps).
 
 ---
 

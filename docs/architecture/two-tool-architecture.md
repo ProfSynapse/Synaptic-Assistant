@@ -3,36 +3,15 @@
 > Part of the Skills-First AI Assistant architecture.
 > Planning only — no implementation.
 >
-> **IMPORTANT — SUPERSESSION HISTORY**:
->
-> 1. **Multi-agent supersession**: The single-loop agentic pattern (Sections 4-5) has been
->    **superseded** by the multi-agent orchestration pattern in `sub-agent-orchestration.md`.
->    The orchestrator no longer calls `use_skill` directly — it delegates to sub-agents.
->
-> 2. **CLI-first supersession**: The JSON Schema tool-calling pattern (Sections 2-3, 7, 9) has
->    been **superseded** by the CLI-first skill definition system in `markdown-skill-system.md`.
->    Skills are now markdown files with YAML frontmatter. The LLM outputs CLI command strings
->    in ` ```cmd ` fenced blocks, not JSON tool calls. `get_skill` is replaced by `--help` text
->    generation. `use_skill` is replaced by CLI parsing + execution. The skill registry is now
->    file-based with hot-reload via FileSystem watcher.
->
-> **What remains valid in this document**:
-> - Section 4-5: Agentic loop structure (single-loop fallback mode)
-> - Section 6: Context assembly and token budgets (adapted for CLI prompt)
-> - Section 6A: Prompt caching strategy (cache principles apply, payload format changes)
-> - Section 10: LLM interaction patterns (behavioral patterns transfer to CLI)
-> - Section 11: Message persistence (tool call traces become command execution traces)
-> - Section 12: Testing strategy (test categories remain valid, specifics change)
-> - Section 14: Integration points (memory, circuit breakers, voice — all still apply)
->
-> **For the current design**, see `markdown-skill-system.md` (CLI interface) and
-> `sub-agent-orchestration.md` (multi-agent coordination).
+> This document captures orchestration and loop design principles alongside the
+> CLI-first skill model. Related detailed documents:
+> - `markdown-skill-system.md` for CLI command and skill-file behavior
+> - `sub-agent-orchestration.md` for orchestrator/sub-agent coordination
 
 ## 1. Overview
 
-> **EVOLVED**: This section describes the original two-tool framing. The problem analysis (1.1)
-> remains valid. The solution has evolved from JSON meta-tools to CLI commands — see
-> `markdown-skill-system.md` for the current approach. The design principles (1.3) carry forward.
+> This section explains the problem framing and design principles used by the
+> current architecture.
 
 ### 1.1 The Problem
 
@@ -46,14 +25,12 @@ The current architecture registers every skill as an individual tool definition 
 
 ### 1.2 The Solution: Two Meta-Tools → CLI Commands
 
-> **EVOLVED**: The original solution defined two JSON meta-tools (`get_skill`/`use_skill`).
-> This has been replaced by a CLI-first interface where:
+> The architecture uses a CLI-first interface where:
 > - **Discovery** (`get_skill`) → `--help` text output per command/subcommand
 > - **Execution** (`use_skill`) → CLI command strings in ` ```cmd ` fenced blocks
 > - **Skill definition** (Elixir modules) → Markdown files with YAML frontmatter
->
-> The original two-tool pattern is retained as a conceptual ancestor and as the
-> `:single_loop` fallback mode. See `markdown-skill-system.md` for the current design.
+
+See `markdown-skill-system.md` for the canonical CLI behavior.
 
 The original design presented exactly **two** tools:
 
@@ -96,12 +73,7 @@ LLM: "Done — I sent the email to Bob about the Q1 report."
 
 ## 2. Tool Definitions
 
-> **SUPERSEDED**: These JSON Schema tool definitions are replaced by the CLI-first interface.
-> - `get_skill` → Replaced by `--help` text generation (see `markdown-skill-system.md` Section 6)
-> - `use_skill` → Replaced by CLI command parsing from ` ```cmd ` fenced blocks (see `markdown-skill-system.md` Sections 3-4)
-> - JSON Schema validation → Replaced by YAML frontmatter flag validation (see `markdown-skill-system.md` Section 5)
->
-> Retained here for the `:single_loop` fallback mode.
+> This section maps conceptual tool definitions to the CLI-first interface.
 
 ### 2.1 get_skill
 
@@ -228,13 +200,10 @@ end
 
 ## 3. Execution Flow
 
-> **SUPERSEDED**: These execution flows describe the JSON meta-tool path. The CLI-first
-> equivalent is in `markdown-skill-system.md`:
+> These execution flows are represented in CLI-first form in `markdown-skill-system.md`:
 > - Section 3: CLI Parser (tokenization, command resolution, flag parsing, validation)
 > - Section 4: CLI Extractor (` ```cmd ` block detection in LLM output)
 > - Section 5: Execution Pipeline (parsed command → handler dispatch → result)
->
-> Retained here for the `:single_loop` fallback mode.
 
 ### 3.1 get_skill Execution
 
@@ -387,10 +356,8 @@ end
 
 ## 4. Agentic Loop Design
 
-> **SUPERSEDED**: This section describes the original single-loop pattern where one LLM
-> calls both `get_skill` and `use_skill`. This has been replaced by the multi-agent
-> orchestration pattern in `sub-agent-orchestration.md`. Retained here for reference
-> and as a fallback for the `:single_loop` feature flag mode.
+> This section describes loop mechanics and links to the orchestrator/sub-agent
+> coordination model in `sub-agent-orchestration.md`.
 
 ### 4.1 Loop Architecture
 
@@ -658,9 +625,8 @@ end
 
 ## 5. Circuit Breaker and Limits
 
-> **PARTIALLY SUPERSEDED**: Skill-level circuit breakers (5.4) and the "continue?" pattern
-> (5.2-5.3) remain valid. The three-tier limit system (5.1) has been extended to a
-> four-level hierarchy in `sub-agent-orchestration.md` Section 7.
+> Circuit-breaker and limit behavior is aligned with the multi-agent hierarchy in
+> `sub-agent-orchestration.md` Section 7.
 
 ### 5.1 Three-Tier Limit System
 
@@ -1102,14 +1068,12 @@ Assuming Anthropic Claude Sonnet via OpenRouter, 10 user turns per conversation,
 
 ## 7. Skill Registry Enhancements
 
-> **SUPERSEDED**: The ETS-backed module registry described here is replaced by a file-based
-> skill registry with hot-reload. See `markdown-skill-system.md` Section 7 for the current design:
+> The skill registry is file-based with hot-reload. See `markdown-skill-system.md`
+> Section 7 for the current design:
 > - Skills are discovered from markdown files on disk (not compiled Elixir modules)
 > - FileSystem watcher triggers hot-reload on file changes
 > - ETS still used for fast lookup, but populated from parsed markdown files
 > - Domain information extracted from YAML frontmatter, not module callbacks
->
-> Retained here for the `:single_loop` fallback mode.
 
 ### 7.1 Registry Interface
 
@@ -1214,8 +1178,7 @@ end
 
 ## 8. Module Structure
 
-> **PARTIALLY SUPERSEDED**: The file layout below reflects the original JSON meta-tool design.
-> The CLI-first design introduces a different module structure — see `markdown-skill-system.md`
+> The CLI-first design introduces this module structure — see `markdown-skill-system.md`
 > Section 13 for the current file layout. Key differences:
 > - `meta_tools/` → replaced by `cli/` (extractor, help) + `skills/router.ex`
 > - `schema_validator.ex` → handler-side validation with shared `FlagValidator` helper
@@ -1235,6 +1198,7 @@ end
 | `Assistant.Orchestrator.LoopState` | Struct | Per-conversation loop state |
 
 ### 8.2 Retained Modules (JSON fallback for `:single_loop` mode)
+### 8.2 Related Modules
 
 | Module | Type | Purpose |
 |--------|------|---------|
@@ -1308,11 +1272,9 @@ priv/skills/                     # Skill definitions (one .md per action, SRP)
 
 ## 9. JSON Schema Validation
 
-> **SUPERSEDED**: JSON Schema validation is replaced by YAML frontmatter-driven flag
-> validation in the CLI parser. See `markdown-skill-system.md` Section 5.4 for flag
-> validation (type checking, enum enforcement, required flag enforcement).
->
-> Retained here for the `:single_loop` fallback mode.
+> Validation in the runtime path uses CLI/frontmatter-driven flag checks. See
+> `markdown-skill-system.md` Section 5.4 for type checking, enum enforcement,
+> and required flag enforcement.
 
 ### 9.1 Purpose
 
@@ -1662,10 +1624,10 @@ config :assistant, Assistant.Orchestrator.Engine,
 | Mode | Description | LLM Interface | Skill Definition |
 |------|-------------|---------------|------------------|
 | `:multi_agent` | **Default**. Orchestrator + sub-agents, CLI commands. | CLI commands in ` ```cmd ` blocks | Markdown files with YAML frontmatter |
-| `:single_loop` | JSON meta-tool fallback. | JSON tool calls (get_skill/use_skill) | Elixir modules with `tool_definition/0` |
-| `:direct` | N-tool mode (all skills as JSON tools). | JSON tool calls (one per skill) | Elixir modules with `tool_definition/0` |
+| `:single_loop` | Single-loop orchestrator mode. | JSON tool calls (get_skill/use_skill) | Elixir modules with `tool_definition/0` |
+| `:direct` | Direct N-tool mode (all skills as tools). | JSON tool calls (one per skill) | Elixir modules with `tool_definition/0` |
 
-The `:single_loop` mode retains the original two-tool architecture as a fallback. The `:multi_agent` mode with CLI commands is the primary design. See `sub-agent-orchestration.md` for multi-agent coordination and `markdown-skill-system.md` for CLI skill definitions.
+The `:multi_agent` mode with CLI commands is the primary design. See `sub-agent-orchestration.md` for multi-agent coordination and `markdown-skill-system.md` for CLI skill definitions.
 
 ---
 
@@ -1993,15 +1955,15 @@ end
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| **LLM interface** | CLI commands in ` ```cmd ` fenced blocks (supersedes JSON tool calls) | LLMs produce CLI commands more reliably than nested JSON; self-documenting via `--help`. See `markdown-skill-system.md`. |
-| **Skill definition format** | Markdown files with minimal YAML (`name` + `description`); body is the full definition (supersedes Elixir `tool_definition/0`) | Self-creating skills; runtime hot-reload; man-page style documentation IS the definition. See `markdown-skill-system.md`. |
+| **LLM interface** | CLI commands in ` ```cmd ` fenced blocks | LLMs produce CLI commands more reliably than nested JSON; self-documenting via `--help`. See `markdown-skill-system.md`. |
+| **Skill definition format** | Markdown files with minimal YAML (`name` + `description`); body is the full definition | Self-creating skills; runtime hot-reload; man-page style documentation IS the definition. See `markdown-skill-system.md`. |
 | **Skill granularity** | One file per action (SRP): `email/send.md`, not `email.md` | Atomic, composable, testable, replaceable skills. Domain from directory path. |
-| **Discovery mechanism** | Markdown body served as `--help` text (supersedes `get_skill` JSON schemas) | The skill file IS its own documentation; no schema-to-help translation needed. |
-| **Skill registry** | File-based with FileSystem watcher + ETS cache (supersedes compile-time module discovery) | Hot-reload on file changes; compatible with self-creating skills; ETS keyed by skill name. |
-| **Skill validation** | Handler-side with shared `FlagValidator` helper (supersedes centralized JSON Schema) | Keeps system simple; markdown is for humans, not machine parsing. Handlers know their own requirements. |
-| Tool surface (fallback) | Two meta-tools (get_skill, use_skill) retained for `:single_loop` mode | Backward compatibility; gradual migration path. |
+| **Discovery mechanism** | Markdown body served as `--help` text | The skill file IS its own documentation; no schema-to-help translation needed. |
+| **Skill registry** | File-based with FileSystem watcher + ETS cache | Hot-reload on file changes; compatible with self-creating skills; ETS keyed by skill name. |
+| **Skill validation** | Handler-side with shared `FlagValidator` helper | Keeps system simple; markdown is for humans, not machine parsing. Handlers know their own requirements. |
+| Tool surface | Meta-tools and CLI execution surface | Supports coordinated orchestration and scoped execution. |
 | Error reporting | Errors as `:ok` tuples with `:error` status | LLM receives errors as tool results and can self-correct |
-| Parallel execution | Task.Supervisor for concurrent sub-agents (supersedes direct use_skill parallelism) | BEAM concurrency for multi-agent turns. See `sub-agent-orchestration.md` Section 4. |
+| Parallel execution | Task.Supervisor for concurrent sub-agents | BEAM concurrency for multi-agent turns. See `sub-agent-orchestration.md` Section 4. |
 | Circuit breaker scope | Per inner skill, not per meta-tool or CLI command | Skills may be degraded independently; CLI parser always available |
 | Limit behavior | Progress report + "continue?" pattern | Transparency and user control over long-running operations |
 | Domain discovery | Summary first, details on demand | Prevents token bloat from reappearing at discovery level |
