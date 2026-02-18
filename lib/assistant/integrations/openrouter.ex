@@ -7,6 +7,7 @@
 #
 # Related files:
 #   - lib/assistant/behaviours/llm_client.ex (behaviour contract)
+#   - lib/assistant/config/loader.ex (model roster, HTTP config from models.yaml)
 #   - config/runtime.exs (API key configuration)
 
 defmodule Assistant.Integrations.OpenRouter do
@@ -47,15 +48,21 @@ defmodule Assistant.Integrations.OpenRouter do
   `:model` in the opts keyword list. Model selection is the responsibility of
   `Assistant.Config.Loader`, which resolves model IDs from `config/models.yaml`
   based on role (orchestrator, sub_agent, compaction, etc.).
+
+  ## HTTP Settings
+
+  Retry, backoff, and timeout parameters are loaded at call time from
+  `Assistant.Config.Loader.http_config/0` (sourced from the `http:` section
+  of `config/models.yaml`). No defaults are hardcoded in this module.
   """
 
   @behaviour Assistant.Behaviours.LLMClient
 
   require Logger
 
+  alias Assistant.Config.Loader, as: ConfigLoader
+
   @base_url "https://openrouter.ai/api/v1"
-  @default_receive_timeout :timer.seconds(120)
-  @max_retries 3
 
   # --- Public API ---
 
@@ -171,7 +178,8 @@ defmodule Assistant.Integrations.OpenRouter do
         {:cont, {req, resp}}
       end
 
-      req = build_req_client()
+      http = ConfigLoader.http_config()
+      req = build_req_client(http, :streaming)
 
       case Req.post(req, url: "/chat/completions", json: body, into: stream_handler) do
         {:ok, %{status: 200}} ->
@@ -410,11 +418,18 @@ defmodule Assistant.Integrations.OpenRouter do
   # --- HTTP Client ---
 
   defp do_request(body) do
-    req = build_req_client()
+    http = ConfigLoader.http_config()
+    req = build_req_client(http, :request)
     Req.post(req, url: "/chat/completions", json: body)
   end
 
-  defp build_req_client do
+  defp build_req_client(http, mode) do
+    timeout =
+      case mode do
+        :streaming -> http.streaming_timeout_ms
+        :request -> http.request_timeout_ms
+      end
+
     Req.new(
       base_url: base_url(),
       headers: [
@@ -422,17 +437,18 @@ defmodule Assistant.Integrations.OpenRouter do
         {"content-type", "application/json"}
       ],
       retry: :safe_transient,
-      max_retries: @max_retries,
-      retry_delay: &exponential_backoff/1,
-      receive_timeout: @default_receive_timeout
+      max_retries: http.max_retries,
+      retry_delay: fn retry_count ->
+        exponential_backoff(retry_count, http.base_backoff_ms, http.max_backoff_ms)
+      end,
+      receive_timeout: timeout
     )
   end
 
-  defp exponential_backoff(retry_count) do
-    # 1s, 2s, 4s with jitter
-    base_delay = Integer.pow(2, retry_count) * 1_000
-    jitter = :rand.uniform(500)
-    base_delay + jitter
+  defp exponential_backoff(retry_count, base_backoff_ms, max_backoff_ms) do
+    base_delay = Integer.pow(2, retry_count) * base_backoff_ms
+    jitter = :rand.uniform(div(base_backoff_ms, 2))
+    min(base_delay + jitter, max_backoff_ms)
   end
 
   defp extract_retry_after(%{headers: headers}) when is_map(headers) do

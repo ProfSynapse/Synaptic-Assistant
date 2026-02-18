@@ -150,6 +150,20 @@ models:
     cost_tier: medium
 
 # ---------------------------------------------------------------------------
+# HTTP Client Configuration — OpenRouter request settings
+# ---------------------------------------------------------------------------
+#
+# All operational HTTP parameters live here so you can tune without code changes.
+# hot-reloadable via Config.Watcher.
+
+http:
+  max_retries: 3                # Maximum retry attempts on transient errors (429, 500, 502, 503, 504)
+  base_backoff_ms: 1000         # Initial backoff before first retry (exponential with jitter)
+  max_backoff_ms: 30000         # Cap on backoff duration
+  request_timeout_ms: 120000    # Per-request timeout (2 min — long chains can take time)
+  streaming_timeout_ms: 300000  # Timeout for streaming responses (5 min)
+
+# ---------------------------------------------------------------------------
 # Voice Configuration — ElevenLabs TTS settings
 # ---------------------------------------------------------------------------
 #
