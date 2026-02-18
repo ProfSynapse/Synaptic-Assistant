@@ -36,6 +36,9 @@ defmodule Assistant.Application do
           # Job processing
           {Oban, Application.fetch_env!(:assistant, Oban)},
 
+          # Workflow cron loader (after Scheduler + Oban — registers cron jobs for workflows)
+          Assistant.Scheduler.QuantumLoader,
+
           # Skill system (Task.Supervisor must start before Registry and Executor)
           {Task.Supervisor, name: Assistant.Skills.TaskSupervisor},
           Assistant.Skills.Registry,
