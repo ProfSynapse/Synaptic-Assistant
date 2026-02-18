@@ -1,18 +1,18 @@
-# lib/assistant/config/loader.ex — Configuration loader for models.yaml.
+# lib/assistant/config/loader.ex — Configuration loader for config.yaml.
 #
 # ETS-backed GenServer that loads, validates, caches, and hot-reloads the
 # model roster, voice configuration, and HTTP client settings from
-# config/models.yaml. Public API functions read directly from ETS for
+# config/config.yaml. Public API functions read directly from ETS for
 # lock-free concurrent access.
 #
 # Related files:
-#   - config/models.yaml (source of truth for models, voice, HTTP settings)
+#   - config/config.yaml (source of truth for models, voice, HTTP settings)
 #   - lib/assistant/config/watcher.ex (file-system watcher, triggers reload)
 #   - docs/architecture/config-design.md (design spec)
 
 defmodule Assistant.Config.Loader do
   @moduledoc """
-  Loads and serves model roster, voice, and HTTP configuration from config/models.yaml.
+  Loads and serves model roster, voice, and HTTP configuration from config/config.yaml.
 
   Backed by ETS for fast concurrent reads. The GenServer coordinates reloads
   triggered by `Assistant.Config.Watcher` on file changes.
@@ -24,7 +24,7 @@ defmodule Assistant.Config.Loader do
 
   ## Boot Behaviour
 
-  If `config/models.yaml` is missing, malformed, or references undefined env
+  If `config/config.yaml` is missing, malformed, or references undefined env
   vars, `init/1` crashes. The supervisor retries with backoff. The assistant
   cannot operate without a model roster.
 
@@ -40,14 +40,14 @@ defmodule Assistant.Config.Loader do
   require Logger
 
   @ets_table :assistant_config
-  @config_path "config/models.yaml"
+  @config_path "config/config.yaml"
 
   # --- Public API (read from ETS, no GenServer call) ---
 
   @doc """
   Returns the HTTP client configuration as a map.
 
-  Values come from the `http:` section of `config/models.yaml`:
+  Values come from the `http:` section of `config/config.yaml`:
 
     - `:max_retries` — Maximum retry attempts on transient errors
     - `:base_backoff_ms` — Initial backoff before first retry

@@ -1,7 +1,8 @@
-# Synaptic Assistant — Model Roster & Voice Configuration
+# Synaptic Assistant — Model Roster, Voice & HTTP Configuration
 #
-# This file is the single source of truth for available LLM models and voice settings.
-# It is loaded at boot by Assistant.Config.Loader and hot-reloaded on file change.
+# This file is the single source of truth for available LLM models, voice settings,
+# and HTTP client parameters. Loaded at boot by Assistant.Config.Loader and
+# hot-reloaded on file change.
 #
 # Env var interpolation: Use ${ENV_VAR} for sensitive values (resolved at load time).
 # Unresolved env vars raise at boot; missing optional vars resolve to null.

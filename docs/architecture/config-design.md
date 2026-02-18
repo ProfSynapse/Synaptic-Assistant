@@ -1,4 +1,4 @@
-# Configuration Design: Model Roster & Voice
+# Configuration Design: Model Roster, Voice & HTTP
 
 > Revision 2 — 2026-02-17
 > - `model_for/2` now accepts optional override opts (`prefer:` tier, `id:` explicit model).
@@ -6,7 +6,7 @@
 
 ## 1. Overview
 
-The assistant uses a YAML configuration file (`config/models.yaml`) as the single source of truth for:
+The assistant uses a YAML configuration file (`config/config.yaml`) as the single source of truth for:
 
 1. **Model roster** — curated list of OpenRouter LLM models with tier, use-case, and cost metadata.
 2. **Default role assignments** — which model tier to use for orchestrator, sub-agent, compaction, sentinel, and audio transcription.
@@ -139,7 +139,7 @@ GenServer responsible for loading, validating, caching, and hot-reloading the mo
 ```elixir
 defmodule Assistant.Config.Loader do
   @moduledoc """
-  Loads and serves model roster and voice configuration from config/models.yaml.
+  Loads and serves model roster and voice configuration from config/config.yaml.
   Backed by ETS for fast concurrent reads. GenServer coordinates reloads.
   """
 
@@ -277,10 +277,10 @@ This can be added later without changing the public API.
 
 ### 6.1 Standalone Config Watcher
 
-`Assistant.Config.Watcher` is a dedicated GenServer that watches `config/models.yaml` for changes. It is separate from `Assistant.Skills.Watcher` (which watches the `skills/` directory for skill hot-reload). Each watcher has a single responsibility and independent lifecycle.
+`Assistant.Config.Watcher` is a dedicated GenServer that watches `config/config.yaml` for changes. It is separate from `Assistant.Skills.Watcher` (which watches the `skills/` directory for skill hot-reload). Each watcher has a single responsibility and independent lifecycle.
 
 ```
-config/models.yaml changed
+config/config.yaml changed
     |
     v
 Assistant.Config.Watcher detects :modified event
@@ -313,7 +313,7 @@ Validates against schema rules
 ```elixir
 defmodule Assistant.Config.Watcher do
   @moduledoc """
-  FileSystem-based watcher for config/models.yaml.
+  FileSystem-based watcher for config/config.yaml.
   Debounces file change events and triggers ConfigLoader.reload/0.
   Separate from Assistant.Skills.Watcher (different directory, different concern).
   """
@@ -333,14 +333,14 @@ end
 
 ```elixir
 # In Assistant.Application children list
-{Assistant.Config.Watcher, path: "config/models.yaml"}
+{Assistant.Config.Watcher, path: "config/config.yaml"}
 ```
 
 ### 6.3 Separation from Skills.Watcher
 
 | Watcher | Watches | Triggers | Reason for separation |
 |---------|---------|----------|----------------------|
-| `Assistant.Config.Watcher` | `config/models.yaml` | `ConfigLoader.reload/0` | Config is a single file with schema validation; failure keeps old config |
+| `Assistant.Config.Watcher` | `config/config.yaml` | `ConfigLoader.reload/0` | Config is a single file with schema validation; failure keeps old config |
 | `Assistant.Skills.Watcher` | `skills/` directory (recursive) | `Registry.reload/0` | Skills are many files with independent loading; failure affects only the changed skill |
 
 Both use the `file_system` dependency but operate independently. A crash in one does not affect the other (`:one_for_one` supervisor strategy).
@@ -440,7 +440,7 @@ Assistant.Application (supervision tree, :one_for_one)
     +-- Assistant.Config.Loader (GenServer)
     |     init/1:
     |       1. Create ETS table :assistant_config
-    |       2. Read config/models.yaml
+    |       2. Read config/config.yaml
     |       3. Interpolate ${ENV_VAR} patterns
     |       4. Parse YAML (via yaml_elixir)
     |       5. Validate schema
@@ -448,7 +448,7 @@ Assistant.Application (supervision tree, :one_for_one)
     |       7. If any step fails -> crash (supervisor retries)
     |
     +-- Assistant.Config.Watcher (GenServer)           # standalone, config only
-    |     Watches config/models.yaml, debounces, calls Loader.reload/0
+    |     Watches config/config.yaml, debounces, calls Loader.reload/0
     |
     +-- Assistant.Skills.Registry (GenServer)
     |
@@ -458,7 +458,7 @@ Assistant.Application (supervision tree, :one_for_one)
     +-- ... (remaining children: Repo, Endpoint, Oban, etc.)
 ```
 
-**Boot failure behavior:** If `config/models.yaml` is missing, malformed, or references undefined env vars, the `ConfigLoader` crashes on `init/1`. The supervisor will retry with backoff. This is intentional — the assistant cannot operate without a model roster.
+**Boot failure behavior:** If `config/config.yaml` is missing, malformed, or references undefined env vars, the `ConfigLoader` crashes on `init/1`. The supervisor will retry with backoff. This is intentional — the assistant cannot operate without a model roster.
 
 ---
 
@@ -491,13 +491,13 @@ The YAML config and `runtime.exs` have distinct, non-overlapping responsibilitie
 | Concern | Where | Why |
 |---------|-------|-----|
 | API keys (OpenRouter, ElevenLabs, Google, HubSpot) | `runtime.exs` | Secrets — never in version control |
-| Model roster (IDs, tiers, use cases) | `config/models.yaml` | Human-editable, version-controlled, hot-reloadable |
-| Default model assignments | `config/models.yaml` | Operational tuning, config-only changes |
-| Voice configuration (model, settings) | `config/models.yaml` | Operational tuning |
-| Voice ID | `config/models.yaml` with `${ELEVENLABS_VOICE_ID}` | Varies per deployment |
+| Model roster (IDs, tiers, use cases) | `config/config.yaml` | Human-editable, version-controlled, hot-reloadable |
+| Default model assignments | `config/config.yaml` | Operational tuning, config-only changes |
+| Voice configuration (model, settings) | `config/config.yaml` | Operational tuning |
+| Voice ID | `config/config.yaml` with `${ELEVENLABS_VOICE_ID}` | Varies per deployment |
 | Database URL, Phoenix settings | `runtime.exs` | Infrastructure secrets |
 
-`runtime.exs` is the boundary for secrets. `config/models.yaml` is the boundary for operational tuning.
+`runtime.exs` is the boundary for secrets. `config/config.yaml` is the boundary for operational tuning.
 
 ---
 
