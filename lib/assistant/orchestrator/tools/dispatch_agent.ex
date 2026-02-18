@@ -105,6 +105,15 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
               "Override the LLM model for this agent (e.g., " <>
                 "\"anthropic/claude-haiku-4-5-20251001\" for simple tasks). " <>
                 "Optional — defaults to the orchestrator's model."
+          },
+          "context_files" => %{
+            "type" => "array",
+            "items" => %{"type" => "string"},
+            "description" =>
+              "List of file paths to pre-load into the agent's system prompt as " <>
+                "context documents. Files are read and injected at the top of the " <>
+                "prompt for cache efficiency. Paths relative to project root or " <>
+                "absolute. Missing files are skipped with a warning. Optional."
           }
         },
         "required" => ["agent_id", "mission", "skills"]
@@ -231,7 +240,8 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
            context: params["context"],
            depends_on: params["depends_on"] || [],
            max_tool_calls: params["max_tool_calls"] || @default_max_tool_calls,
-           model_override: params["model_override"]
+           model_override: params["model_override"],
+           context_files: params["context_files"] || []
          }}
     end
   end
@@ -263,7 +273,8 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
         skills: validated.skills,
         depends_on: validated.depends_on,
         max_tool_calls: validated.max_tool_calls,
-        model_override: validated.model_override
+        model_override: validated.model_override,
+        context_files: validated.context_files
       },
       status: "pending",
       started_at: DateTime.utc_now()
@@ -286,6 +297,7 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
       depends_on: validated.depends_on,
       max_tool_calls: validated.max_tool_calls,
       model_override: validated.model_override,
+      context_files: validated.context_files,
       execution_log_id: execution_log.id
     }
   end
