@@ -788,18 +788,27 @@ defmodule Assistant.Orchestrator.SubAgent do
     loaded_files =
       file_paths
       |> Enum.reduce([], fn path, acc ->
-        resolved = resolve_path(path)
+        case resolve_path(path) do
+          {:ok, resolved} ->
+            case File.read(resolved) do
+              {:ok, contents} ->
+                estimated_tokens = div(byte_size(contents), 4)
+                [%{path: path, contents: contents, estimated_tokens: estimated_tokens} | acc]
 
-        case File.read(resolved) do
-          {:ok, contents} ->
-            estimated_tokens = div(byte_size(contents), 4)
-            [%{path: path, contents: contents, estimated_tokens: estimated_tokens} | acc]
+              {:error, reason} ->
+                Logger.warning("Context file not found or unreadable — skipping",
+                  path: path,
+                  resolved: resolved,
+                  reason: inspect(reason),
+                  agent_id: dispatch_params[:agent_id]
+                )
 
-          {:error, reason} ->
-            Logger.warning("Context file not found or unreadable — skipping",
+                acc
+            end
+
+          {:error, :path_traversal_denied} ->
+            Logger.warning("Context file path rejected — outside allowed base directory",
               path: path,
-              resolved: resolved,
-              reason: inspect(reason),
               agent_id: dispatch_params[:agent_id]
             )
 
@@ -862,10 +871,19 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   defp resolve_path(path) do
-    if Path.type(path) == :absolute do
-      path
+    base = File.cwd!()
+
+    resolved =
+      if Path.type(path) == :absolute do
+        Path.expand(path)
+      else
+        Path.expand(path, base)
+      end
+
+    if String.starts_with?(resolved, base <> "/") or resolved == base do
+      {:ok, resolved}
     else
-      Path.join(File.cwd!(), path)
+      {:error, :path_traversal_denied}
     end
   end
 
