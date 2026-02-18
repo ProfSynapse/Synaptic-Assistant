@@ -56,9 +56,22 @@ if api_key = System.get_env("OPENROUTER_API_KEY") do
   config :assistant, :openrouter_api_key, api_key
 end
 
-# Google service account credentials (JSON key file path or inline JSON)
+# Google service account credentials (inline JSON string or file path to JSON key)
+# Goth requires a decoded map, so we parse JSON here at config time.
 if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
-  config :assistant, :google_credentials, google_creds
+  credentials =
+    if String.starts_with?(String.trim(google_creds), "{") do
+      Jason.decode!(google_creds)
+    else
+      google_creds |> File.read!() |> Jason.decode!()
+    end
+
+  config :assistant, :google_credentials, credentials
+end
+
+# Google Cloud project number (used for Google Chat JWT audience verification)
+if project_number = System.get_env("GOOGLE_CLOUD_PROJECT_NUMBER") do
+  config :assistant, :google_cloud_project_number, project_number
 end
 
 # ElevenLabs — Text-to-Speech

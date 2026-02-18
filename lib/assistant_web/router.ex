@@ -10,6 +10,10 @@ defmodule AssistantWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :google_chat_auth do
+    plug AssistantWeb.Plugs.GoogleChatAuth
+  end
+
   # Health check — used by Railway and monitoring
   scope "/", AssistantWeb do
     pipe_through :api
@@ -17,12 +21,18 @@ defmodule AssistantWeb.Router do
     get "/health", HealthController, :index
   end
 
-  # Webhook endpoints — channel adapters
+  # Google Chat webhook — JWT-verified via GoogleChatAuth plug
+  scope "/webhooks", AssistantWeb do
+    pipe_through [:api, :google_chat_auth]
+
+    post "/google-chat", GoogleChatController, :event
+  end
+
+  # Other webhook endpoints — channel adapters (no additional auth yet)
   scope "/webhooks", AssistantWeb do
     pipe_through :api
 
     post "/telegram", WebhookController, :telegram
-    post "/google-chat", WebhookController, :google_chat
   end
 
   # Dev routes can be added here when needed (e.g., debug endpoints)

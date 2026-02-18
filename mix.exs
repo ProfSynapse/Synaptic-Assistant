@@ -65,9 +65,6 @@ defmodule Assistant.MixProject do
       {:google_api_gmail, "~> 0.17"},
       {:google_api_calendar, "~> 0.26"},
 
-      # Telegram
-      {:telegex, "~> 1.8"},
-
       # Job processing & scheduling
       {:oban, "~> 2.18"},
       {:quantum, "~> 3.5"},
