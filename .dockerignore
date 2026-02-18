@@ -1,0 +1,35 @@
+# .dockerignore — Files excluded from Docker build context.
+#
+# Reduces build context size and prevents leaking secrets.
+
+# Dependencies and build artifacts
+_build/
+deps/
+cover/
+doc/
+
+# Environment files with secrets
+.env
+.env.*
+
+# Git and IDE
+.git
+.gitignore
+.history/
+.worktrees/
+.elixir_ls/
+.vscode/
+.idea/
+.claude/
+
+# Documentation (not needed in production image)
+docs/
+*.md
+!README.md
+
+# Test files
+test/
+
+# OS files
+.DS_Store
+Thumbs.db
