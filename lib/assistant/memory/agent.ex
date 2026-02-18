@@ -856,7 +856,7 @@ defmodule Assistant.Memory.Agent do
   end
 
   defp via_tuple(user_id) do
-    {:via, Registry, {Assistant.SubAgent.Registry, {:memory_agent, user_id}}}
+    {:via, Elixir.Registry, {Assistant.SubAgent.Registry, {:memory_agent, user_id}}}
   end
 
   defp elapsed_ms(nil), do: 0

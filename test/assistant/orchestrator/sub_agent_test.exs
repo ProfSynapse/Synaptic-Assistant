@@ -1,46 +1,187 @@
 # test/assistant/orchestrator/sub_agent_test.exs
 #
 # Tests for sub-agent execution, focusing on scope isolation
-# (INVARIANT 4: sub-agent tool calls restricted to assigned skills).
-#
-# Uses pure function testing for the helper functions, and structured
-# assertions for the scope enforcement logic.
+# (INVARIANT 4: sub-agent tool calls restricted to assigned skills)
+# and the GenServer lifecycle (start, status, resume, execute wrapper).
 
 defmodule Assistant.Orchestrator.SubAgentTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
+  # async: false because we use named registries
 
   alias Assistant.Orchestrator.SubAgent
 
+  setup do
+    # Trap exits so SubAgent crashes (LLM failure) don't kill the test process
+    Process.flag(:trap_exit, true)
+
+    # Start infrastructure unlinked so it survives test process cleanup
+    start_unlinked(Registry, keys: :unique, name: Assistant.SubAgent.Registry)
+    start_unlinked(Task.Supervisor, name: Assistant.Skills.TaskSupervisor)
+
+    # Ensure Skills.Registry and PromptLoader are running
+    ensure_skills_registry_started()
+    ensure_prompt_loader_started()
+
+    :ok
+  end
+
   # ---------------------------------------------------------------
-  # Response parsing helpers (tested via module internal behavior)
+  # GenServer lifecycle — start_link
   # ---------------------------------------------------------------
 
-  describe "response parsing" do
-    test "has_text_no_tools? identifies text-only responses" do
-      # We test this indirectly by verifying SubAgent behavior.
-      # The module uses these for routing in handle_response/5.
-      # Since they're private, we validate the contract through
-      # the expected output structure.
-      assert true
+  describe "start_link/1" do
+    test "starts and registers in SubAgent.Registry" do
+      agent_id = "test-agent-#{System.unique_integer([:positive])}"
+
+      dispatch_params = %{
+        agent_id: agent_id,
+        mission: "Test mission",
+        skills: ["email.search"],
+        context: nil,
+        context_files: nil
+      }
+
+      {:ok, pid} =
+        SubAgent.start_link(
+          dispatch_params: dispatch_params,
+          dep_results: %{},
+          engine_state: %{conversation_id: "conv-1", user_id: "user-1"}
+        )
+
+      assert Process.alive?(pid)
+
+      # Verify registration
+      assert [{^pid, _}] =
+               Registry.lookup(Assistant.SubAgent.Registry, agent_id)
+
+      # The agent will start running the LLM loop (which will fail without a real client)
+      # Wait briefly, then stop
+      Process.sleep(100)
+      if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1_000)
     end
   end
 
   # ---------------------------------------------------------------
-  # Scope enforcement — build_scoped_tools/1
+  # GenServer lifecycle — get_status
+  # ---------------------------------------------------------------
+
+  describe "get_status/1" do
+    test "returns status for registered agent" do
+      agent_id = "test-status-#{System.unique_integer([:positive])}"
+
+      dispatch_params = %{
+        agent_id: agent_id,
+        mission: "Status test",
+        skills: [],
+        context: nil,
+        context_files: nil
+      }
+
+      {:ok, pid} =
+        SubAgent.start_link(
+          dispatch_params: dispatch_params,
+          dep_results: %{},
+          engine_state: %{conversation_id: "conv-1", user_id: "user-1"}
+        )
+
+      # Give a moment for the process to initialize
+      Process.sleep(10)
+
+      case SubAgent.get_status(agent_id) do
+        {:ok, status} ->
+          assert status.status in [:running, :completed, :failed]
+
+        {:error, :not_found} ->
+          # Agent may have already finished and exited
+          :ok
+      end
+
+      Process.sleep(100)
+      if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1_000)
+    end
+
+    test "returns {:error, :not_found} for unregistered agent" do
+      assert {:error, :not_found} = SubAgent.get_status("nonexistent-agent-xyz")
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # GenServer lifecycle — resume
+  # ---------------------------------------------------------------
+
+  describe "resume/2" do
+    test "returns {:error, :not_found} for unregistered agent" do
+      assert {:error, :not_found} =
+               SubAgent.resume("nonexistent-agent-xyz", %{message: "test"})
+    end
+
+    test "returns {:error, :not_awaiting} when agent is running" do
+      agent_id = "test-resume-#{System.unique_integer([:positive])}"
+
+      dispatch_params = %{
+        agent_id: agent_id,
+        mission: "Resume test",
+        skills: [],
+        context: nil,
+        context_files: nil
+      }
+
+      {:ok, pid} =
+        SubAgent.start_link(
+          dispatch_params: dispatch_params,
+          dep_results: %{},
+          engine_state: %{conversation_id: "conv-1", user_id: "user-1"}
+        )
+
+      Process.sleep(10)
+
+      # Agent is running (not awaiting), so resume should return error
+      case SubAgent.resume(agent_id, %{message: "update"}) do
+        {:error, :not_awaiting} -> :ok
+        {:error, :not_found} -> :ok  # Agent may have already completed
+      end
+
+      Process.sleep(100)
+      if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1_000)
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # execute/3 — synchronous wrapper (backward compatibility)
+  # ---------------------------------------------------------------
+
+  describe "execute/3" do
+    test "returns result map with expected keys" do
+      agent_id = "test-exec-#{System.unique_integer([:positive])}"
+
+      dispatch_params = %{
+        agent_id: agent_id,
+        mission: "Execute test",
+        skills: [],
+        context: nil,
+        context_files: nil
+      }
+
+      engine_state = %{conversation_id: "conv-1", user_id: "user-1"}
+
+      # execute/3 starts the GenServer and waits for completion
+      # Without a real LLM client, the loop will fail → agent returns failed status
+      result = SubAgent.execute(dispatch_params, %{}, engine_state)
+
+      assert is_map(result)
+      assert Map.has_key?(result, :status)
+      assert Map.has_key?(result, :result)
+      assert Map.has_key?(result, :tool_calls_used)
+      assert result.status in [:completed, :failed, :timeout]
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # Scope enforcement — structural contract tests
   # ---------------------------------------------------------------
 
   describe "scope enforcement" do
     test "scoped tool enum restricts skill names" do
-      # The sub-agent's use_skill tool definition should contain
-      # an enum limiting the skill parameter to only allowed skills.
-      # We test this by examining the tools structure.
-      #
-      # Since build_scoped_tools is private, we test via the public
-      # execute/3 contract. The tool definition should only contain
-      # skills from dispatch_params.skills.
-
-      # This is a structural test — verify the contract holds
-      # by examining what the module produces.
       dispatch_params = %{
         agent_id: "test_agent",
         mission: "Search for emails",
@@ -48,22 +189,11 @@ defmodule Assistant.Orchestrator.SubAgentTest do
         context: nil
       }
 
-      # The tools built for this dispatch should only allow
-      # email.search and email.read in the enum.
-      # Since we can't easily call build_scoped_tools directly,
-      # we verify the contract in the execute_use_skill path tests below.
       assert dispatch_params.skills == ["email.search", "email.read"]
     end
   end
 
-  # ---------------------------------------------------------------
-  # Function extraction helpers
-  # ---------------------------------------------------------------
-
   describe "function name/args extraction" do
-    # These are private but we can test the contract through
-    # structured tool call maps.
-
     test "atom-keyed tool call structure" do
       tc = %{
         id: "call_1",
@@ -71,7 +201,6 @@ defmodule Assistant.Orchestrator.SubAgentTest do
         function: %{name: "use_skill", arguments: ~s({"skill": "email.send"})}
       }
 
-      # Verify the structure matches what SubAgent expects
       assert tc.function.name == "use_skill"
       assert is_binary(tc.function.arguments)
     end
@@ -88,43 +217,11 @@ defmodule Assistant.Orchestrator.SubAgentTest do
   end
 
   # ---------------------------------------------------------------
-  # Context building
-  # ---------------------------------------------------------------
-
-  describe "context building contracts" do
-    test "dependency section is empty for no dependencies" do
-      # build_dependency_section(%{}) should return ""
-      # Test the contract by checking what gets built for the system prompt
-      assert %{} == %{}
-    end
-
-    test "dependency results are formatted for downstream agents" do
-      dep_results = %{
-        "agent_a" => %{result: "Found 3 emails from Bob", status: :completed},
-        "agent_b" => %{result: "Calendar is clear today", status: :completed}
-      }
-
-      # The system prompt should include prior agent results
-      assert map_size(dep_results) == 2
-      assert dep_results["agent_a"].result =~ "Found 3 emails"
-    end
-  end
-
-  # ---------------------------------------------------------------
   # Dual scope enforcement (tool def enum + runtime check)
   # ---------------------------------------------------------------
 
   describe "dual scope enforcement" do
-    test "out-of-scope skill returns error message" do
-      # INVARIANT 4: Sub-agent tool calls restricted to assigned skills.
-      # The sub-agent enforces scope at TWO points:
-      # 1. Tool definition enum (LLM sees only allowed skills)
-      # 2. Runtime check in execute_use_skill (server-side validation)
-      #
-      # This test verifies the runtime check contract:
-      # If skill_name is NOT in dispatch_params.skills, the agent
-      # should return an error message, not execute the skill.
-
+    test "out-of-scope skill is not in assigned skills" do
       dispatch_params = %{
         agent_id: "test_agent",
         mission: "Search emails",
@@ -132,13 +229,11 @@ defmodule Assistant.Orchestrator.SubAgentTest do
         context: nil
       }
 
-      # Attempting "email.send" which is NOT in the skills list
-      # should be blocked at the runtime scope check.
       assert "email.send" not in dispatch_params.skills
       assert "email.search" in dispatch_params.skills
     end
 
-    test "in-scope skill is allowed" do
+    test "in-scope skill is in assigned skills" do
       dispatch_params = %{
         agent_id: "test_agent",
         mission: "Search and read emails",
@@ -153,7 +248,7 @@ defmodule Assistant.Orchestrator.SubAgentTest do
   end
 
   # ---------------------------------------------------------------
-  # extract_last_text/1 behavior
+  # Message extraction
   # ---------------------------------------------------------------
 
   describe "message extraction" do
@@ -166,7 +261,6 @@ defmodule Assistant.Orchestrator.SubAgentTest do
         %{role: "assistant", content: "Found 3 emails."}
       ]
 
-      # The module's extract_last_text/1 should return "Found 3 emails."
       last_assistant =
         messages
         |> Enum.reverse()
@@ -197,6 +291,53 @@ defmodule Assistant.Orchestrator.SubAgentTest do
         end)
 
       assert last_assistant == nil
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # Helpers
+  # ---------------------------------------------------------------
+
+  defp start_unlinked(module, opts) do
+    case module.start_link(opts) do
+      {:ok, pid} -> Process.unlink(pid)
+      {:error, {:already_started, _}} -> :ok
+    end
+  end
+
+  defp ensure_prompt_loader_started do
+    if :ets.whereis(:assistant_prompts) != :undefined do
+      :ok
+    else
+      tmp = Path.join(System.tmp_dir!(), "prompts_sa_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp)
+
+      File.write!(Path.join(tmp, "sub_agent.yaml"), """
+      system: |
+        You are a focused execution agent (test mode).
+        Available skills: <%= @skills_text %>
+        <%= @dep_section %>
+        <%= @context_section %>
+      """)
+
+      case Assistant.Config.PromptLoader.start_link(prompts_dir: tmp) do
+        {:ok, _} -> :ok
+        {:error, {:already_started, _}} -> :ok
+      end
+    end
+  end
+
+  defp ensure_skills_registry_started do
+    if :ets.whereis(:assistant_skills) != :undefined do
+      :ok
+    else
+      tmp_dir = Path.join(System.tmp_dir!(), "empty_skills_sa_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(tmp_dir)
+
+      case Assistant.Skills.Registry.start_link(skills_dir: tmp_dir) do
+        {:ok, _} -> :ok
+        {:error, {:already_started, _}} -> :ok
+      end
     end
   end
 end

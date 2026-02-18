@@ -1125,7 +1125,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   # --- Registry ---
 
   defp via_tuple(agent_id) do
-    {:via, Registry, {Assistant.SubAgent.Registry, agent_id}}
+    {:via, Elixir.Registry, {Assistant.SubAgent.Registry, agent_id}}
   end
 
   # --- Response Parsing Helpers ---
