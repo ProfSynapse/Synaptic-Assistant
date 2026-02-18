@@ -33,7 +33,10 @@ config :assistant, Oban,
     default: 10,
     compaction: 5,
     memory: 5,
-    notifications: 3
+    notifications: 3,
+    email: 5,
+    calendar: 3,
+    scheduled: 5
   ]
 
 # Quantum cron scheduler

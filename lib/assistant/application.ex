@@ -30,6 +30,9 @@ defmodule Assistant.Application do
         # Google OAuth2 (conditional — only when credentials are configured)
         maybe_goth() ++
         [
+          # Cron scheduler (before Oban — scheduled jobs may enqueue Oban work)
+          Assistant.Scheduler,
+
           # Job processing
           {Oban, Application.fetch_env!(:assistant, Oban)},
 

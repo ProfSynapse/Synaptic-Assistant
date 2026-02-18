@@ -84,7 +84,9 @@ defmodule Assistant.Integrations.Google.Auth do
     [
       "https://www.googleapis.com/auth/chat.bot",
       "https://www.googleapis.com/auth/drive.readonly",
-      "https://www.googleapis.com/auth/drive.file"
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/calendar"
     ]
   end
 end
