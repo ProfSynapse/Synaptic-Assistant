@@ -22,7 +22,7 @@ defmodule Assistant.Skills.Tasks.Get do
   alias Assistant.TaskManager.Queries
 
   @impl true
-  def execute(flags, _context) do
+  def execute(flags, context) do
     task_id = flags["id"] || flags["task_id"] || flags["_positional"]
 
     unless task_id do
@@ -32,7 +32,7 @@ defmodule Assistant.Skills.Tasks.Get do
          content: "Missing required argument: task ID or short_id (e.g., T-001)"
        }}
     else
-      case Queries.get_task(task_id) do
+      case Queries.get_task(task_id, context.user_id) do
         {:ok, task} ->
           {:ok,
            %Result{

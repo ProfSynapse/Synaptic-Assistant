@@ -22,7 +22,7 @@ defmodule Assistant.Skills.Tasks.Create do
   alias Assistant.TaskManager.Queries
 
   @impl true
-  def execute(flags, _context) do
+  def execute(flags, context) do
     title = flags["title"]
 
     unless title do
@@ -33,7 +33,7 @@ defmodule Assistant.Skills.Tasks.Create do
        }}
     else
       attrs =
-        %{title: title}
+        %{title: title, creator_id: context.user_id}
         |> maybe_put(:description, flags["description"])
         |> maybe_put(:priority, flags["priority"])
         |> maybe_put(:tags, parse_tags(flags["tags"]))

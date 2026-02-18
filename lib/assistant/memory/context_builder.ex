@@ -164,8 +164,9 @@ defmodule Assistant.Memory.ContextBuilder do
 
   defp fetch_active_tasks(user_id, limit) do
     # Fetch non-done, non-cancelled tasks that are not archived.
-    # TaskManager.Queries.list_tasks returns [%Task{}] directly (not a tuple).
+    # TaskManager.Queries.list_tasks requires user_id for ownership scoping.
     TaskQueries.list_tasks(
+      user_id: user_id,
       assignee_id: user_id,
       include_archived: false,
       limit: limit,

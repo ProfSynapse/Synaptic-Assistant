@@ -23,7 +23,7 @@ defmodule Assistant.Skills.Tasks.Delete do
   alias Assistant.TaskManager.Queries
 
   @impl true
-  def execute(flags, _context) do
+  def execute(flags, context) do
     task_id = flags["id"] || flags["task_id"] || flags["_positional"]
 
     unless task_id do
@@ -36,7 +36,7 @@ defmodule Assistant.Skills.Tasks.Delete do
       reason = flags["reason"] || "cancelled"
       opts = [archive_reason: reason]
 
-      case Queries.delete_task(task_id, opts) do
+      case Queries.delete_task(task_id, opts, context.user_id) do
         {:ok, task} ->
           {:ok,
            %Result{
@@ -47,6 +47,13 @@ defmodule Assistant.Skills.Tasks.Delete do
            }}
 
         {:error, :not_found} ->
+          {:ok,
+           %Result{
+             status: :error,
+             content: "Task not found: #{task_id}"
+           }}
+
+        {:error, :unauthorized} ->
           {:ok,
            %Result{
              status: :error,

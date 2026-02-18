@@ -57,6 +57,24 @@ defmodule Assistant.TaskManager.Queries do
   @tracked_fields ~w(title description status priority tags due_date due_time
                      assignee_id parent_task_id archive_reason)a
 
+  # Whitelist of known option keys for normalize_opts/1.
+  # Unknown string keys are silently dropped to avoid atom exhaustion attacks.
+  @known_opt_keys %{
+    "query" => :query,
+    "status" => :status,
+    "priority" => :priority,
+    "assignee_id" => :assignee_id,
+    "tags" => :tags,
+    "due_before" => :due_before,
+    "due_after" => :due_after,
+    "include_archived" => :include_archived,
+    "limit" => :limit,
+    "offset" => :offset,
+    "sort_by" => :sort_by,
+    "sort_order" => :sort_order,
+    "user_id" => :user_id
+  }
+
   # --------------------------------------------------------------------
   # Create
   # --------------------------------------------------------------------
@@ -130,28 +148,44 @@ defmodule Assistant.TaskManager.Queries do
   @doc """
   Fetches a task by UUID `id` or `short_id` string (e.g., "T-001").
 
+  The 1-arity version is for internal/system use (no ownership check).
+  The 2-arity version scopes by `creator_id` for user-facing operations.
+
   Preloads subtasks, comments (with author), and history entries.
 
   ## Returns
 
     * `{:ok, task}` with preloaded associations
-    * `{:error, :not_found}` if no task matches
+    * `{:error, :not_found}` if no task matches (or user doesn't own it)
   """
   @spec get_task(String.t()) :: {:ok, Task.t()} | {:error, :not_found}
   def get_task(id_or_short_id) do
-    query =
-      if uuid?(id_or_short_id) do
-        from(t in Task, where: t.id == ^id_or_short_id)
-      else
-        from(t in Task, where: t.short_id == ^id_or_short_id)
-      end
-
-    query
+    base_task_query(id_or_short_id)
     |> preload([:subtasks, comments: :author, history: []])
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
       task -> {:ok, task}
+    end
+  end
+
+  @spec get_task(String.t(), String.t()) :: {:ok, Task.t()} | {:error, :not_found}
+  def get_task(id_or_short_id, user_id) do
+    base_task_query(id_or_short_id)
+    |> where([t], t.creator_id == ^user_id)
+    |> preload([:subtasks, comments: :author, history: []])
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :not_found}
+      task -> {:ok, task}
+    end
+  end
+
+  defp base_task_query(id_or_short_id) do
+    if uuid?(id_or_short_id) do
+      from(t in Task, where: t.id == ^id_or_short_id)
+    else
+      from(t in Task, where: t.short_id == ^id_or_short_id)
     end
   end
 
@@ -164,15 +198,20 @@ defmodule Assistant.TaskManager.Queries do
 
   Uses `Ecto.Multi` to ensure the update and history entries are atomic.
 
+  The 2-arity version is for internal/system use (no ownership check).
+  The 3-arity version verifies `creator_id` matches `user_id` before updating.
+
   ## Parameters
 
     * `id` - Task UUID
     * `attrs` - Map of fields to update
+    * `user_id` - (3-arity) UUID of the requesting user for ownership check
 
   ## Returns
 
     * `{:ok, task}` with updated task
     * `{:error, :not_found}` if task doesn't exist
+    * `{:error, :unauthorized}` if user doesn't own the task
     * `{:error, changeset}` on validation failure
   """
   @spec update_task(String.t(), map()) :: {:ok, Task.t()} | {:error, term()}
@@ -182,21 +221,39 @@ defmodule Assistant.TaskManager.Queries do
         {:error, :not_found}
 
       task ->
-        changeset = Task.changeset(task, attrs)
-        changes = changeset.changes
+        do_update_task(task, attrs)
+    end
+  end
 
-        multi =
-          Multi.new()
-          |> Multi.update(:task, changeset)
-          |> add_history_entries(task, changes, attrs)
+  @spec update_task(String.t(), map(), String.t()) :: {:ok, Task.t()} | {:error, term()}
+  def update_task(id, attrs, user_id) do
+    case Repo.get(Task, id) do
+      nil ->
+        {:error, :not_found}
 
-        case Repo.transaction(multi) do
-          {:ok, %{task: updated_task}} ->
-            {:ok, updated_task}
+      %Task{creator_id: creator_id} when creator_id != user_id ->
+        {:error, :unauthorized}
 
-          {:error, :task, changeset, _changes} ->
-            {:error, changeset}
-        end
+      task ->
+        do_update_task(task, attrs)
+    end
+  end
+
+  defp do_update_task(task, attrs) do
+    changeset = Task.changeset(task, attrs)
+    changes = changeset.changes
+
+    multi =
+      Multi.new()
+      |> Multi.update(:task, changeset)
+      |> add_history_entries(task, changes, attrs)
+
+    case Repo.transaction(multi) do
+      {:ok, %{task: updated_task}} ->
+        {:ok, updated_task}
+
+      {:error, :task, changeset, _changes} ->
+        {:error, changeset}
     end
   end
 
@@ -236,6 +293,9 @@ defmodule Assistant.TaskManager.Queries do
   @doc """
   Soft-deletes a task by setting `archived_at` to now.
 
+  The version without `user_id` is for internal/system use.
+  Pass `user_id` to enforce ownership before archiving.
+
   ## Options
 
     * `:archive_reason` - One of "completed", "cancelled", "superseded"
@@ -244,6 +304,7 @@ defmodule Assistant.TaskManager.Queries do
 
     * `{:ok, task}` with archived task
     * `{:error, :not_found}` if task doesn't exist
+    * `{:error, :unauthorized}` if user doesn't own the task
     * `{:error, changeset}` on validation failure
   """
   @spec delete_task(String.t(), keyword()) :: {:ok, Task.t()} | {:error, term()}
@@ -254,6 +315,16 @@ defmodule Assistant.TaskManager.Queries do
       archived_at: DateTime.utc_now(),
       archive_reason: reason
     })
+  end
+
+  @spec delete_task(String.t(), keyword(), String.t()) :: {:ok, Task.t()} | {:error, term()}
+  def delete_task(id, opts, user_id) do
+    reason = Keyword.get(opts, :archive_reason, "cancelled")
+
+    update_task(id, %{
+      archived_at: DateTime.utc_now(),
+      archive_reason: reason
+    }, user_id)
   end
 
   # --------------------------------------------------------------------
@@ -281,27 +352,38 @@ defmodule Assistant.TaskManager.Queries do
     * List of matching tasks, ordered by FTS rank (if query provided)
       or by priority then due_date.
   """
-  @spec search_tasks(keyword() | map()) :: [Task.t()]
+  @spec search_tasks(keyword() | map()) :: {:error, :user_id_required} | [Task.t()]
   def search_tasks(opts) do
     opts = normalize_opts(opts)
-    query_text = opts[:query]
+    user_id = opts[:user_id]
 
-    base =
-      if query_text && query_text != "" do
-        from(t in Task,
-          where: fragment("search_vector @@ plainto_tsquery('english', ?)", ^query_text),
-          order_by: [
-            desc: fragment("ts_rank(search_vector, plainto_tsquery('english', ?))", ^query_text)
-          ]
-        )
-      else
-        from(t in Task, order_by: [asc: :priority, asc: :due_date, desc: :inserted_at])
-      end
+    unless user_id do
+      {:error, :user_id_required}
+    else
+      query_text = opts[:query]
 
-    base
-    |> apply_filters(opts)
-    |> limit(^(opts[:limit] || 50))
-    |> Repo.all()
+      base =
+        if query_text && query_text != "" do
+          from(t in Task,
+            where:
+              t.creator_id == ^user_id and
+                fragment("search_vector @@ plainto_tsquery('english', ?)", ^query_text),
+            order_by: [
+              desc: fragment("ts_rank(search_vector, plainto_tsquery('english', ?))", ^query_text)
+            ]
+          )
+        else
+          from(t in Task,
+            where: t.creator_id == ^user_id,
+            order_by: [asc: :priority, asc: :due_date, desc: :inserted_at]
+          )
+        end
+
+      base
+      |> apply_filters(opts)
+      |> limit(^(opts[:limit] || 50))
+      |> Repo.all()
+    end
   end
 
   # --------------------------------------------------------------------
@@ -326,23 +408,29 @@ defmodule Assistant.TaskManager.Queries do
 
     * List of tasks matching filters.
   """
-  @spec list_tasks(keyword() | map()) :: [Task.t()]
+  @spec list_tasks(keyword() | map()) :: {:error, :user_id_required} | [Task.t()]
   def list_tasks(opts \\ []) do
     opts = normalize_opts(opts)
-    limit = opts[:limit] || 20
-    offset = opts[:offset] || 0
-    sort_by = opts[:sort_by] || :inserted_at
-    sort_order = opts[:sort_order] || :desc
+    user_id = opts[:user_id]
 
-    sort_by = validate_sort_field(sort_by)
-    sort_order = validate_sort_order(sort_order)
+    unless user_id do
+      {:error, :user_id_required}
+    else
+      limit_val = opts[:limit] || 20
+      offset_val = opts[:offset] || 0
+      sort_by = opts[:sort_by] || :inserted_at
+      sort_order = opts[:sort_order] || :desc
 
-    from(t in Task)
-    |> apply_filters(opts)
-    |> order_by([t], [{^sort_order, field(t, ^sort_by)}])
-    |> limit(^limit)
-    |> offset(^offset)
-    |> Repo.all()
+      sort_by = validate_sort_field(sort_by)
+      sort_order = validate_sort_order(sort_order)
+
+      from(t in Task, where: t.creator_id == ^user_id)
+      |> apply_filters(opts)
+      |> order_by([t], [{^sort_order, field(t, ^sort_by)}])
+      |> limit(^limit_val)
+      |> offset(^offset_val)
+      |> Repo.all()
+    end
   end
 
   defp validate_sort_field(field) when field in [:priority, :due_date, :inserted_at], do: field
@@ -459,15 +547,20 @@ defmodule Assistant.TaskManager.Queries do
   @doc """
   Adds a comment to a task.
 
+  The 2-arity version is for internal/system use (no ownership check).
+  The 3-arity version verifies the task belongs to `user_id` before inserting.
+
   ## Parameters
 
     * `task_id` - UUID of the task
     * `attrs` - Map with `:content` (required), optionally `:author_id`,
       `:source_conversation_id`
+    * `user_id` - (3-arity) UUID of the requesting user for ownership check
 
   ## Returns
 
     * `{:ok, comment}` on success
+    * `{:error, :not_found}` if the task doesn't exist or user doesn't own it
     * `{:error, changeset}` on validation failure
   """
   @spec add_comment(String.t(), map()) :: {:ok, TaskComment.t()} | {:error, Ecto.Changeset.t()}
@@ -477,6 +570,21 @@ defmodule Assistant.TaskManager.Queries do
     %TaskComment{}
     |> TaskComment.changeset(attrs)
     |> Repo.insert()
+  end
+
+  @spec add_comment(String.t(), map(), String.t()) ::
+          {:ok, TaskComment.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def add_comment(task_id, attrs, user_id) do
+    case Repo.get(Task, task_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Task{creator_id: creator_id} when creator_id != user_id ->
+        {:error, :not_found}
+
+      _task ->
+        add_comment(task_id, attrs)
+    end
   end
 
   @doc """
@@ -595,9 +703,16 @@ defmodule Assistant.TaskManager.Queries do
   end
 
   defp normalize_opts(opts) when is_map(opts) do
-    Enum.map(opts, fn
-      {k, v} when is_binary(k) -> {String.to_existing_atom(k), v}
-      {k, v} -> {k, v}
+    opts
+    |> Enum.flat_map(fn
+      {k, v} when is_binary(k) ->
+        case Map.get(@known_opt_keys, k) do
+          nil -> []
+          atom_key -> [{atom_key, v}]
+        end
+
+      {k, v} when is_atom(k) ->
+        [{k, v}]
     end)
   end
 

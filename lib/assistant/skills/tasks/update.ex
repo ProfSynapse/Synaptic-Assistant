@@ -42,7 +42,7 @@ defmodule Assistant.Skills.Tasks.Update do
            content: "No fields to update. Provide at least one flag (--status, --priority, --title, etc.)"
          }}
       else
-        case Queries.update_task(task_id, attrs) do
+        case Queries.update_task(task_id, attrs, context.user_id) do
           {:ok, task} ->
             changed_fields = Map.keys(attrs) |> Enum.map_join(", ", &Atom.to_string/1)
 
@@ -55,6 +55,13 @@ defmodule Assistant.Skills.Tasks.Update do
              }}
 
           {:error, :not_found} ->
+            {:ok,
+             %Result{
+               status: :error,
+               content: "Task not found: #{task_id}"
+             }}
+
+          {:error, :unauthorized} ->
             {:ok,
              %Result{
                status: :error,
@@ -92,7 +99,7 @@ defmodule Assistant.Skills.Tasks.Update do
     attrs = maybe_put(attrs, :due_date, parse_date(flags["due"]))
 
     # Tag modifications: --add-tag and --remove-tag for incremental changes
-    attrs = apply_tag_changes(attrs, flags, task_id)
+    attrs = apply_tag_changes(attrs, flags, task_id, context.user_id)
 
     # Audit metadata (not stored on the task, but passed to history logging)
     attrs = maybe_put(attrs, :changed_by_user_id, context.user_id)
@@ -101,12 +108,12 @@ defmodule Assistant.Skills.Tasks.Update do
     attrs
   end
 
-  defp apply_tag_changes(attrs, flags, task_id) do
+  defp apply_tag_changes(attrs, flags, task_id, user_id) do
     add_tags = parse_tags(flags["add_tag"] || flags["add-tag"])
     remove_tags = parse_tags(flags["remove_tag"] || flags["remove-tag"])
 
     if add_tags || remove_tags do
-      case Queries.get_task(task_id) do
+      case Queries.get_task(task_id, user_id) do
         {:ok, task} ->
           current_tags = task.tags || []
           new_tags = current_tags

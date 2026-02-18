@@ -22,9 +22,9 @@ defmodule Assistant.Skills.Tasks.Search do
   alias Assistant.TaskManager.Queries
 
   @impl true
-  def execute(flags, _context) do
+  def execute(flags, context) do
     opts =
-      []
+      [user_id: context.user_id]
       |> maybe_add(:query, flags["query"])
       |> maybe_add(:status, flags["status"])
       |> maybe_add(:priority, flags["priority"])
@@ -36,24 +36,35 @@ defmodule Assistant.Skills.Tasks.Search do
     tasks = Queries.search_tasks(opts)
 
     content =
-      if tasks == [] do
-        "No tasks found matching the given criteria."
-      else
-        header = "Found #{length(tasks)} task(s):\n"
+      case tasks do
+        {:error, :user_id_required} ->
+          "Search failed: user context is required."
 
-        rows =
-          tasks
-          |> Enum.map(&format_task_row/1)
-          |> Enum.join("\n")
+        [] ->
+          "No tasks found matching the given criteria."
 
-        header <> rows
+        tasks ->
+          header = "Found #{length(tasks)} task(s):\n"
+
+          rows =
+            tasks
+            |> Enum.map(&format_task_row/1)
+            |> Enum.join("\n")
+
+          header <> rows
+      end
+
+    task_count =
+      case tasks do
+        {:error, _} -> 0
+        list -> length(list)
       end
 
     {:ok,
      %Result{
        status: :ok,
        content: content,
-       metadata: %{count: length(tasks)}
+       metadata: %{count: task_count}
      }}
   end
 
