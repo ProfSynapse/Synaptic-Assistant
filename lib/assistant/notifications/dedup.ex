@@ -22,7 +22,7 @@ defmodule Assistant.Notifications.Dedup do
   """
   @spec init() :: :ok
   def init do
-    :ets.new(@table, [:named_table, :public, :set])
+    :ets.new(@table, [:named_table, :protected, :set])
     :ok
   rescue
     ArgumentError -> :ok

@@ -99,39 +99,54 @@ defmodule AssistantWeb.GoogleChatController do
     conversation_id = derive_conversation_id(message)
 
     # Ensure the engine is running for this conversation
-    ensure_engine_started(conversation_id, message)
+    case ensure_engine_started(conversation_id, message) do
+      :ok ->
+        # Send the message to the orchestrator engine
+        case Engine.send_message(conversation_id, message.content) do
+          {:ok, response_text} ->
+            reply_opts = build_reply_opts(message)
 
-    # Send the message to the orchestrator engine
-    case Engine.send_message(conversation_id, message.content) do
-      {:ok, response_text} ->
-        reply_opts = build_reply_opts(message)
+            case ChatClient.send_message(message.space_id, response_text, reply_opts) do
+              {:ok, _} ->
+                Logger.debug("Google Chat reply sent",
+                  conversation_id: conversation_id,
+                  space_id: message.space_id
+                )
 
-        case ChatClient.send_message(message.space_id, response_text, reply_opts) do
-          {:ok, _} ->
-            Logger.debug("Google Chat reply sent",
-              conversation_id: conversation_id,
-              space_id: message.space_id
-            )
+              {:error, reason} ->
+                Logger.error("Failed to send Google Chat reply",
+                  conversation_id: conversation_id,
+                  space_id: message.space_id,
+                  reason: inspect(reason)
+                )
+            end
 
           {:error, reason} ->
-            Logger.error("Failed to send Google Chat reply",
+            Logger.error("Orchestrator processing failed",
               conversation_id: conversation_id,
-              space_id: message.space_id,
               reason: inspect(reason)
             )
+
+            error_text =
+              "I encountered an error processing your message. Please try again."
+
+            reply_opts = build_reply_opts(message)
+            ChatClient.send_message(message.space_id, error_text, reply_opts)
         end
 
       {:error, reason} ->
-        Logger.error("Orchestrator processing failed",
+        Logger.error("Failed to start engine for conversation",
           conversation_id: conversation_id,
           reason: inspect(reason)
         )
 
-        error_text =
-          "I encountered an error processing your message. Please try again."
-
         reply_opts = build_reply_opts(message)
-        ChatClient.send_message(message.space_id, error_text, reply_opts)
+
+        ChatClient.send_message(
+          message.space_id,
+          "I encountered an error starting the conversation engine. Please try again.",
+          reply_opts
+        )
     end
   rescue
     error ->

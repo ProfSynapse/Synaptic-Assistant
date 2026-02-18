@@ -44,6 +44,7 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
   @expected_issuer "chat@system.gserviceaccount.com"
   @cache_table :google_chat_certs_cache
   @cache_ttl_ms :timer.hours(1)
+  @clock_skew_seconds 30
 
   # --- Plug Callbacks ---
 
@@ -168,7 +169,7 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
       claims["aud"] != project_number ->
         {:error, :invalid_audience}
 
-      not is_integer(claims["exp"]) or claims["exp"] <= now ->
+      not is_integer(claims["exp"]) or claims["exp"] + @clock_skew_seconds <= now ->
         {:error, :token_expired}
 
       true ->
@@ -216,7 +217,7 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
   defp ensure_ets_table do
     case :ets.whereis(@cache_table) do
       :undefined ->
-        :ets.new(@cache_table, [:set, :public, :named_table])
+        :ets.new(@cache_table, [:set, :protected, :named_table])
 
       _ref ->
         :ok

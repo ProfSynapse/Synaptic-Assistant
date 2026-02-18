@@ -19,6 +19,9 @@ defmodule Assistant.Application do
         # Prompt template loader (after Config.Loader — reads config/prompts/*.yaml)
         Assistant.Config.PromptLoader,
 
+        # Encryption vault (must start before Repo consumers that use Cloak types)
+        Assistant.Vault,
+
         # Infrastructure
         Assistant.Repo,
         {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},

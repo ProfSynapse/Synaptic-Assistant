@@ -38,6 +38,14 @@ defmodule Assistant.Notifications.Router do
     critical: 3
   }
 
+  # String-keyed version for matching DB values without atom conversion
+  @severity_levels_str %{
+    "info" => 0,
+    "warning" => 1,
+    "error" => 2,
+    "critical" => 3
+  }
+
   @sweep_interval_ms 60_000
 
   # --- Public API ---
@@ -150,7 +158,7 @@ defmodule Assistant.Notifications.Router do
     severity_level = Map.get(@severity_levels, severity, 0)
 
     Enum.filter(rules, fn rule ->
-      rule_level = Map.get(@severity_levels, String.to_existing_atom(rule.severity_min), 0)
+      rule_level = Map.get(@severity_levels_str, rule.severity_min, 0)
       severity_match = severity_level >= rule_level
 
       component_match =

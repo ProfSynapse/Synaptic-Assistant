@@ -25,8 +25,22 @@ defmodule Assistant.Notifications.GoogleChat do
     - `:ok` on successful delivery (HTTP 2xx)
     - `{:error, reason}` on failure
   """
+  @allowed_webhook_prefix "https://chat.googleapis.com/"
+
   @spec send(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def send(webhook_url, message, opts \\ []) do
+    unless String.starts_with?(webhook_url, @allowed_webhook_prefix) do
+      Logger.warning("Rejected webhook URL — does not match allowed prefix",
+        url_prefix: String.slice(webhook_url, 0, 30)
+      )
+
+      {:error, :invalid_webhook_url}
+    else
+      do_send(webhook_url, message, opts)
+    end
+  end
+
+  defp do_send(webhook_url, message, opts) do
     timeout = Keyword.get(opts, :timeout, 10_000)
 
     case Req.post(webhook_url,

@@ -23,6 +23,8 @@ defmodule Assistant.Skills.Files.Search do
 
   @default_limit 20
   @max_limit 100
+  @valid_drive_id ~r/^[A-Za-z0-9_-]+$/
+  @rejected_query_chars ~r/[()=<>]/
 
   @impl true
   def execute(flags, context) do
@@ -77,7 +79,10 @@ defmodule Assistant.Skills.Files.Search do
 
     parts =
       if query do
-        [~s(name contains '#{escape_query(query)}') | parts]
+        case validate_query_text(query) do
+          :ok -> [~s(name contains '#{escape_query(query)}') | parts]
+          {:error, _} = err -> throw(err)
+        end
       else
         parts
       end
@@ -91,7 +96,10 @@ defmodule Assistant.Skills.Files.Search do
 
     parts =
       if folder do
-        [~s('#{escape_query(folder)}' in parents) | parts]
+        case validate_drive_id(folder) do
+          :ok -> [~s('#{folder}' in parents) | parts]
+          {:error, _} = err -> throw(err)
+        end
       else
         parts
       end
@@ -167,7 +175,25 @@ defmodule Assistant.Skills.Files.Search do
   defp parse_limit(limit) when is_integer(limit), do: min(max(limit, 1), @max_limit)
   defp parse_limit(_), do: @default_limit
 
+  defp validate_drive_id(id) do
+    if Regex.match?(@valid_drive_id, id) do
+      :ok
+    else
+      {:error, "Invalid folder ID '#{String.slice(id, 0, 20)}'. Folder IDs contain only alphanumeric characters, hyphens, and underscores."}
+    end
+  end
+
+  defp validate_query_text(query) do
+    if Regex.match?(@rejected_query_chars, query) do
+      {:error, "Search query cannot contain special characters: ( ) = < >"}
+    else
+      :ok
+    end
+  end
+
   defp escape_query(str) do
-    String.replace(str, "'", "\\'")
+    str
+    |> String.replace("\\", "\\\\")
+    |> String.replace("'", "\\'")
   end
 end

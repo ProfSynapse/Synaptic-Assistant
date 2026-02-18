@@ -32,6 +32,7 @@ defmodule Assistant.Integrations.Google.Chat do
 
   @base_url "https://chat.googleapis.com/v1"
   @max_message_bytes 32_000
+  @valid_space_name ~r/^spaces\/[A-Za-z0-9_-]+$/
 
   @doc """
   Send a text message to a Google Chat space.
@@ -51,6 +52,18 @@ defmodule Assistant.Integrations.Google.Chat do
   @spec send_message(String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def send_message(space_name, text, opts \\ []) do
+    unless Regex.match?(@valid_space_name, space_name) do
+      Logger.warning("Rejected invalid space_name format",
+        space_name: inspect(String.slice(space_name, 0, 40))
+      )
+
+      {:error, :invalid_space_name}
+    else
+      do_send_message(space_name, text, opts)
+    end
+  end
+
+  defp do_send_message(space_name, text, opts) do
     thread_name = Keyword.get(opts, :thread_name)
     truncated_text = truncate_message(text)
 
