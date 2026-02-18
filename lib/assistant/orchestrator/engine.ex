@@ -46,6 +46,7 @@ defmodule Assistant.Orchestrator.Engine do
 
   use GenServer
 
+  alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.Orchestrator.{AgentScheduler, Context, LoopRunner, Nudger, SubAgent}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults}
   alias Assistant.Resilience.CircuitBreaker
@@ -176,6 +177,13 @@ defmodule Assistant.Orchestrator.Engine do
         # Append assistant response to history
         assistant_msg = %{role: "assistant", content: response_text}
         final_state = Map.update!(final_state, :messages, &(&1 ++ [assistant_msg]))
+
+        # Broadcast token usage for ContextMonitor
+        broadcast_token_usage(final_state)
+
+        # Broadcast turn completion for TurnClassifier
+        broadcast_turn_completed(final_state, message, response_text)
+
         {:reply, {:ok, response_text}, final_state}
 
       {:error, reason, final_state} ->
@@ -504,6 +512,42 @@ defmodule Assistant.Orchestrator.Engine do
   end
 
   defp accumulate_usage(state, _usage), do: state
+
+  # --- PubSub Broadcasts ---
+
+  defp broadcast_token_usage(state) do
+    case state.last_prompt_tokens do
+      nil ->
+        :ok
+
+      prompt_tokens when is_integer(prompt_tokens) and prompt_tokens > 0 ->
+        model = ConfigLoader.model_for(:orchestrator)
+        max_tokens = (model && model.max_context_tokens) || 200_000
+        utilization = prompt_tokens / max_tokens
+
+        Phoenix.PubSub.broadcast(
+          Assistant.PubSub,
+          "memory:token_usage",
+          {:token_usage_updated, state.conversation_id, state.user_id, utilization}
+        )
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp broadcast_turn_completed(state, user_message, assistant_response) do
+    Phoenix.PubSub.broadcast(
+      Assistant.PubSub,
+      "memory:turn_completed",
+      {:turn_completed, %{
+        conversation_id: state.conversation_id,
+        user_id: state.user_id,
+        user_message: user_message,
+        assistant_response: assistant_response
+      }}
+    )
+  end
 
   defp via_tuple(conversation_id) do
     {:via, Registry, {Assistant.Orchestrator.EngineRegistry, conversation_id}}

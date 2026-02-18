@@ -36,6 +36,10 @@ defmodule Assistant.Application do
       {Registry, keys: :unique, name: Assistant.SubAgent.Registry},
       {DynamicSupervisor, name: Assistant.Orchestrator.ConversationSupervisor, strategy: :one_for_one},
 
+      # Memory background triggers (subscribe to PubSub events from Engine)
+      Assistant.Memory.ContextMonitor,
+      Assistant.Memory.TurnClassifier,
+
       # Web endpoint (last — depends on everything above)
       AssistantWeb.Endpoint
     ]
