@@ -102,15 +102,17 @@ defmodule Assistant.Memory.ContextBuilder do
   defp fetch_relevant_memories(_user_id, nil, _limit), do: []
 
   defp fetch_relevant_memories(user_id, query, limit) do
-    {:ok, entries} = Search.search_memories(user_id, query: query, limit: limit)
-    entries
-  rescue
-    error ->
-      Logger.debug("ContextBuilder: memory search failed",
-        reason: Exception.message(error)
-      )
+    case Search.search_memories(user_id, query: query, limit: limit) do
+      {:ok, entries} ->
+        entries
 
-      []
+      {:error, reason} ->
+        Logger.debug("ContextBuilder: memory search failed",
+          reason: inspect(reason)
+        )
+
+        []
+    end
   end
 
   defp format_memory_context(nil, []), do: ""
