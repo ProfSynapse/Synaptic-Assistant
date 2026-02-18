@@ -75,7 +75,10 @@ defmodule Assistant.Behaviours.LLMClient do
           required(:completion_tokens) => non_neg_integer(),
           required(:total_tokens) => non_neg_integer(),
           optional(:cached_tokens) => non_neg_integer(),
-          optional(:cache_write_tokens) => non_neg_integer()
+          optional(:cache_write_tokens) => non_neg_integer(),
+          optional(:audio_tokens) => non_neg_integer(),
+          optional(:reasoning_tokens) => non_neg_integer(),
+          optional(:cost) => float() | nil
         }
 
   @typedoc "Parsed completion response."

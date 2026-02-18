@@ -13,6 +13,7 @@
 #   - lib/assistant/orchestrator/tools/get_agent_results.ex (tool definition)
 #   - lib/assistant/skills/registry.ex (domain listing)
 #   - lib/assistant/config/loader.ex (model roster, limits config)
+#   - lib/assistant/config/prompt_loader.ex (orchestrator system prompt template)
 
 defmodule Assistant.Orchestrator.Context do
   @moduledoc """
@@ -35,6 +36,7 @@ defmodule Assistant.Orchestrator.Context do
   """
 
   alias Assistant.Config.Loader, as: ConfigLoader
+  alias Assistant.Config.PromptLoader
   alias Assistant.Integrations.OpenRouter
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill}
   alias Assistant.Skills.Registry
@@ -102,7 +104,7 @@ defmodule Assistant.Orchestrator.Context do
     }
 
     # Context block + conversation history in a single user message sequence
-    context_and_messages = build_message_sequence(context_block, messages, role)
+    context_and_messages = build_message_sequence(context_block, messages, role, loop_state)
 
     %{
       system: system_message,
@@ -120,31 +122,31 @@ defmodule Assistant.Orchestrator.Context do
   def build_system_prompt(loop_state) do
     domains = list_domains()
 
-    """
-    You are an AI assistant orchestrator. You coordinate sub-agents to fulfill user requests.
+    assigns = %{
+      skill_domains: Enum.join(domains, ", "),
+      user_id: loop_state[:user_id] || "unknown",
+      channel: loop_state[:channel] || "unknown",
+      current_date: Date.utc_today() |> Date.to_iso8601()
+    }
 
-    Your workflow:
-    1. Understand the user's request
-    2. Call get_skill to discover relevant capabilities
-    3. Decompose the request into sub-tasks
-    4. Dispatch sub-agents via dispatch_agent (one per sub-task)
-    5. Collect results via get_agent_results
-    6. Synthesize a clear response for the user once done
+    case PromptLoader.render(:orchestrator, assigns) do
+      {:ok, rendered} ->
+        rendered
 
-    Rules:
-    - You NEVER execute skills directly — always delegate to sub-agents
-    - For simple single-skill requests, dispatch one agent (don't over-decompose)
-    - For multi-step requests, identify dependencies and parallelize where possible
-    - Agent missions should be specific and self-contained
-    - Only give agents the skills they need (principle of least privilege)
-    - If an agent fails, decide: retry with adjusted mission, skip, or report to user
+      {:error, _reason} ->
+        # Fallback: hardcoded prompt if YAML not loaded
+        Logger.warning("PromptLoader fallback for :orchestrator — using hardcoded prompt")
 
-    Available skill domains: #{Enum.join(domains, ", ")}
+        """
+        You are an AI assistant orchestrator. You coordinate sub-agents to fulfill user requests.
 
-    User: #{loop_state[:user_id] || "unknown"}
-    Channel: #{loop_state[:channel] || "unknown"}
-    Date: #{Date.utc_today() |> Date.to_iso8601()}
-    """
+        Available skill domains: #{assigns.skill_domains}
+
+        User: #{assigns.user_id}
+        Channel: #{assigns.channel}
+        Date: #{assigns.current_date}
+        """
+    end
   end
 
   # --- Private: System Prompt Components ---
@@ -171,7 +173,7 @@ defmodule Assistant.Orchestrator.Context do
 
   # --- Private: Message Sequence ---
 
-  defp build_message_sequence(context_block, messages, role) do
+  defp build_message_sequence(context_block, messages, role, loop_state) do
     # If we have a context block, prepend it as a cached user message
     context_messages =
       if context_block do
@@ -194,7 +196,10 @@ defmodule Assistant.Orchestrator.Context do
 
     # Compute available token budget from model context window and limits config
     token_budget = compute_history_token_budget(role)
-    trimmed = trim_messages(messages, token_budget)
+    last_prompt_tokens = loop_state[:last_prompt_tokens]
+    last_message_count = loop_state[:last_message_count] || 0
+
+    trimmed = trim_messages(messages, token_budget, last_prompt_tokens, last_message_count)
 
     context_messages ++ trimmed
   end
@@ -213,9 +218,34 @@ defmodule Assistant.Orchestrator.Context do
     max(available, 1_000)
   end
 
-  defp trim_messages(messages, token_budget) do
-    # Trim oldest messages first until total estimated tokens fit within budget.
-    # Approximation: ~4 characters per token (good enough for trimming heuristic).
+  defp trim_messages(messages, token_budget, last_prompt_tokens, last_message_count) do
+    # Two strategies based on whether we have actual token usage from the API:
+    #
+    # 1. Usage-based (preferred): last_prompt_tokens from OpenRouter tells us
+    #    exactly how many tokens the prior request consumed (system + tools +
+    #    context block + all messages). We use that as baseline and only estimate
+    #    deltas for messages added since.
+    #
+    # 2. Pure estimation (fallback): First message in conversation has no prior
+    #    usage data. Estimate all messages at ~4 chars/token.
+    case last_prompt_tokens do
+      nil ->
+        # Fallback: no prior usage data, estimate everything
+        trim_messages_by_estimation(messages, token_budget)
+
+      baseline when is_integer(baseline) and baseline > 0 ->
+        # Usage-based: baseline covers messages[0..last_message_count-1].
+        # Estimate only new messages added since the last LLM call.
+        trim_messages_by_usage(messages, token_budget, baseline, last_message_count)
+
+      _ ->
+        # Safety fallback for unexpected values (0, negative, non-integer)
+        trim_messages_by_estimation(messages, token_budget)
+    end
+  end
+
+  # Pure estimation fallback: walk newest-first, accumulate estimated tokens.
+  defp trim_messages_by_estimation(messages, token_budget) do
     messages
     |> Enum.reverse()
     |> Enum.reduce_while({[], 0}, fn msg, {kept, total_tokens} ->
@@ -229,6 +259,53 @@ defmodule Assistant.Orchestrator.Context do
       end
     end)
     |> elem(0)
+  end
+
+  # Usage-based trimming: use actual API prompt_tokens as baseline for known
+  # messages, then estimate deltas for new messages only.
+  defp trim_messages_by_usage(messages, token_budget, baseline, last_message_count) do
+    msg_count = length(messages)
+
+    # Split into known (covered by baseline) and new (needing estimation)
+    {known_msgs, new_msgs} =
+      if last_message_count >= msg_count do
+        # All messages were in the prior request (shouldn't happen, but safe)
+        {messages, []}
+      else
+        Enum.split(messages, last_message_count)
+      end
+
+    # Estimate tokens for new messages only
+    new_tokens = Enum.reduce(new_msgs, 0, &(estimate_message_tokens(&1) + &2))
+    total_estimated = baseline + new_tokens
+
+    if total_estimated <= token_budget do
+      # Everything fits — no trimming needed
+      messages
+    else
+      # Need to trim. Remove oldest known messages first (preserve new messages
+      # since they contain the most recent context — tool results, dispatches).
+      overshoot = total_estimated - token_budget
+      {_trimmed, kept_known} = trim_oldest(known_msgs, overshoot)
+      kept_known ++ new_msgs
+    end
+  end
+
+  # Remove oldest messages until we've freed at least `tokens_to_free` tokens.
+  # Returns {freed_tokens, remaining_messages}.
+  defp trim_oldest(messages, tokens_to_free) do
+    do_trim_oldest(messages, tokens_to_free, 0)
+  end
+
+  defp do_trim_oldest([], _tokens_to_free, freed), do: {freed, []}
+
+  defp do_trim_oldest(remaining, tokens_to_free, freed) when freed >= tokens_to_free do
+    {freed, remaining}
+  end
+
+  defp do_trim_oldest([msg | rest], tokens_to_free, freed) do
+    msg_tokens = estimate_message_tokens(msg)
+    do_trim_oldest(rest, tokens_to_free, freed + msg_tokens)
   end
 
   defp estimate_message_tokens(message) do

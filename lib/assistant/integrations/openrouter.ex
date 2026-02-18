@@ -333,26 +333,24 @@ defmodule Assistant.Integrations.OpenRouter do
   defp parse_tool_calls(_), do: []
 
   defp parse_usage(%{"usage" => usage}) when is_map(usage) do
-    details = usage["prompt_tokens_details"] || %{}
+    prompt_details = usage["prompt_tokens_details"] || %{}
+    completion_details = usage["completion_tokens_details"] || %{}
 
     %{
       prompt_tokens: usage["prompt_tokens"] || 0,
       completion_tokens: usage["completion_tokens"] || 0,
       total_tokens: usage["total_tokens"] || 0,
-      cached_tokens: details["cached_tokens"] || 0,
-      cache_write_tokens: details["cache_write_tokens"] || 0
+      # prompt_tokens already includes cached_tokens — cached_tokens is a
+      # subset, not additive. Useful for cache hit observability.
+      cached_tokens: prompt_details["cached_tokens"] || 0,
+      cache_write_tokens: prompt_details["cache_write_tokens"] || 0,
+      audio_tokens: prompt_details["audio_tokens"] || 0,
+      reasoning_tokens: completion_details["reasoning_tokens"] || 0,
+      cost: usage["cost"]
     }
   end
 
-  defp parse_usage(_) do
-    %{
-      prompt_tokens: 0,
-      completion_tokens: 0,
-      total_tokens: 0,
-      cached_tokens: 0,
-      cache_write_tokens: 0
-    }
-  end
+  defp parse_usage(_), do: empty_usage()
 
   # --- SSE Stream Handling ---
 
@@ -473,7 +471,10 @@ defmodule Assistant.Integrations.OpenRouter do
       completion_tokens: 0,
       total_tokens: 0,
       cached_tokens: 0,
-      cache_write_tokens: 0
+      cache_write_tokens: 0,
+      audio_tokens: 0,
+      reasoning_tokens: 0,
+      cost: nil
     }
   end
 
