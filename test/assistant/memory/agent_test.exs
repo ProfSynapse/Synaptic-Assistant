@@ -47,6 +47,9 @@ defmodule Assistant.Memory.AgentTest do
       start_unlinked(Assistant.Config.PromptLoader, dir: tmp)
     end
 
+    # Config.Loader (ETS-backed GenServer for model/limits config)
+    ensure_config_loader_started()
+
     user_id = "mem-agent-test-#{System.unique_integer([:positive])}"
 
     on_exit(fn ->
@@ -225,6 +228,54 @@ defmodule Assistant.Memory.AgentTest do
 
       {:error, :not_found} ->
         :ok
+    end
+  end
+
+  defp ensure_config_loader_started do
+    if :ets.whereis(:assistant_config) != :undefined do
+      :ok
+    else
+      tmp_dir = System.tmp_dir!()
+      config_path = Path.join(tmp_dir, "test_config_agent_#{System.unique_integer([:positive])}.yaml")
+
+      yaml = """
+      defaults:
+        orchestrator: primary
+        compaction: fast
+
+      models:
+        - id: "test/fast"
+          tier: fast
+          description: "test"
+          use_cases: [orchestrator, compaction]
+          supports_tools: true
+          max_context_tokens: 100000
+          cost_tier: low
+
+      http:
+        max_retries: 1
+        base_backoff_ms: 100
+        max_backoff_ms: 1000
+        request_timeout_ms: 5000
+        streaming_timeout_ms: 10000
+
+      limits:
+        context_utilization_target: 0.85
+        compaction_trigger_threshold: 0.75
+        response_reserve_tokens: 1024
+        orchestrator_turn_limit: 10
+        sub_agent_turn_limit: 5
+        cache_ttl_seconds: 60
+        orchestrator_cache_breakpoints: 2
+        sub_agent_cache_breakpoints: 1
+      """
+
+      File.write!(config_path, yaml)
+
+      case Assistant.Config.Loader.start_link(path: config_path) do
+        {:ok, _} -> :ok
+        {:error, {:already_started, _}} -> :ok
+      end
     end
   end
 end
