@@ -1,6 +1,7 @@
 ---
 name: "memory.extract_entities"
 description: "Extract named entities and relations from text, upserting into the knowledge graph with temporal logic."
+handler: "Assistant.Skills.Memory.ExtractEntities"
 tags:
   - memory
   - entities

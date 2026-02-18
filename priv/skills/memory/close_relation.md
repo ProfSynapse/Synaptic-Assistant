@@ -1,6 +1,7 @@
 ---
 name: "memory.close_relation"
 description: "Close an existing entity relation (set valid_to=now) and optionally open a replacement."
+handler: "Assistant.Skills.Memory.CloseRelation"
 tags:
   - memory
   - entities
