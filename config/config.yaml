@@ -165,6 +165,24 @@ http:
   streaming_timeout_ms: 300000  # Timeout for streaming responses (5 min)
 
 # ---------------------------------------------------------------------------
+# Limits — orchestrator and sub-agent operational boundaries
+# ---------------------------------------------------------------------------
+#
+# Token budgets, turn limits, and cache settings for context management.
+# context_utilization_target * max_context_tokens - response_reserve_tokens
+# = available token budget for conversation history.
+
+limits:
+  context_utilization_target: 0.85    # Use up to 85% of model's context window
+  compaction_trigger_threshold: 0.75  # Trigger compaction at 75% utilization
+  response_reserve_tokens: 4096      # Reserve for model's response
+  orchestrator_turn_limit: 100       # Max turns per orchestrator conversation
+  sub_agent_turn_limit: 30           # Max turns per sub-agent dispatch
+  cache_ttl_seconds: 3600            # Default cache TTL (1 hour)
+  orchestrator_cache_breakpoints: 4  # Max cache breakpoints for orchestrator
+  sub_agent_cache_breakpoints: 1     # Max cache breakpoints for sub-agents
+
+# ---------------------------------------------------------------------------
 # Voice Configuration — ElevenLabs TTS settings
 # ---------------------------------------------------------------------------
 #

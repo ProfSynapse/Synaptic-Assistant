@@ -1,7 +1,8 @@
 # lib/assistant/application.ex — OTP Application entry point.
 #
 # Defines the supervision tree for the Skills-First AI Assistant.
-# Children start in order: infrastructure first, then services, then web endpoint.
+# Children start in order: infrastructure first, then skill system, then
+# orchestrator infrastructure, then web endpoint.
 
 defmodule Assistant.Application do
   @moduledoc false
@@ -11,13 +12,25 @@ defmodule Assistant.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      # Infrastructure (start first)
+      # Config loader (must be first — other children depend on ETS config)
+      Assistant.Config.Loader,
+
+      # Infrastructure
       Assistant.Repo,
       {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Assistant.PubSub},
 
       # Job processing
       {Oban, Application.fetch_env!(:assistant, Oban)},
+
+      # Skill system (Task.Supervisor must start before Registry and Executor)
+      {Task.Supervisor, name: Assistant.Skills.TaskSupervisor},
+      Assistant.Skills.Registry,
+      Assistant.Skills.Watcher,
+
+      # Orchestrator (process registry + DynamicSupervisor for per-conversation engines)
+      {Registry, keys: :unique, name: Assistant.Orchestrator.EngineRegistry},
+      {DynamicSupervisor, name: Assistant.Orchestrator.ConversationSupervisor, strategy: :one_for_one},
 
       # Web endpoint (last — depends on everything above)
       AssistantWeb.Endpoint

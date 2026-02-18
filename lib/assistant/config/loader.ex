@@ -1,7 +1,7 @@
 # lib/assistant/config/loader.ex — Configuration loader for config.yaml.
 #
 # ETS-backed GenServer that loads, validates, caches, and hot-reloads the
-# model roster, voice configuration, and HTTP client settings from
+# model roster, voice configuration, HTTP client settings, and limits from
 # config/config.yaml. Public API functions read directly from ETS for
 # lock-free concurrent access.
 #
@@ -12,7 +12,7 @@
 
 defmodule Assistant.Config.Loader do
   @moduledoc """
-  Loads and serves model roster, voice, and HTTP configuration from config/config.yaml.
+  Loads and serves model roster, voice, HTTP, and limits configuration from config/config.yaml.
 
   Backed by ETS for fast concurrent reads. The GenServer coordinates reloads
   triggered by `Assistant.Config.Watcher` on file changes.
@@ -20,7 +20,8 @@ defmodule Assistant.Config.Loader do
   ## Public API
 
   All read functions (`all_models/0`, `model_for/2`, `voice_config/0`,
-  `http_config/0`) read directly from ETS — no GenServer call overhead.
+  `http_config/0`, `limits_config/0`) read directly from ETS — no GenServer
+  call overhead.
 
   ## Boot Behaviour
 
@@ -134,6 +135,39 @@ defmodule Assistant.Config.Loader do
     end
   end
 
+  @doc """
+  Returns the limits configuration as a map.
+
+  Values come from the `limits:` section of `config/config.yaml`:
+
+    - `:context_utilization_target` — Fraction of context window to use (0.0–1.0)
+    - `:compaction_trigger_threshold` — Trigger compaction at this utilization
+    - `:response_reserve_tokens` — Tokens reserved for model response
+    - `:orchestrator_turn_limit` — Max turns per orchestrator conversation
+    - `:sub_agent_turn_limit` — Max turns per sub-agent dispatch
+    - `:cache_ttl_seconds` — Default cache TTL
+    - `:orchestrator_cache_breakpoints` — Max cache breakpoints for orchestrator
+    - `:sub_agent_cache_breakpoints` — Max cache breakpoints for sub-agents
+
+  Raises if config has not been loaded (GenServer not started).
+  """
+  @spec limits_config() :: %{
+          context_utilization_target: float(),
+          compaction_trigger_threshold: float(),
+          response_reserve_tokens: pos_integer(),
+          orchestrator_turn_limit: pos_integer(),
+          sub_agent_turn_limit: pos_integer(),
+          cache_ttl_seconds: pos_integer(),
+          orchestrator_cache_breakpoints: pos_integer(),
+          sub_agent_cache_breakpoints: pos_integer()
+        }
+  def limits_config do
+    case :ets.lookup(@ets_table, :limits) do
+      [{:limits, config}] -> config
+      [] -> raise "Config not loaded — Assistant.Config.Loader not started"
+    end
+  end
+
   # --- Reload API (goes through GenServer for coordination) ---
 
   @doc """
@@ -192,6 +226,7 @@ defmodule Assistant.Config.Loader do
         {:defaults, config.defaults},
         {:voice, config.voice},
         {:http, config.http},
+        {:limits, config.limits},
         {:loaded_at, DateTime.utc_now()}
       ])
 
@@ -225,8 +260,9 @@ defmodule Assistant.Config.Loader do
     with {:ok, defaults} <- parse_defaults(parsed["defaults"]),
          {:ok, models} <- parse_models(parsed["models"]),
          {:ok, voice} <- parse_voice(parsed["voice"]),
-         {:ok, http} <- parse_http(parsed["http"]) do
-      {:ok, %{defaults: defaults, models: models, voice: voice, http: http}}
+         {:ok, http} <- parse_http(parsed["http"]),
+         {:ok, limits} <- parse_limits(parsed["limits"]) do
+      {:ok, %{defaults: defaults, models: models, voice: voice, http: http, limits: limits}}
     end
   end
 
@@ -300,11 +336,49 @@ defmodule Assistant.Config.Loader do
     end
   end
 
+  defp parse_limits(nil), do: {:error, :missing_limits_section}
+
+  defp parse_limits(limits) when is_map(limits) do
+    with {:ok, context_utilization_target} <- require_float_in_range(limits, "context_utilization_target", 0.0, 1.0),
+         {:ok, compaction_trigger_threshold} <- require_float_in_range(limits, "compaction_trigger_threshold", 0.0, 1.0),
+         {:ok, response_reserve_tokens} <- require_pos_integer(limits, "response_reserve_tokens"),
+         {:ok, orchestrator_turn_limit} <- require_pos_integer(limits, "orchestrator_turn_limit"),
+         {:ok, sub_agent_turn_limit} <- require_pos_integer(limits, "sub_agent_turn_limit"),
+         {:ok, cache_ttl_seconds} <- require_pos_integer(limits, "cache_ttl_seconds"),
+         {:ok, orchestrator_cache_breakpoints} <- require_pos_integer(limits, "orchestrator_cache_breakpoints"),
+         {:ok, sub_agent_cache_breakpoints} <- require_pos_integer(limits, "sub_agent_cache_breakpoints") do
+      {:ok,
+       %{
+         context_utilization_target: context_utilization_target,
+         compaction_trigger_threshold: compaction_trigger_threshold,
+         response_reserve_tokens: response_reserve_tokens,
+         orchestrator_turn_limit: orchestrator_turn_limit,
+         sub_agent_turn_limit: sub_agent_turn_limit,
+         cache_ttl_seconds: cache_ttl_seconds,
+         orchestrator_cache_breakpoints: orchestrator_cache_breakpoints,
+         sub_agent_cache_breakpoints: sub_agent_cache_breakpoints
+       }}
+    end
+  end
+
   defp require_pos_integer(map, key) do
     case map[key] do
       value when is_integer(value) and value > 0 -> {:ok, value}
-      nil -> {:error, {:missing_http_field, key}}
-      other -> {:error, {:invalid_http_field, key, other}}
+      nil -> {:error, {:missing_field, key}}
+      other -> {:error, {:invalid_field, key, other}}
+    end
+  end
+
+  defp require_float_in_range(map, key, min, max) do
+    case map[key] do
+      value when is_number(value) and value >= min and value <= max ->
+        {:ok, value / 1}
+
+      nil ->
+        {:error, {:missing_field, key}}
+
+      other ->
+        {:error, {:invalid_field, key, other}}
     end
   end
 end
