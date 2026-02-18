@@ -1,6 +1,7 @@
 ---
 name: "memory.compact_conversation"
 description: "Summarize a message range into memory entries and extract entities for long-term storage."
+handler: "Assistant.Skills.Memory.CompactConversation"
 tags:
   - memory
   - compaction

@@ -40,6 +40,7 @@ defmodule Assistant.Orchestrator.Context do
   alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.Config.PromptLoader
   alias Assistant.Integrations.OpenRouter
+  alias Assistant.Memory.ContextBuilder
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
   alias Assistant.Skills.Registry
 
@@ -162,9 +163,8 @@ defmodule Assistant.Orchestrator.Context do
 
   # --- Private: Context Block ---
 
-  defp build_context_block(_loop_state, opts) do
-    memory = Keyword.get(opts, :memory_context, "")
-    task_summary = Keyword.get(opts, :task_summary, "")
+  defp build_context_block(loop_state, opts) do
+    {memory, task_summary} = resolve_context_data(loop_state, opts)
 
     parts =
       [memory, task_summary]
@@ -172,6 +172,38 @@ defmodule Assistant.Orchestrator.Context do
       |> Enum.join("\n\n")
 
     if parts == "", do: nil, else: parts
+  end
+
+  # When callers pre-build context (e.g., sub-agents with their own context
+  # strategy), use their values directly. Otherwise, auto-fetch via ContextBuilder.
+  defp resolve_context_data(loop_state, opts) do
+    memory = Keyword.get(opts, :memory_context)
+    task_summary = Keyword.get(opts, :task_summary)
+
+    if memory || task_summary do
+      # At least one value is pre-provided; use them as-is (nil becomes "")
+      {memory || "", task_summary || ""}
+    else
+      # Neither provided — auto-build from ContextBuilder
+      auto_build_context(loop_state, opts)
+    end
+  end
+
+  defp auto_build_context(loop_state, opts) do
+    conversation_id = loop_state[:conversation_id]
+    user_id = loop_state[:user_id]
+
+    if user_id do
+      case ContextBuilder.build_context(conversation_id, user_id, opts) do
+        {:ok, %{memory_context: memory, task_summary: task_summary}} ->
+          {memory, task_summary}
+
+        _error ->
+          {"", ""}
+      end
+    else
+      {"", ""}
+    end
   end
 
   # --- Private: Message Sequence ---

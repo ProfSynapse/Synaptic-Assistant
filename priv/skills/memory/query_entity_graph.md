@@ -1,6 +1,7 @@
 ---
 name: "memory.query_entity_graph"
 description: "Fetch all active entity relations for a given entity in the knowledge graph."
+handler: "Assistant.Skills.Memory.QueryEntityGraph"
 tags:
   - memory
   - entities

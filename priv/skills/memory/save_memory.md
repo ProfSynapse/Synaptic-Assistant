@@ -1,6 +1,7 @@
 ---
 name: "memory.save_memory"
 description: "Write a new memory entry with content, topics, and provenance metadata."
+handler: "Assistant.Skills.Memory.Save"
 tags:
   - memory
   - write

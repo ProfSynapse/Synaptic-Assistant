@@ -1,6 +1,7 @@
 ---
 name: "memory.search_memories"
 description: "Semantic search across memory entries for the current user."
+handler: "Assistant.Skills.Memory.Search"
 tags:
   - memory
   - search
