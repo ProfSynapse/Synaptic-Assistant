@@ -22,7 +22,7 @@ defmodule AssistantWeb.Router do
     pipe_through :api
 
     post "/telegram", WebhookController, :telegram
-    post "/google-chat", WebhookController, :google_chat
+    post "/google-chat", GoogleChatController, :event
   end
 
   # Dev routes can be added here when needed (e.g., debug endpoints)
