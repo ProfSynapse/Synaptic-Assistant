@@ -7,8 +7,10 @@
 # Related files:
 #   - lib/assistant/application.ex (starts Goth in the supervision tree)
 #   - config/runtime.exs (Google credentials configuration)
-#   - lib/assistant/integrations/google/drive.ex (consumer — Wave 3)
-#   - lib/assistant/integrations/google/chat.ex (consumer — Wave 2)
+#   - lib/assistant/integrations/google/drive.ex (consumer — Drive API)
+#   - lib/assistant/integrations/google/chat.ex (consumer — Chat API)
+#   - lib/assistant/integrations/google/gmail.ex (consumer — Gmail API)
+#   - lib/assistant/integrations/google/calendar.ex (consumer — Calendar API)
 
 defmodule Assistant.Integrations.Google.Auth do
   @moduledoc """
