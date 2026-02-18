@@ -83,6 +83,32 @@ defmodule Assistant.Integrations.Google.Gmail do
     end
   end
 
+  @doc """
+  Create a draft email. Builds RFC 2822, base64url-encodes, saves as draft via Gmail API.
+  Rejects newlines in header fields to prevent header injection.
+  Opts: `:from`, `:cc`.
+  """
+  @spec create_draft(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def create_draft(to, subject, body, opts \\ []) do
+    cc = Keyword.get(opts, :cc)
+
+    with :ok <- validate_headers(to, subject, cc),
+         {:ok, conn} <- get_connection() do
+      raw = build_rfc2822(to, subject, body, opts) |> base64url_encode()
+      draft_body = %Model.Draft{message: %Model.Message{raw: raw}}
+
+      case Users.gmail_users_drafts_create(conn, "me", body: draft_body) do
+        {:ok, %Model.Draft{} = draft} ->
+          Logger.info("Gmail draft created", draft_id: draft.id)
+          {:ok, %{id: draft.id}}
+
+        {:error, reason} ->
+          Logger.warning("Gmail create_draft failed", error: inspect(reason))
+          {:error, reason}
+      end
+    end
+  end
+
   @doc "Search messages and return full content. Calls list then get for each. Opts: `:limit`."
   @spec search_messages(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def search_messages(query, opts \\ []) do
