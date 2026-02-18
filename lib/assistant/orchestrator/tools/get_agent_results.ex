@@ -42,6 +42,7 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
   @max_wait_ms 60_000
   @default_tail_lines 10
   @terminal_statuses [:completed, :failed, :timeout]
+  @actionable_statuses [:completed, :failed, :timeout, :awaiting_orchestrator]
 
   @doc """
   Returns the OpenAI-compatible function tool definition for get_agent_results.
@@ -193,7 +194,8 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
         done: all_done,
         total: length(agents_data),
         completed: Enum.count(agents_data, &(&1.status == "completed")),
-        failed: Enum.count(agents_data, &(&1.status in ["failed", "timeout"]))
+        failed: Enum.count(agents_data, &(&1.status in ["failed", "timeout"])),
+        awaiting: Enum.count(agents_data, &(&1.status == "awaiting_orchestrator"))
       }
     }
   end
@@ -201,15 +203,27 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
   defp format_single_agent(id, agent_state, include_tail?, tail_lines) do
     status = to_string(agent_state[:status] || :pending)
     is_terminal = agent_state[:status] in @terminal_statuses
+    is_actionable = agent_state[:status] in @actionable_statuses
 
     base = %{
       agent_id: id,
       status: status,
       is_terminal: is_terminal,
+      is_actionable: is_actionable,
       result: agent_state[:result],
       tool_calls_used: agent_state[:tool_calls_used] || 0,
       duration_ms: agent_state[:duration_ms]
     }
+
+    # Add awaiting_orchestrator details if present
+    base =
+      if agent_state[:status] == :awaiting_orchestrator do
+        base
+        |> Map.put(:awaiting_reason, agent_state[:reason])
+        |> Map.put(:partial_history, agent_state[:partial_history])
+      else
+        base
+      end
 
     if include_tail? and is_list(agent_state[:transcript_tail]) do
       tail = Enum.take(agent_state[:transcript_tail], -tail_lines)
@@ -235,6 +249,13 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
             do: ", #{agent.tool_calls_used} tool calls",
             else: ""
 
+        awaiting_section =
+          if agent.status == "awaiting_orchestrator" and agent[:awaiting_reason] do
+            "\nNeeds help: #{agent.awaiting_reason}"
+          else
+            ""
+          end
+
         tail_section =
           case agent[:transcript_tail] do
             lines when is_list(lines) and lines != [] ->
@@ -244,15 +265,24 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
               ""
           end
 
-        "#{status_icon} #{agent.agent_id} [#{agent.status}#{duration}#{calls}]\n#{result_text}#{tail_section}"
+        "#{status_icon} #{agent.agent_id} [#{agent.status}#{duration}#{calls}]\n#{result_text}#{awaiting_section}#{tail_section}"
       end)
 
     all_done = Enum.all?(agents_data, & &1.is_terminal)
+    any_awaiting = Enum.any?(agents_data, &(&1.status == "awaiting_orchestrator"))
 
     done_line =
-      if all_done,
-        do: "\n\nAll agents have completed.",
-        else: "\n\nSome agents are still running. Call get_agent_results again to check progress."
+      cond do
+        all_done ->
+          "\n\nAll agents have completed."
+
+        any_awaiting ->
+          "\n\nOne or more agents are awaiting orchestrator input. " <>
+            "Use send_agent_update to provide what they need, then call get_agent_results again."
+
+        true ->
+          "\n\nSome agents are still running. Call get_agent_results again to check progress."
+      end
 
     sections <> done_line
   end
@@ -262,6 +292,7 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
   defp status_icon("timeout"), do: "[TIMEOUT]"
   defp status_icon("running"), do: "[RUNNING]"
   defp status_icon("pending"), do: "[PENDING]"
+  defp status_icon("awaiting_orchestrator"), do: "[AWAITING]"
   defp status_icon(_), do: "[?]"
 
   # --- Helpers ---

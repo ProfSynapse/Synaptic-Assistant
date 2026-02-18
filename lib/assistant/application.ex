@@ -15,6 +15,9 @@ defmodule Assistant.Application do
       # Config loader (must be first — other children depend on ETS config)
       Assistant.Config.Loader,
 
+      # Prompt template loader (after Config.Loader — reads config/prompts/*.yaml)
+      Assistant.Config.PromptLoader,
+
       # Infrastructure
       Assistant.Repo,
       {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},
@@ -28,8 +31,9 @@ defmodule Assistant.Application do
       Assistant.Skills.Registry,
       Assistant.Skills.Watcher,
 
-      # Orchestrator (process registry + DynamicSupervisor for per-conversation engines)
+      # Orchestrator (process registries + DynamicSupervisor for per-conversation engines)
       {Registry, keys: :unique, name: Assistant.Orchestrator.EngineRegistry},
+      {Registry, keys: :unique, name: Assistant.SubAgent.Registry},
       {DynamicSupervisor, name: Assistant.Orchestrator.ConversationSupervisor, strategy: :one_for_one},
 
       # Web endpoint (last — depends on everything above)
