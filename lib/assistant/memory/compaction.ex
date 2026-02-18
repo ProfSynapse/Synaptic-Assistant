@@ -75,7 +75,11 @@ defmodule Assistant.Memory.Compaction do
          {:ok, system_prompt} <- render_system_prompt(token_budget),
          {:ok, user_prompt} <- build_user_prompt(conversation, messages),
          {:ok, summary_text} <- call_llm(model, system_prompt, user_prompt) do
-      Store.update_summary(conversation_id, summary_text, model.id)
+      last_message = List.last(messages)
+
+      Store.update_summary(conversation_id, summary_text, model.id,
+        last_compacted_message_id: last_message.id
+      )
     end
   end
 
@@ -85,32 +89,74 @@ defmodule Assistant.Memory.Compaction do
 
   # Fetches messages that haven't been summarized yet.
   # For first compaction (summary_version == 0): all messages.
-  # For incremental: messages inserted after the conversation's last update_at
-  # associated with the summary_version bump. We use offset-based approach:
-  # skip the number of messages already covered by the summary version, then
-  # take the next batch.
+  # For incremental with boundary marker: messages inserted after the last
+  # compacted message (precise boundary tracking).
+  # For incremental without marker (legacy): falls back to recency heuristic.
   defp fetch_new_messages(conversation, message_limit) do
     summary_version = conversation.summary_version || 0
 
     messages =
-      if summary_version == 0 do
-        # First compaction: all messages
-        Store.list_messages(conversation.id, limit: message_limit, order: :asc)
-      else
-        # Incremental: messages beyond what was already summarized.
-        # We use the simple heuristic of fetching the most recent messages.
-        # A more precise approach would track the last-compacted message ID,
-        # but summary_version + recent messages is sufficient for incremental fold.
-        Store.list_messages(conversation.id,
-          limit: message_limit,
-          order: :desc
-        )
-        |> Enum.reverse()
+      cond do
+        summary_version == 0 ->
+          # First compaction: all messages
+          Store.list_messages(conversation.id, limit: message_limit, order: :asc)
+
+        conversation.last_compacted_message_id != nil ->
+          # Precise boundary: fetch messages inserted after the last compacted one
+          fetch_messages_after(
+            conversation.id,
+            conversation.last_compacted_message_id,
+            message_limit
+          )
+
+        true ->
+          # Legacy fallback: no boundary marker, use recency heuristic
+          Store.list_messages(conversation.id,
+            limit: message_limit,
+            order: :desc
+          )
+          |> Enum.reverse()
       end
 
     case messages do
       [] -> {:error, :no_new_messages}
       msgs -> {:ok, msgs}
+    end
+  end
+
+  # Fetches messages inserted strictly after the given boundary message.
+  # Uses the boundary message's inserted_at timestamp to filter, since UUIDs
+  # are not sequentially ordered. Messages with the same timestamp as the
+  # boundary are excluded by also filtering out the boundary ID itself.
+  defp fetch_messages_after(conversation_id, boundary_message_id, limit) do
+    import Ecto.Query
+
+    boundary_query =
+      from m in Assistant.Schemas.Message,
+        where: m.id == ^boundary_message_id,
+        select: m.inserted_at
+
+    case Assistant.Repo.one(boundary_query) do
+      nil ->
+        # Boundary message was deleted; fall back to recency heuristic
+        Logger.warning("Compaction boundary message not found, falling back to recency",
+          conversation_id: conversation_id,
+          boundary_message_id: boundary_message_id
+        )
+
+        Store.list_messages(conversation_id, limit: limit, order: :desc)
+        |> Enum.reverse()
+
+      boundary_at ->
+        from(m in Assistant.Schemas.Message,
+          where:
+            m.conversation_id == ^conversation_id and
+              (m.inserted_at > ^boundary_at or
+                 (m.inserted_at == ^boundary_at and m.id != ^boundary_message_id)),
+          order_by: [asc: m.inserted_at],
+          limit: ^limit
+        )
+        |> Assistant.Repo.all()
     end
   end
 

@@ -24,6 +24,9 @@ defmodule Assistant.Schemas.Conversation do
     field :summary_version, :integer, default: 0
     field :summary_model, :string
 
+    # Compaction boundary tracking
+    field :last_compacted_message_id, :binary_id
+
     # Sub-agent hierarchy
     field :agent_type, :string, default: "orchestrator"
     belongs_to :parent_conversation, __MODULE__
@@ -45,6 +48,7 @@ defmodule Assistant.Schemas.Conversation do
     :summary,
     :summary_version,
     :summary_model,
+    :last_compacted_message_id,
     :agent_type,
     :parent_conversation_id
   ]

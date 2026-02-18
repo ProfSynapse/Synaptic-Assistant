@@ -247,6 +247,9 @@ defmodule Assistant.Memory.Store do
     * `conversation_id` - The conversation to update.
     * `summary_text` - The new summary content.
     * `model_name` - The model used to generate the summary.
+    * `opts` - Optional keyword list:
+      * `:last_compacted_message_id` - ID of the last message included in this
+        compaction batch, used as a boundary marker for the next incremental run.
 
   ## Returns
 
@@ -254,9 +257,24 @@ defmodule Assistant.Memory.Store do
     * `{:error, :not_found}` if conversation doesn't exist
     * `{:error, reason}` on other failures
   """
-  @spec update_summary(binary(), String.t(), String.t()) ::
+  @spec update_summary(binary(), String.t(), String.t(), keyword()) ::
           {:ok, Conversation.t()} | {:error, term()}
-  def update_summary(conversation_id, summary_text, model_name) do
+  def update_summary(conversation_id, summary_text, model_name, opts \\ []) do
+    last_compacted_id = Keyword.get(opts, :last_compacted_message_id)
+
+    set_fields = [
+      summary: summary_text,
+      summary_model: model_name,
+      updated_at: DateTime.utc_now()
+    ]
+
+    set_fields =
+      if last_compacted_id do
+        Keyword.put(set_fields, :last_compacted_message_id, last_compacted_id)
+      else
+        set_fields
+      end
+
     Ecto.Multi.new()
     |> Ecto.Multi.update_all(
       :update_summary,
@@ -264,11 +282,7 @@ defmodule Assistant.Memory.Store do
         where: c.id == ^conversation_id,
         select: c
       ),
-      set: [
-        summary: summary_text,
-        summary_model: model_name,
-        updated_at: DateTime.utc_now()
-      ],
+      set: set_fields,
       inc: [summary_version: 1]
     )
     |> Repo.transaction()
