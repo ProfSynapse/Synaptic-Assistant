@@ -14,7 +14,8 @@ defaults:
   sub_agent: balanced
   compaction: fast
   sentinel: fast
-  audio_transcription: fast
+  audio_transcription: fast     # STT — model that can process audio input
+  audio_output: primary         # TTS via model (e.g. gpt-audio) — alternative/complement to ElevenLabs
 
 # ---------------------------------------------------------------------------
 # Model Roster — curated list of OpenRouter models
@@ -25,7 +26,9 @@ defaults:
 #   tier            primary | balanced | fast | cheap
 #   description     Human-readable summary
 #   use_cases       List of roles this model is suitable for:
-#                     orchestrator, sub_agent, compaction, sentinel, audio_transcription
+#                     orchestrator, sub_agent, compaction, sentinel,
+#                     audio_transcription (can process audio/speech input — STT),
+#                     audio_output (can generate audio/speech output — TTS via model)
 #   supports_tools  Whether the model supports tool/function calling
 #   max_context_tokens  Maximum context window size
 #   cost_tier       low | medium | high (relative cost classification)
@@ -95,6 +98,56 @@ models:
     supports_tools: true
     max_context_tokens: 1047576
     cost_tier: low
+
+  # Audio-capable models — can transcribe speech input and/or generate speech output.
+  # These complement ElevenLabs TTS; audio_output models can be used as an alternative
+  # when native audio responses are preferred (e.g. lower latency, conversational voice).
+
+  - id: "google/gemini-3-flash-preview"
+    tier: balanced
+    description: "Gemini 3 Flash Preview — fast, large context, audio input, $0.50/$3 per M tokens"
+    use_cases:
+      - orchestrator
+      - sub_agent
+      - compaction
+      - audio_transcription
+    supports_tools: true
+    max_context_tokens: 1048576
+    cost_tier: low
+
+  - id: "google/gemini-3-pro-preview"
+    tier: primary
+    description: "Gemini 3 Pro Preview — top-tier reasoning, audio input/output, $2/$12 per M tokens"
+    use_cases:
+      - orchestrator
+      - sub_agent
+      - audio_transcription
+      - audio_output
+    supports_tools: true
+    max_context_tokens: 1048576
+    cost_tier: high
+
+  - id: "openai/gpt-audio"
+    tier: primary
+    description: "GPT Audio — native audio input and output, 128k context, $2.50/$10 per M tokens, $32 audio tokens; alternative to ElevenLabs TTS"
+    use_cases:
+      - sub_agent
+      - audio_transcription
+      - audio_output
+    supports_tools: true
+    max_context_tokens: 128000
+    cost_tier: high
+
+  - id: "openai/gpt-audio-mini"
+    tier: balanced
+    description: "GPT Audio Mini — native audio input/output, 128k context, $0.60/$2.40 per M tokens, $0.60 audio tokens; low-cost audio alternative"
+    use_cases:
+      - sub_agent
+      - audio_transcription
+      - audio_output
+    supports_tools: true
+    max_context_tokens: 128000
+    cost_tier: medium
 
 # ---------------------------------------------------------------------------
 # Voice Configuration — ElevenLabs TTS settings
