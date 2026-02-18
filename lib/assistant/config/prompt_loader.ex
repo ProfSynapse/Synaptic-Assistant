@@ -140,12 +140,14 @@ defmodule Assistant.Config.PromptLoader do
     * `{:ok, raw_template}` — The raw EEx template string
     * `{:error, :not_found}` — No prompt loaded with that name
   """
-  @spec get_raw(atom()) :: {:ok, String.t()} | {:error, :not_found}
+  @spec get_raw(atom()) :: {:ok, String.t()} | {:error, :not_found | :not_available}
   def get_raw(name) do
     case :ets.lookup(@ets_table, {name, :raw_system}) do
       [{_, raw}] -> {:ok, raw}
       [] -> {:error, :not_found}
     end
+  rescue
+    ArgumentError -> {:error, :not_available}
   end
 
   # --- Reload API (goes through GenServer for coordination) ---
@@ -260,6 +262,8 @@ defmodule Assistant.Config.PromptLoader do
       [{_, compiled}] -> {:ok, compiled}
       [] -> {:error, :not_found}
     end
+  rescue
+    ArgumentError -> {:error, :not_available}
   end
 
   defp render_template(compiled_template, assigns) do
