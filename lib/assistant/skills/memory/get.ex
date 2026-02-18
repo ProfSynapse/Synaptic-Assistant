@@ -22,7 +22,7 @@ defmodule Assistant.Skills.Memory.Get do
   alias Assistant.Skills.Result
 
   @impl true
-  def execute(flags, _context) do
+  def execute(flags, context) do
     entry_id = flags["id"] || flags["entry_id"]
 
     unless entry_id && entry_id != "" do
@@ -33,6 +33,13 @@ defmodule Assistant.Skills.Memory.Get do
        }}
     else
       case Store.get_memory_entry(entry_id) do
+        {:ok, entry} when entry.user_id != context.user_id ->
+          {:ok,
+           %Result{
+             status: :error,
+             content: "Memory entry not found: #{entry_id}"
+           }}
+
         {:ok, entry} ->
           segment = maybe_fetch_segment(entry)
 

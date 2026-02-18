@@ -107,7 +107,7 @@ defmodule Assistant.Memory.ContextBuilder do
   rescue
     error ->
       Logger.debug("ContextBuilder: memory search failed",
-        reason: inspect(error)
+        reason: Exception.message(error)
       )
 
       []
@@ -202,11 +202,13 @@ defmodule Assistant.Memory.ContextBuilder do
   # Private Helpers
   # ---------------------------------------------------------------------------
 
-  defp truncate_to_budget(text, max_chars) when byte_size(text) <= max_chars, do: text
-
   defp truncate_to_budget(text, max_chars) do
-    # Leave room for the truncation indicator
-    limit = max_chars - 20
-    String.slice(text, 0, limit) <> "\n...[truncated]"
+    if String.length(text) <= max_chars do
+      text
+    else
+      # Leave room for the truncation indicator
+      limit = max_chars - 20
+      String.slice(text, 0, limit) <> "\n...[truncated]"
+    end
   end
 end

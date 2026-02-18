@@ -24,13 +24,14 @@ defmodule Assistant.Skills.Memory.CompactConversation do
 
   @behaviour Assistant.Skills.Handler
 
+  alias Assistant.Memory.Store
   alias Assistant.Scheduler.Workers.CompactionWorker
   alias Assistant.Skills.Result
 
   require Logger
 
   @impl true
-  def execute(flags, _context) do
+  def execute(flags, context) do
     conversation_id = flags["conversation_id"] || flags["id"]
 
     unless conversation_id && conversation_id != "" do
@@ -40,38 +41,48 @@ defmodule Assistant.Skills.Memory.CompactConversation do
          content: "Missing required parameter: conversation_id"
        }}
     else
-      args = build_args(conversation_id, flags)
+      with {:ok, conv} <- Store.get_conversation(conversation_id),
+           true <- conv.user_id == context.user_id do
+        args = build_args(conversation_id, flags)
 
-      case CompactionWorker.new(args) |> Oban.insert() do
-        {:ok, job} ->
-          Logger.info("Compaction enqueued",
-            conversation_id: conversation_id,
-            job_id: job.id
-          )
+        case CompactionWorker.new(args) |> Oban.insert() do
+          {:ok, job} ->
+            Logger.info("Compaction enqueued",
+              conversation_id: conversation_id,
+              job_id: job.id
+            )
 
-          {:ok,
-           %Result{
-             status: :ok,
-             content:
-               Jason.encode!(%{
-                 status: "enqueued",
-                 conversation_id: conversation_id,
-                 job_id: job.id
-               }),
-             side_effects: [:compaction_enqueued],
-             metadata: %{job_id: job.id, conversation_id: conversation_id}
-           }}
+            {:ok,
+             %Result{
+               status: :ok,
+               content:
+                 Jason.encode!(%{
+                   status: "enqueued",
+                   conversation_id: conversation_id,
+                   job_id: job.id
+                 }),
+               side_effects: [:compaction_enqueued],
+               metadata: %{job_id: job.id, conversation_id: conversation_id}
+             }}
 
-        {:error, reason} ->
-          Logger.error("Failed to enqueue compaction",
-            conversation_id: conversation_id,
-            reason: inspect(reason)
-          )
+          {:error, reason} ->
+            Logger.error("Failed to enqueue compaction",
+              conversation_id: conversation_id,
+              reason: inspect(reason)
+            )
 
+            {:ok,
+             %Result{
+               status: :error,
+               content: "Failed to enqueue compaction: #{inspect(reason)}"
+             }}
+        end
+      else
+        _not_owned_or_not_found ->
           {:ok,
            %Result{
              status: :error,
-             content: "Failed to enqueue compaction: #{inspect(reason)}"
+             content: "Conversation not found: #{conversation_id}"
            }}
       end
     end

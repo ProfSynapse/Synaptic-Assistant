@@ -28,7 +28,7 @@ defmodule Assistant.Skills.Memory.CloseRelation do
   require Logger
 
   @impl true
-  def execute(flags, _context) do
+  def execute(flags, context) do
     relation_id = flags["relation_id"] || flags["id"]
 
     unless relation_id && relation_id != "" do
@@ -38,7 +38,7 @@ defmodule Assistant.Skills.Memory.CloseRelation do
          content: "Missing required parameter: relation_id"
        }}
     else
-      case close_relation(relation_id) do
+      case close_relation(relation_id, context.user_id) do
         {:ok, closed} ->
           closed_relation = Repo.preload(closed, [:source_entity, :target_entity])
 
@@ -83,7 +83,7 @@ defmodule Assistant.Skills.Memory.CloseRelation do
     end
   end
 
-  defp close_relation(relation_id) do
+  defp close_relation(relation_id, user_id) do
     now = DateTime.utc_now()
 
     case Repo.get(MemoryEntityRelation, relation_id) do
@@ -93,15 +93,22 @@ defmodule Assistant.Skills.Memory.CloseRelation do
       %{valid_to: valid_to} when not is_nil(valid_to) ->
         {:error, :already_closed}
 
-      _relation ->
-        from(r in MemoryEntityRelation,
-          where: r.id == ^relation_id and is_nil(r.valid_to),
-          select: r
-        )
-        |> Repo.update_all(set: [valid_to: now])
-        |> case do
-          {0, _} -> {:error, :not_found}
-          {_count, [updated]} -> {:ok, updated}
+      relation ->
+        # Verify ownership: load the source entity and check user_id
+        source_entity = Repo.get(Assistant.Schemas.MemoryEntity, relation.source_entity_id)
+
+        if is_nil(source_entity) or source_entity.user_id != user_id do
+          {:error, :not_found}
+        else
+          from(r in MemoryEntityRelation,
+            where: r.id == ^relation_id and is_nil(r.valid_to),
+            select: r
+          )
+          |> Repo.update_all(set: [valid_to: now])
+          |> case do
+            {0, _} -> {:error, :not_found}
+            {_count, [updated]} -> {:ok, updated}
+          end
         end
     end
   end
