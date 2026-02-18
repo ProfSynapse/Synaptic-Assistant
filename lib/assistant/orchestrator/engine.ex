@@ -32,7 +32,8 @@ defmodule Assistant.Orchestrator.Engine do
   ## Modes
 
     * `:multi_agent` — (default) Full orchestrator with sub-agent dispatch.
-      The LLM sees get_skill, dispatch_agent, get_agent_results tools.
+      The LLM sees get_skill, dispatch_agent, get_agent_results,
+      send_agent_update tools.
     * `:single_loop` — Voice/simple channel mode. Single LLM loop with
       direct skill execution, no sub-agent dispatch.
 
