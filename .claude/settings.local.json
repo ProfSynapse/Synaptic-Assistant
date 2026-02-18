@@ -15,7 +15,12 @@
       "WebFetch(domain:www.freshcodeit.com)",
       "WebFetch(domain:openrouter.ai)",
       "WebFetch(domain:news.ycombinator.com)",
-      "WebFetch(domain:hexdocs.pm)"
+      "WebFetch(domain:hexdocs.pm)",
+      "WebFetch(domain:elevenlabs.io)",
+      "WebFetch(domain:core.telegram.org)",
+      "WebFetch(domain:developers.hubspot.com)",
+      "WebFetch(domain:docs.slack.dev)",
+      "WebFetch(domain:api.slack.com)"
     ]
   }
 }
