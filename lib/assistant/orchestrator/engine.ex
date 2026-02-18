@@ -439,7 +439,34 @@ defmodule Assistant.Orchestrator.Engine do
   # --- Sub-Agent Execution ---
 
   defp execute_sub_agent(dispatch_params, dep_results, engine_state) do
-    SubAgent.execute(dispatch_params, dep_results, engine_state)
+    case SubAgent.execute(dispatch_params, dep_results, engine_state) do
+      {:error, {:context_budget_exceeded, details}} ->
+        # Convert structured error to a map result the orchestrator LLM can act on.
+        # Include the per-file breakdown so the LLM can decide which files to drop.
+        file_breakdown =
+          (details[:files] || [])
+          |> Enum.map_join("\n", fn f ->
+            "  - #{f.path}: ~#{f.estimated_tokens} tokens"
+          end)
+
+        base =
+          "Context files exceed token budget " <>
+            "(#{details.estimated_tokens} estimated vs #{details.budget_tokens} budget, " <>
+            "overage: #{details.overage_tokens} tokens).\n\n" <>
+            "Per-file breakdown:\n#{file_breakdown}"
+
+        nudged = Nudger.format_error(base, :context_budget_exceeded, details)
+
+        %{
+          status: :failed,
+          result: nudged,
+          tool_calls_used: 0,
+          duration_ms: 0
+        }
+
+      result ->
+        result
+    end
   end
 
   # --- Helpers ---
