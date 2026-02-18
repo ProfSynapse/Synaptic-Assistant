@@ -18,9 +18,10 @@ defmodule Assistant.Orchestrator.SubAgentTest do
     start_unlinked(Registry, keys: :unique, name: Assistant.SubAgent.Registry)
     start_unlinked(Task.Supervisor, name: Assistant.Skills.TaskSupervisor)
 
-    # Ensure Skills.Registry and PromptLoader are running
+    # Ensure Skills.Registry, PromptLoader, and ConfigLoader are running
     ensure_skills_registry_started()
     ensure_prompt_loader_started()
+    ensure_config_loader_started()
 
     :ok
   end
@@ -335,6 +336,53 @@ defmodule Assistant.Orchestrator.SubAgentTest do
       File.mkdir_p!(tmp_dir)
 
       case Assistant.Skills.Registry.start_link(skills_dir: tmp_dir) do
+        {:ok, _} -> :ok
+        {:error, {:already_started, _}} -> :ok
+      end
+    end
+  end
+
+  defp ensure_config_loader_started do
+    if :ets.whereis(:assistant_config) != :undefined do
+      :ok
+    else
+      tmp_dir = System.tmp_dir!()
+      config_path = Path.join(tmp_dir, "test_config_sa_#{System.unique_integer([:positive])}.yaml")
+
+      yaml = """
+      defaults:
+        orchestrator: primary
+
+      models:
+        - id: "test/fast"
+          tier: fast
+          description: "test"
+          use_cases: [orchestrator]
+          supports_tools: true
+          max_context_tokens: 100000
+          cost_tier: low
+
+      http:
+        max_retries: 1
+        base_backoff_ms: 100
+        max_backoff_ms: 1000
+        request_timeout_ms: 5000
+        streaming_timeout_ms: 10000
+
+      limits:
+        context_utilization_target: 0.85
+        compaction_trigger_threshold: 0.75
+        response_reserve_tokens: 1024
+        orchestrator_turn_limit: 10
+        sub_agent_turn_limit: 5
+        cache_ttl_seconds: 60
+        orchestrator_cache_breakpoints: 2
+        sub_agent_cache_breakpoints: 1
+      """
+
+      File.write!(config_path, yaml)
+
+      case Assistant.Config.Loader.start_link(path: config_path) do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> :ok
       end
