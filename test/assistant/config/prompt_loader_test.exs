@@ -94,8 +94,10 @@ defmodule Assistant.Config.PromptLoaderTest do
 
     test "renders empty interpolations for missing variables" do
       # EEx renders missing assigns as empty strings (nil → "")
-      # rather than raising an error
-      assert {:ok, rendered} = PromptLoader.render(:orchestrator, %{})
+      # rather than raising an error. Pass all expected assigns with
+      # empty values to avoid EEx "assign not available" warnings.
+      assigns = %{skill_domains: "", user_id: "", current_date: ""}
+      assert {:ok, rendered} = PromptLoader.render(:orchestrator, assigns)
       assert rendered =~ "You are an AI assistant."
       # Variables should be blank but the template still renders
       assert rendered =~ "Available domains:"
