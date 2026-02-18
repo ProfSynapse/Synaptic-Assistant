@@ -56,9 +56,7 @@ defmodule Assistant.Memory.ContextMonitorTest do
       user_id = "user-below-#{System.unique_integer([:positive])}"
       conversation_id = "conv-below"
 
-      # Register a fake memory agent to check if it gets dispatched to
-      test_pid = self()
-
+      # Register ourselves as the memory agent for this user
       Registry.register(
         Assistant.SubAgent.Registry,
         {:memory_agent, user_id},

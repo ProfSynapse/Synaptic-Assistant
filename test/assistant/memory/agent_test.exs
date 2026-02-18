@@ -44,7 +44,7 @@ defmodule Assistant.Memory.AgentTest do
         <%= @skills_text %>
       """)
 
-      start_unlinked(Assistant.Config.PromptLoader, prompts_dir: tmp)
+      start_unlinked(Assistant.Config.PromptLoader, dir: tmp)
     end
 
     user_id = "mem-agent-test-#{System.unique_integer([:positive])}"
