@@ -305,7 +305,7 @@ defmodule Assistant.Integrations.OpenRouter do
        %{
          id: body["id"],
          model: body["model"],
-         content: message["content"],
+         content: extract_text_content(message["content"]),
          tool_calls: tool_calls,
          finish_reason: finish_reason,
          usage: usage
@@ -331,6 +331,34 @@ defmodule Assistant.Integrations.OpenRouter do
   end
 
   defp parse_tool_calls(_), do: []
+
+  # Strip reasoning trace content from LLM responses, keeping only final text.
+  #
+  # Standard models: content is a plain string — pass through unchanged.
+  # Anthropic extended thinking: content is an array of blocks like
+  #   [%{"type" => "thinking", ...}, %{"type" => "text", "text" => "..."}]
+  #   Filter to "text" blocks only, concatenate their text values.
+  # DeepSeek R1: reasoning lives in a separate "reasoning_content" field
+  #   which we never extract, so no action needed.
+  defp extract_text_content(content) when is_binary(content), do: content
+  defp extract_text_content(nil), do: nil
+
+  defp extract_text_content(blocks) when is_list(blocks) do
+    text =
+      blocks
+      |> Enum.filter(fn
+        %{"type" => "text"} -> true
+        _ -> false
+      end)
+      |> Enum.map_join(fn %{"text" => text} -> text end)
+
+    case text do
+      "" -> nil
+      result -> result
+    end
+  end
+
+  defp extract_text_content(_other), do: nil
 
   defp parse_usage(%{"usage" => usage}) when is_map(usage) do
     prompt_details = usage["prompt_tokens_details"] || %{}
@@ -389,7 +417,7 @@ defmodule Assistant.Integrations.OpenRouter do
     result = %{}
 
     result =
-      case delta["content"] do
+      case extract_text_content(delta["content"]) do
         nil -> result
         content -> Map.put(result, :content, content)
       end
