@@ -2,13 +2,16 @@
 #
 # Thin wrapper around GoogleApi.Drive.V3 that handles Goth authentication
 # and normalizes response structs into plain maps. Used by file domain skills
-# (files.search, files.read, files.write) and any component needing Drive access.
+# (files.search, files.read, files.write, files.update, files.archive) and any
+# component needing Drive access.
 #
 # Related files:
 #   - lib/assistant/integrations/google/auth.ex (token provider)
 #   - lib/assistant/skills/files/search.ex (consumer — files.search skill)
 #   - lib/assistant/skills/files/read.ex (consumer — files.read skill)
 #   - lib/assistant/skills/files/write.ex (consumer — files.write skill)
+#   - lib/assistant/skills/files/update.ex (consumer — files.update skill)
+#   - lib/assistant/skills/files/archive.ex (consumer — files.archive skill)
 
 defmodule Assistant.Integrations.Google.Drive do
   @moduledoc """
@@ -31,6 +34,9 @@ defmodule Assistant.Integrations.Google.Drive do
 
       # Create a new file
       {:ok, file} = Drive.create_file("notes.txt", "Hello world")
+
+      # Update an existing file's content
+      {:ok, file} = Drive.update_file_content("1a2b3c4d", "Updated content")
   """
 
   require Logger
@@ -216,6 +222,56 @@ defmodule Assistant.Integrations.Google.Drive do
   end
 
   @doc """
+  Update an existing file's content in Google Drive.
+
+  Uses multipart upload to replace the file's content while preserving
+  metadata. For regular files, uploads the content as-is. Google Workspace
+  files (Docs, Sheets) cannot have their content replaced via upload —
+  those errors are propagated to the caller.
+
+  ## Parameters
+
+    - `file_id` - The Drive file ID to update
+    - `content` - New file content as a binary string
+    - `mime_type` - MIME type of the content (default `"text/plain"`)
+
+  ## Returns
+
+    - `{:ok, %{id, name, web_view_link}}` on success
+    - `{:error, term()}` on failure
+  """
+  @spec update_file_content(String.t(), binary(), String.t()) ::
+          {:ok, map()} | {:error, term()}
+  def update_file_content(file_id, content, mime_type \\ "text/plain") do
+    with {:ok, conn} <- get_connection() do
+      metadata = %Model.File{mimeType: mime_type}
+
+      case Files.drive_files_update_iodata(
+             conn,
+             file_id,
+             "multipart",
+             metadata,
+             content,
+             fields: "id,name,webViewLink"
+           ) do
+        {:ok, %Model.File{} = file} ->
+          {:ok, %{
+            id: file.id,
+            name: file.name,
+            web_view_link: file.webViewLink
+          }}
+
+        {:error, %Tesla.Env{status: 404}} ->
+          {:error, :not_found}
+
+        {:error, reason} ->
+          Logger.warning("Drive update_file_content failed for #{file_id}: #{inspect(reason)}")
+          {:error, reason}
+      end
+    end
+  end
+
+  @doc """
   Map a user-friendly type string to a Google Drive MIME type.
 
   Used by the files.search skill to translate `--type doc` into the
@@ -237,7 +293,58 @@ defmodule Assistant.Integrations.Google.Drive do
     end
   end
 
+  @doc """
+  Move a file to a new parent folder.
+
+  Uses the Drive Files.update endpoint with `addParents` / `removeParents`
+  query parameters to re-parent a file without changing its content.
+
+  ## Parameters
+
+    - `file_id` - The Drive file ID to move
+    - `new_parent_id` - The destination folder ID
+    - `remove_parents` - Whether to remove existing parents (default `true`).
+      When `true`, fetches current parents and removes them so the file
+      appears only in the new folder.
+
+  ## Returns
+
+    - `{:ok, %{id, name, parents}}` on success
+    - `{:error, term()}` on failure
+  """
+  @spec move_file(String.t(), String.t(), boolean()) ::
+          {:ok, map()} | {:error, term()}
+  def move_file(file_id, new_parent_id, remove_parents \\ true) do
+    with {:ok, conn} <- get_connection(),
+         {:ok, file_meta} <- get_file(file_id) do
+      api_opts =
+        [addParents: new_parent_id, fields: "id,name,parents"]
+        |> maybe_remove_parents(file_meta, remove_parents)
+
+      case Files.drive_files_update(conn, file_id, api_opts) do
+        {:ok, %Model.File{} = updated} ->
+          {:ok, %{id: updated.id, name: updated.name, parents: updated.parents}}
+
+        {:error, reason} ->
+          Logger.warning("Drive move_file failed for #{file_id}: #{inspect(reason)}")
+          {:error, reason}
+      end
+    end
+  end
+
   # -- Private --
+
+  defp maybe_remove_parents(opts, _file_meta, false), do: opts
+
+  defp maybe_remove_parents(opts, file_meta, true) do
+    case file_meta.parents do
+      parents when is_list(parents) and parents != [] ->
+        Keyword.put(opts, :removeParents, Enum.join(parents, ","))
+
+      _ ->
+        opts
+    end
+  end
 
   defp get_connection do
     case Assistant.Integrations.Google.Auth.token() do
