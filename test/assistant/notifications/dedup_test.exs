@@ -10,8 +10,15 @@ defmodule Assistant.Notifications.DedupTest do
   alias Assistant.Notifications.Dedup
 
   setup do
-    # Ensure a clean ETS table for each test.
-    # Delete the table if it exists from a prior test, then init fresh.
+    # Stop the Router GenServer so it relinquishes ownership of the :notification_dedup ETS table.
+    # With :protected access, only the table owner can write. By stopping the Router and
+    # re-creating the table here, the test process becomes the owner for the duration of the test.
+    case Process.whereis(Assistant.Notifications.Router) do
+      nil -> :ok
+      pid -> GenServer.stop(pid, :normal, 5000)
+    end
+
+    # Delete any existing table and create a fresh one owned by the test process.
     try do
       :ets.delete(:notification_dedup)
     rescue
