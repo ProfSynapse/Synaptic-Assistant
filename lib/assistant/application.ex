@@ -48,6 +48,9 @@ defmodule Assistant.Application do
           Assistant.Memory.ContextMonitor,
           Assistant.Memory.TurnClassifier,
 
+          # Notification router (dedup + rule-based dispatch to channels)
+          Assistant.Notifications.Router,
+
           # Web endpoint (last — depends on everything above)
           AssistantWeb.Endpoint
         ]
