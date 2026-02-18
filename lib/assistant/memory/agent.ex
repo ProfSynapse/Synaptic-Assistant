@@ -8,12 +8,18 @@
 # Can be dispatched to by: ContextMonitor (background triggers),
 # TurnClassifier (conversation-driven), or orchestrator (manual).
 #
+# Dispatch interface (from ContextMonitor/TurnClassifier):
+#   GenServer.cast(pid, {:mission, action, params})
+#   Actions: :compact_conversation, :save_memory, :extract_entities
+#
 # Related files:
 #   - lib/assistant/orchestrator/sub_agent.ex (LLM loop pattern origin)
 #   - lib/assistant/memory/skill_executor.ex (search-first enforcement)
 #   - lib/assistant/skills/registry.ex (skill loading)
 #   - config/prompts/memory_agent.yaml (system prompt template)
 #   - priv/skills/memory/ (skill definitions)
+#   - lib/assistant/orchestrator/context_monitor.ex (dispatches :compact_conversation)
+#   - lib/assistant/orchestrator/turn_classifier.ex (dispatches :save_memory, :extract_entities)
 
 defmodule Assistant.Memory.Agent do
   @moduledoc """
@@ -29,10 +35,31 @@ defmodule Assistant.Memory.Agent do
   persists for the duration of a user session. It can handle multiple
   dispatch missions sequentially.
 
-  1. `start_link/1` — starts the GenServer, registers via `{:memory_agent, user_id}`
-  2. `dispatch/2` — send a mission; the agent runs its LLM loop
+  1. `start_link/1` — starts the GenServer, registers as `{:memory_agent, user_id}`
+     in `Assistant.SubAgent.Registry`
+  2. Receives missions via cast: `GenServer.cast(pid, {:mission, action, params})`
   3. On mission complete → returns to `:idle` state, awaiting next dispatch
   4. On error → logs and returns to `:idle`
+
+  ## Dispatch Interface
+
+  ContextMonitor and TurnClassifier dispatch missions via cast:
+
+      GenServer.cast(pid, {:mission, :compact_conversation, %{
+        conversation_id: "uuid", user_id: "uuid", message_range: {1, 50}
+      }})
+
+      GenServer.cast(pid, {:mission, :save_memory, %{
+        user_message: "...", assistant_response: "...",
+        user_id: "uuid", conversation_id: "uuid"
+      }})
+
+      GenServer.cast(pid, {:mission, :extract_entities, %{
+        user_message: "...", assistant_response: "...",
+        user_id: "uuid", conversation_id: "uuid"
+      }})
+
+  The orchestrator can also dispatch manually via `dispatch/2` (synchronous call).
 
   ## States
 
@@ -251,6 +278,48 @@ defmodule Assistant.Memory.Agent do
   @impl true
   def handle_call({:resume, _update}, _from, state) do
     {:reply, {:error, :not_awaiting}, state}
+  end
+
+  # --- Cast: Mission dispatch from ContextMonitor / TurnClassifier ---
+
+  @impl true
+  def handle_cast({:mission, action, params}, %{status: :idle} = state) do
+    conversation_id = params[:conversation_id] || Ecto.UUID.generate()
+    mission = build_mission_text(action, params)
+
+    Logger.info("MemoryAgent mission cast received",
+      user_id: state.user_id,
+      action: action,
+      conversation_id: conversation_id
+    )
+
+    mission_params = %{
+      mission: mission,
+      conversation_id: conversation_id,
+      original_request: nil
+    }
+
+    new_state = %{
+      state
+      | status: :running,
+        current_mission: mission_params,
+        started_at: System.monotonic_time(:millisecond)
+    }
+
+    {:noreply, new_state, {:continue, {:start_mission, conversation_id, @default_max_tool_calls}}}
+  end
+
+  @impl true
+  def handle_cast({:mission, action, params}, state) do
+    # Agent is busy — log and drop the mission
+    Logger.warning("MemoryAgent mission dropped — agent busy",
+      user_id: state.user_id,
+      action: action,
+      status: state.status,
+      conversation_id: params[:conversation_id]
+    )
+
+    {:noreply, state}
   end
 
   # --- Continue: Start Mission ---
@@ -692,6 +761,66 @@ defmodule Assistant.Memory.Agent do
     Registry.list_by_domain(@memory_domain)
   end
 
+  # --- Mission Text Builders ---
+
+  defp build_mission_text(:compact_conversation, params) do
+    conversation_id = params[:conversation_id] || "unknown"
+    {start_idx, end_idx} = params[:message_range] || {0, 0}
+
+    """
+    Compact conversation #{conversation_id}, messages #{start_idx} through #{end_idx}.
+
+    Steps:
+    1. Search existing memories for this conversation to avoid duplicate compaction.
+    2. Summarize the message range into concise, self-contained memory entries.
+    3. Extract entities and relations from the conversation content.
+    4. Save the resulting memories with source_type "compaction" and provenance metadata.
+    """
+  end
+
+  defp build_mission_text(:save_memory, params) do
+    user_msg = params[:user_message] || ""
+    assistant_msg = params[:assistant_response] || ""
+
+    """
+    Analyze the following exchange and save any noteworthy information to memory.
+
+    User message: #{String.slice(user_msg, 0, 2000)}
+
+    Assistant response: #{String.slice(assistant_msg, 0, 2000)}
+
+    Steps:
+    1. Search existing memories for related content to avoid duplicates.
+    2. Identify facts, decisions, preferences, or important context worth remembering.
+    3. Save concise memory entries for anything new or updated.
+    4. Skip saving if the exchange contains no memorable information.
+    """
+  end
+
+  defp build_mission_text(:extract_entities, params) do
+    user_msg = params[:user_message] || ""
+    assistant_msg = params[:assistant_response] || ""
+
+    """
+    Extract entities and relations from the following exchange.
+
+    User message: #{String.slice(user_msg, 0, 2000)}
+
+    Assistant response: #{String.slice(assistant_msg, 0, 2000)}
+
+    Steps:
+    1. Query the entity graph for any entities mentioned in the text.
+    2. Identify people, projects, tools, concepts, and organizations.
+    3. Extract relations between entities (works_on, uses, knows, part_of, related_to).
+    4. For existing entities with changed attributes, close old relations and open new ones.
+    5. Create new entities and relations for anything not yet in the graph.
+    """
+  end
+
+  defp build_mission_text(action, _params) do
+    "Execute memory action: #{action}. Search existing memories first, then proceed."
+  end
+
   # --- Helper Functions ---
 
   defp build_skill_context(gen_state) do
@@ -727,7 +856,7 @@ defmodule Assistant.Memory.Agent do
   end
 
   defp via_tuple(user_id) do
-    {:via, Registry, {Assistant.Memory.AgentRegistry, user_id}}
+    {:via, Registry, {Assistant.SubAgent.Registry, {:memory_agent, user_id}}}
   end
 
   defp elapsed_ms(nil), do: 0
