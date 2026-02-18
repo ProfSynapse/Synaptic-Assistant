@@ -35,6 +35,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
   decides whether to loop again or respond to the user.
   """
 
+  alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.Orchestrator.Context
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
   alias Assistant.Skills.Result, as: SkillResult
@@ -69,7 +70,18 @@ defmodule Assistant.Orchestrator.LoopRunner do
           | {:error, term()}
   def run_iteration(messages, loop_state, opts \\ []) do
     tools = Keyword.get(opts, :tools, Context.tool_definitions())
-    model = Keyword.get(opts, :model)
+
+    model =
+      case Keyword.get(opts, :model) do
+        nil ->
+          case ConfigLoader.model_for(:orchestrator) do
+            %{id: id} -> id
+            nil -> nil
+          end
+
+        override ->
+          override
+      end
 
     llm_opts =
       [tools: tools]

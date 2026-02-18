@@ -80,7 +80,7 @@ defmodule Assistant.Memory.Agent do
 
   use GenServer
 
-  alias Assistant.Config.PromptLoader
+  alias Assistant.Config.{Loader, PromptLoader}
   alias Assistant.Memory.SkillExecutor
   alias Assistant.Orchestrator.{Limits, Sentinel}
   alias Assistant.Skills.{Context, Registry, Result}
@@ -576,9 +576,19 @@ defmodule Assistant.Memory.Agent do
 
       original_request = get_in(gen_state, [:current_mission, :original_request])
 
-      # Phase 1: Sentinel stub always approves. Phase 2 will add rejection handling.
-      {:ok, :approved} = Sentinel.check(original_request, "memory management", proposed_action)
-      execute_with_search_first(tc, skill_name, skill_args, gen_state, executor_session)
+      case Sentinel.check(original_request, "memory management", proposed_action) do
+        {:ok, :approved} ->
+          execute_with_search_first(tc, skill_name, skill_args, gen_state, executor_session)
+
+        {:ok, {:rejected, reason}} ->
+          Logger.warning("Sentinel rejected memory agent action",
+            agent_id: "memory_agent:#{gen_state.user_id}",
+            skill: skill_name,
+            reason: reason
+          )
+
+          {{tc, "Action rejected by security gate: #{reason}"}, executor_session}
+      end
     else
       {{tc,
         "Error: Skill \"#{skill_name}\" is not available. " <>
@@ -836,7 +846,14 @@ defmodule Assistant.Memory.Agent do
   end
 
   defp build_model_opts(context) do
-    [tools: context.tools]
+    model =
+      case Loader.model_for(:sub_agent) do
+        %{id: id} -> id
+        nil -> nil
+      end
+
+    opts = [tools: context.tools]
+    if model, do: Keyword.put(opts, :model, model), else: opts
   end
 
   defp build_resume_content(update) do

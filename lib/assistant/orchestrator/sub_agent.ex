@@ -368,14 +368,18 @@ defmodule Assistant.Orchestrator.SubAgent do
       parent_conversation_id: state.engine_state[:parent_conversation_id]
     )
 
-    {:stop, :normal,
-     %{
-       state
-       | status: final_result.status,
-         result: final_result.result,
-         tool_calls_used: final_result[:tool_calls_used] || state.tool_calls_used,
-         duration_ms: duration_ms
-     }}
+    final_state = %{
+      state
+      | status: final_result.status,
+        result: final_result.result,
+        tool_calls_used: final_result[:tool_calls_used] || state.tool_calls_used,
+        duration_ms: duration_ms
+    }
+
+    # Use {:shutdown, result_map} so wait_for_completion can extract the
+    # final result from the :DOWN message — the GenServer is dead before
+    # get_status can be called.
+    {:stop, {:shutdown, build_final_result_map(final_state)}, final_state}
   end
 
   @impl true
@@ -388,13 +392,14 @@ defmodule Assistant.Orchestrator.SubAgent do
       reason: inspect(reason)
     )
 
-    {:stop, :normal,
-     %{
-       state
-       | status: :failed,
-         result: "Sub-agent loop crashed: #{inspect(reason)}",
-         duration_ms: duration_ms
-     }}
+    final_state = %{
+      state
+      | status: :failed,
+        result: "Sub-agent loop crashed: #{inspect(reason)}",
+        duration_ms: duration_ms
+    }
+
+    {:stop, {:shutdown, build_final_result_map(final_state)}, final_state}
   end
 
   # Catch-all for unrelated messages
@@ -1060,18 +1065,26 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   # --- Synchronous wait helper ---
 
-  defp wait_for_completion(agent_id, monitor_ref) do
+  defp wait_for_completion(_agent_id, monitor_ref) do
     receive do
-      {:DOWN, ^monitor_ref, :process, _pid, :normal} ->
-        # Process exited normally — get final status
-        case get_status(agent_id) do
-          {:ok, status_map} -> status_map
-          {:error, :not_found} -> fetch_from_registry_or_default(agent_id)
-        end
-
       {:DOWN, ^monitor_ref, :process, _pid, {:shutdown, {:error, {:context_budget_exceeded, _}} = error}} ->
         # Context budget exceeded — return the error directly
         error
+
+      {:DOWN, ^monitor_ref, :process, _pid, {:shutdown, %{status: _} = result_map}} ->
+        # Normal completion — the GenServer packed its final result into the
+        # shutdown reason so we can read it here (the process is already dead).
+        result_map
+
+      {:DOWN, ^monitor_ref, :process, _pid, :normal} ->
+        # Should not happen after the {:shutdown, result} change, but handle
+        # gracefully for safety.
+        %{
+          status: :completed,
+          result: "Agent completed (status unavailable after shutdown).",
+          tool_calls_used: 0,
+          duration_ms: 0
+        }
 
       {:DOWN, ^monitor_ref, :process, _pid, reason} ->
         %{
@@ -1091,14 +1104,12 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp fetch_from_registry_or_default(_agent_id) do
-    # The GenServer already terminated; we can't query it.
-    # Return a basic completed status.
+  defp build_final_result_map(state) do
     %{
-      status: :completed,
-      result: "Agent completed (status unavailable after shutdown).",
-      tool_calls_used: 0,
-      duration_ms: 0
+      status: state.status,
+      result: extract_result_text(state.result),
+      tool_calls_used: state.tool_calls_used,
+      duration_ms: state.duration_ms
     }
   end
 
@@ -1132,12 +1143,22 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   defp build_model_opts(dispatch_params, context) do
-    opts = [tools: context.tools]
+    model =
+      case dispatch_params[:model_override] do
+        nil ->
+          case Loader.model_for(:sub_agent) do
+            %{id: id} -> id
+            nil -> nil
+          end
 
-    case dispatch_params[:model_override] do
-      nil -> opts
-      model -> Keyword.put(opts, :model, model)
-    end
+        override ->
+          override
+      end
+
+    [tools: context.tools]
+    |> then(fn opts ->
+      if model, do: Keyword.put(opts, :model, model), else: opts
+    end)
   end
 
   # --- Registry ---
