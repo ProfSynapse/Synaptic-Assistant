@@ -1,5 +1,5 @@
 defmodule AssistantWeb.ErrorJSONTest do
-  use AssistantWeb.ConnCase, async: true
+  use ExUnit.Case, async: true
 
   test "renders 404" do
     assert AssistantWeb.ErrorJSON.render("404.json", %{}) == %{errors: %{detail: "Not Found"}}
