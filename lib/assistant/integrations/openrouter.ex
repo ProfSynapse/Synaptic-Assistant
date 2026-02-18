@@ -41,8 +41,12 @@ defmodule Assistant.Integrations.OpenRouter do
       # config/runtime.exs
       config :assistant, :openrouter_api_key, System.fetch_env!("OPENROUTER_API_KEY")
 
-      # Optional model override (default: "anthropic/claude-sonnet-4-20250514")
-      config :assistant, :openrouter_default_model, "anthropic/claude-sonnet-4-20250514"
+  ## Model Selection
+
+  This client does **not** have a default model. Callers must always pass
+  `:model` in the opts keyword list. Model selection is the responsibility of
+  `Assistant.Config.Loader`, which resolves model IDs from `config/models.yaml`
+  based on role (orchestrator, sub_agent, compaction, etc.).
   """
 
   @behaviour Assistant.Behaviours.LLMClient
@@ -50,7 +54,6 @@ defmodule Assistant.Integrations.OpenRouter do
   require Logger
 
   @base_url "https://openrouter.ai/api/v1"
-  @default_model "anthropic/claude-sonnet-4-20250514"
   @default_receive_timeout :timer.seconds(120)
   @max_retries 3
 
@@ -62,9 +65,13 @@ defmodule Assistant.Integrations.OpenRouter do
   This is the default execution mode for orchestrator and sub-agent loops.
   Tool definitions are sorted alphabetically for cache consistency.
 
-  ## Options
+  ## Options (required)
 
-    - `:model` — Model ID (default from config or `#{@default_model}`)
+    - `:model` — Model ID from `config/models.yaml` (e.g. `"anthropic/claude-sonnet-4-6"`).
+      **Required.** Resolve via `Assistant.Config.Loader.model_for/1`.
+
+  ## Options (optional)
+
     - `:tools` — List of tool definitions (will be sorted alphabetically)
     - `:tool_choice` — `"auto"`, `"none"`, `"required"` (default: `"auto"` when tools present)
     - `:temperature` — Sampling temperature (default: provider default)
@@ -78,39 +85,41 @@ defmodule Assistant.Integrations.OpenRouter do
         %{role: "user", content: "Hello"}
       ]
 
-      {:ok, response} = OpenRouter.chat_completion(messages, tools: tool_defs)
+      {:ok, response} = OpenRouter.chat_completion(messages, model: "anthropic/claude-sonnet-4-6")
       response.content  # => "Hello! How can I help?"
+
+  Returns `{:error, :no_model_specified}` if `:model` is not provided.
   """
   @impl true
   def chat_completion(messages, opts \\ []) do
-    body = build_request_body(messages, opts)
+    with {:ok, body} <- build_request_body(messages, opts) do
+      case do_request(body) do
+        {:ok, %{status: 200, body: response_body}} ->
+          parse_completion(response_body)
 
-    case do_request(body) do
-      {:ok, %{status: 200, body: response_body}} ->
-        parse_completion(response_body)
+        {:ok, %{status: 429} = response} ->
+          retry_after = extract_retry_after(response)
+          {:error, {:rate_limited, retry_after}}
 
-      {:ok, %{status: 429} = response} ->
-        retry_after = extract_retry_after(response)
-        {:error, {:rate_limited, retry_after}}
+        {:ok, %{status: 402, body: resp_body}} ->
+          {:error, {:insufficient_credits, get_in(resp_body, ["error", "message"])}}
 
-      {:ok, %{status: 402, body: body}} ->
-        {:error, {:insufficient_credits, get_in(body, ["error", "message"])}}
+        {:ok, %{status: status, body: resp_body}} when status >= 400 ->
+          error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+          Logger.error("OpenRouter API error",
+            status: status,
+            error: error_message
+          )
+          {:error, {:api_error, status, error_message}}
 
-      {:ok, %{status: status, body: body}} when status >= 400 ->
-        error_message = get_in(body, ["error", "message"]) || "Unknown error"
-        Logger.error("OpenRouter API error",
-          status: status,
-          error: error_message
-        )
-        {:error, {:api_error, status, error_message}}
+        {:error, %Req.TransportError{reason: reason}} ->
+          Logger.error("OpenRouter connection error", reason: inspect(reason))
+          {:error, {:connection_error, reason}}
 
-      {:error, %Req.TransportError{reason: reason}} ->
-        Logger.error("OpenRouter connection error", reason: inspect(reason))
-        {:error, {:connection_error, reason}}
-
-      {:error, reason} ->
-        Logger.error("OpenRouter request failed", reason: inspect(reason))
-        {:error, {:request_failed, reason}}
+        {:error, reason} ->
+          Logger.error("OpenRouter request failed", reason: inspect(reason))
+          {:error, {:request_failed, reason}}
+      end
     end
   end
 
@@ -141,48 +150,49 @@ defmodule Assistant.Integrations.OpenRouter do
   """
   @impl true
   def streaming_completion(messages, callback, opts \\ []) do
-    body =
-      messages
-      |> build_request_body(opts)
-      |> Map.put(:stream, true)
-      |> Map.put(:stream_options, %{include_usage: true})
+    with {:ok, base_body} <- build_request_body(messages, opts) do
+      body =
+        base_body
+        |> Map.put(:stream, true)
+        |> Map.put(:stream_options, %{include_usage: true})
 
-    # Use process dictionary to accumulate usage from the final SSE chunk.
-    # The stream handler callback runs in the same process as Req.post/2,
-    # so process dictionary is safe here without concurrency concerns.
-    Process.put(:openrouter_stream_usage, nil)
+      # Use process dictionary to accumulate usage from the final SSE chunk.
+      # The stream handler callback runs in the same process as Req.post/2,
+      # so process dictionary is safe here without concurrency concerns.
+      Process.put(:openrouter_stream_usage, nil)
 
-    stream_handler = fn {:data, data}, {req, resp} ->
-      data
-      |> String.split("\n")
-      |> Enum.each(fn line ->
-        handle_sse_line(line, callback)
-      end)
+      stream_handler = fn {:data, data}, {req, resp} ->
+        data
+        |> String.split("\n")
+        |> Enum.each(fn line ->
+          handle_sse_line(line, callback)
+        end)
 
-      {:cont, {req, resp}}
-    end
+        {:cont, {req, resp}}
+      end
 
-    req = build_req_client()
+      req = build_req_client()
 
-    case Req.post(req, url: "/chat/completions", json: body, into: stream_handler) do
-      {:ok, %{status: 200}} ->
-        final_usage = Process.delete(:openrouter_stream_usage) || empty_usage()
-        {:ok, final_usage}
+      case Req.post(req, url: "/chat/completions", json: body, into: stream_handler) do
+        {:ok, %{status: 200}} ->
+          final_usage = Process.delete(:openrouter_stream_usage) || empty_usage()
+          {:ok, final_usage}
 
-      {:ok, %{status: 429} = response} ->
-        Process.delete(:openrouter_stream_usage)
-        retry_after = extract_retry_after(response)
-        {:error, {:rate_limited, retry_after}}
+        {:ok, %{status: 429} = response} ->
+          Process.delete(:openrouter_stream_usage)
+          retry_after = extract_retry_after(response)
+          {:error, {:rate_limited, retry_after}}
 
-      {:ok, %{status: status, body: body}} when status >= 400 ->
-        Process.delete(:openrouter_stream_usage)
-        error_message = get_in(body, ["error", "message"]) || "Unknown error"
-        {:error, {:api_error, status, error_message}}
+        {:ok, %{status: status, body: resp_body}} when status >= 400 ->
+          Process.delete(:openrouter_stream_usage)
+          error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+          {:error, {:api_error, status, error_message}}
 
-      {:error, reason} ->
-        Process.delete(:openrouter_stream_usage)
-        Logger.error("OpenRouter streaming request failed", reason: inspect(reason))
-        {:error, {:request_failed, reason}}
+        {:error, reason} ->
+          Process.delete(:openrouter_stream_usage)
+          Logger.error("OpenRouter streaming request failed", reason: inspect(reason))
+          {:error, {:request_failed, reason}}
+      end
     end
   end
 
@@ -190,19 +200,21 @@ defmodule Assistant.Integrations.OpenRouter do
 
   @doc false
   def build_request_body(messages, opts) do
-    model = Keyword.get(opts, :model, default_model())
+    case Keyword.fetch(opts, :model) do
+      {:ok, model} ->
+        body =
+          %{model: model, messages: messages}
+          |> maybe_add_tools(opts)
+          |> maybe_add_tool_choice(opts)
+          |> maybe_add_temperature(opts)
+          |> maybe_add_max_tokens(opts)
+          |> maybe_add_parallel_tool_calls(opts)
 
-    body = %{
-      model: model,
-      messages: messages
-    }
+        {:ok, body}
 
-    body
-    |> maybe_add_tools(opts)
-    |> maybe_add_tool_choice(opts)
-    |> maybe_add_temperature(opts)
-    |> maybe_add_max_tokens(opts)
-    |> maybe_add_parallel_tool_calls(opts)
+      :error ->
+        {:error, :no_model_specified}
+    end
   end
 
   defp maybe_add_tools(body, opts) do
@@ -453,10 +465,6 @@ defmodule Assistant.Integrations.OpenRouter do
 
   defp api_key do
     Application.fetch_env!(:assistant, :openrouter_api_key)
-  end
-
-  defp default_model do
-    Application.get_env(:assistant, :openrouter_default_model, @default_model)
   end
 
   defp base_url do
