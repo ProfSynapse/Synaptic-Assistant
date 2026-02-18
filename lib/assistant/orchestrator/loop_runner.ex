@@ -8,6 +8,7 @@
 # Related files:
 #   - lib/assistant/orchestrator/engine.ex (GenServer that calls this)
 #   - lib/assistant/orchestrator/context.ex (builds LLM request payloads)
+#   - lib/assistant/orchestrator/llm_helpers.ex (shared LLM helpers)
 #   - lib/assistant/orchestrator/tools/get_skill.ex
 #   - lib/assistant/orchestrator/tools/dispatch_agent.ex
 #   - lib/assistant/orchestrator/tools/get_agent_results.ex
@@ -35,8 +36,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
   decides whether to loop again or respond to the user.
   """
 
-  alias Assistant.Config.Loader, as: ConfigLoader
-  alias Assistant.Orchestrator.Context
+  alias Assistant.Orchestrator.{Context, LLMHelpers}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
   alias Assistant.Skills.Result, as: SkillResult
 
@@ -73,19 +73,11 @@ defmodule Assistant.Orchestrator.LoopRunner do
 
     model =
       case Keyword.get(opts, :model) do
-        nil ->
-          case ConfigLoader.model_for(:orchestrator) do
-            %{id: id} -> id
-            nil -> nil
-          end
-
-        override ->
-          override
+        nil -> LLMHelpers.resolve_model(:orchestrator)
+        override -> override
       end
 
-    llm_opts =
-      [tools: tools]
-      |> maybe_add(:model, model)
+    llm_opts = LLMHelpers.build_llm_opts(tools, model)
 
     case @llm_client.chat_completion(messages, llm_opts) do
       {:ok, response} ->
@@ -127,14 +119,8 @@ defmodule Assistant.Orchestrator.LoopRunner do
     end
   end
 
-  defp has_text_no_tools?(response) do
-    (response[:content] != nil and response[:content] != "") and
-      (response[:tool_calls] == nil or response[:tool_calls] == [])
-  end
-
-  defp has_tool_calls?(response) do
-    is_list(response[:tool_calls]) and response[:tool_calls] != []
-  end
+  defp has_text_no_tools?(response), do: LLMHelpers.text_response?(response)
+  defp has_tool_calls?(response), do: LLMHelpers.tool_call_response?(response)
 
   # --- Tool Call Processing ---
 
@@ -172,8 +158,8 @@ defmodule Assistant.Orchestrator.LoopRunner do
   end
 
   defp route_tool_call(tc, loop_state) do
-    name = extract_tool_name(tc)
-    args = extract_tool_args(tc)
+    name = LLMHelpers.extract_function_name(tc)
+    args = LLMHelpers.extract_function_args(tc)
 
     case name do
       "get_skill" ->
@@ -249,28 +235,6 @@ defmodule Assistant.Orchestrator.LoopRunner do
 
   # --- Private Helpers ---
 
-  defp extract_tool_name(%{function: %{name: name}}), do: name
-  defp extract_tool_name(%{"function" => %{"name" => name}}), do: name
-  defp extract_tool_name(_), do: "unknown"
-
-  defp extract_tool_args(%{function: %{arguments: args}}) when is_binary(args) do
-    case Jason.decode(args) do
-      {:ok, decoded} -> decoded
-      {:error, _} -> %{}
-    end
-  end
-
-  defp extract_tool_args(%{function: %{arguments: args}}) when is_map(args), do: args
-  defp extract_tool_args(%{"function" => %{"arguments" => args}}) when is_binary(args) do
-    case Jason.decode(args) do
-      {:ok, decoded} -> decoded
-      {:error, _} -> %{}
-    end
-  end
-
-  defp extract_tool_args(%{"function" => %{"arguments" => args}}) when is_map(args), do: args
-  defp extract_tool_args(_), do: %{}
-
   defp build_skill_context(loop_state) do
     %Assistant.Skills.Context{
       conversation_id: loop_state[:conversation_id] || "unknown",
@@ -279,7 +243,4 @@ defmodule Assistant.Orchestrator.LoopRunner do
       channel: loop_state[:channel]
     }
   end
-
-  defp maybe_add(opts, _key, nil), do: opts
-  defp maybe_add(opts, key, value), do: Keyword.put(opts, key, value)
 end

@@ -62,7 +62,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   use GenServer
 
   alias Assistant.Config.{Loader, PromptLoader}
-  alias Assistant.Orchestrator.{Limits, Sentinel}
+  alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
   alias Assistant.Skills.{Context, Executor, Registry, Result}
 
   require Logger
@@ -503,7 +503,7 @@ defmodule Assistant.Orchestrator.SubAgent do
             # Notify GenServer we're pausing
             send(genserver_pid, {:loop_paused, reason, partial_results, help_tc})
 
-            # Block until orchestrator sends resume
+            # Block until orchestrator sends resume (5 min timeout)
             receive do
               {:resume, update} ->
                 # Inject orchestrator response as tool result for request_help
@@ -525,6 +525,24 @@ defmodule Assistant.Orchestrator.SubAgent do
                 updated_context = update_context_with_new_tools(context, resumed_messages, updated_dispatch)
 
                 run_loop(updated_context, final_agent_state, updated_dispatch, engine_state, genserver_pid)
+
+              {:shutdown, reason} ->
+                %{
+                  status: :failed,
+                  result: "Sub-agent shut down while awaiting orchestrator: #{inspect(reason)}",
+                  tool_calls_used: final_agent_state.skill_calls
+                }
+            after
+              300_000 ->
+                Logger.warning("Sub-agent resume timeout after 5 minutes",
+                  agent_id: dispatch_params.agent_id
+                )
+
+                %{
+                  status: :failed,
+                  result: "Timed out waiting for orchestrator response (5 minutes).",
+                  tool_calls_used: final_agent_state.skill_calls
+                }
             end
 
           [] ->
@@ -1145,20 +1163,11 @@ defmodule Assistant.Orchestrator.SubAgent do
   defp build_model_opts(dispatch_params, context) do
     model =
       case dispatch_params[:model_override] do
-        nil ->
-          case Loader.model_for(:sub_agent) do
-            %{id: id} -> id
-            nil -> nil
-          end
-
-        override ->
-          override
+        nil -> LLMHelpers.resolve_model(:sub_agent)
+        override -> override
       end
 
-    [tools: context.tools]
-    |> then(fn opts ->
-      if model, do: Keyword.put(opts, :model, model), else: opts
-    end)
+    LLMHelpers.build_llm_opts(context.tools, model)
   end
 
   # --- Registry ---
@@ -1167,52 +1176,11 @@ defmodule Assistant.Orchestrator.SubAgent do
     {:via, Elixir.Registry, {Assistant.SubAgent.Registry, agent_id}}
   end
 
-  # --- Response Parsing Helpers ---
+  # --- Response Parsing Helpers (delegated to LLMHelpers) ---
 
-  defp has_text_no_tools?(response) do
-    content = response[:content]
-    tool_calls = response[:tool_calls]
-
-    content != nil and content != "" and
-      (tool_calls == nil or tool_calls == [])
-  end
-
-  defp has_tool_calls?(response) do
-    is_list(response[:tool_calls]) and response[:tool_calls] != []
-  end
-
-  defp extract_function_name(%{function: %{name: name}}), do: name
-  defp extract_function_name(%{"function" => %{"name" => name}}), do: name
-  defp extract_function_name(_), do: "unknown"
-
-  defp extract_function_args(%{function: %{arguments: args}}) when is_binary(args) do
-    case Jason.decode(args) do
-      {:ok, decoded} -> decoded
-      {:error, _} -> %{}
-    end
-  end
-
-  defp extract_function_args(%{function: %{arguments: args}}) when is_map(args), do: args
-
-  defp extract_function_args(%{"function" => %{"arguments" => args}}) when is_binary(args) do
-    case Jason.decode(args) do
-      {:ok, decoded} -> decoded
-      {:error, _} -> %{}
-    end
-  end
-
-  defp extract_function_args(%{"function" => %{"arguments" => args}}) when is_map(args), do: args
-  defp extract_function_args(_), do: %{}
-
-  defp extract_last_text(messages) do
-    messages
-    |> Enum.reverse()
-    |> Enum.find_value(fn
-      %{role: "assistant", content: content} when is_binary(content) and content != "" ->
-        content
-
-      _ ->
-        nil
-    end)
-  end
+  defp has_text_no_tools?(response), do: LLMHelpers.text_response?(response)
+  defp has_tool_calls?(response), do: LLMHelpers.tool_call_response?(response)
+  defp extract_function_name(tc), do: LLMHelpers.extract_function_name(tc)
+  defp extract_function_args(tc), do: LLMHelpers.extract_function_args(tc)
+  defp extract_last_text(messages), do: LLMHelpers.extract_last_assistant_text(messages)
 end

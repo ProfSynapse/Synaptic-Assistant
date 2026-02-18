@@ -1,8 +1,8 @@
 defmodule Assistant.Schemas.NotificationChannel do
   @moduledoc """
   Notification channel schema. Represents a destination for alerts
-  (Google Chat webhook, email, Telegram). Config is stored as encrypted
-  binary via Cloak.Ecto.
+  (Google Chat webhook, email, Telegram). Config is stored as binary;
+  Cloak.Ecto encryption is planned but not yet wired.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -15,6 +15,7 @@ defmodule Assistant.Schemas.NotificationChannel do
   schema "notification_channels" do
     field :name, :string
     field :type, :string
+    # TODO: encrypt with Cloak.Ecto before storing real credentials
     field :config, :binary
     field :enabled, :boolean, default: true
 

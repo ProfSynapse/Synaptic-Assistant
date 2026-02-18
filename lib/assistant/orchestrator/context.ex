@@ -248,15 +248,18 @@ defmodule Assistant.Orchestrator.Context do
   end
 
   # Pure estimation fallback: walk newest-first, accumulate estimated tokens.
+  # Operates on whole turns (user + subsequent assistant/tool messages) to avoid
+  # orphaned assistant responses or tool results without their user prompt.
   defp trim_messages_by_estimation(messages, token_budget) do
     messages
+    |> group_into_turns()
     |> Enum.reverse()
-    |> Enum.reduce_while({[], 0}, fn msg, {kept, total_tokens} ->
-      msg_tokens = estimate_message_tokens(msg)
-      new_total = total_tokens + msg_tokens
+    |> Enum.reduce_while({[], 0}, fn turn, {kept, total_tokens} ->
+      turn_tokens = Enum.reduce(turn, 0, &(estimate_message_tokens(&1) + &2))
+      new_total = total_tokens + turn_tokens
 
       if new_total <= token_budget do
-        {:cont, {[msg | kept], new_total}}
+        {:cont, {turn ++ kept, new_total}}
       else
         {:halt, {kept, total_tokens}}
       end
@@ -294,21 +297,48 @@ defmodule Assistant.Orchestrator.Context do
     end
   end
 
-  # Remove oldest messages until we've freed at least `tokens_to_free` tokens.
+  # Remove oldest turns until we've freed at least `tokens_to_free` tokens.
+  # Operates on whole turns (user + assistant/tool messages) to avoid orphans.
   # Returns {freed_tokens, remaining_messages}.
   defp trim_oldest(messages, tokens_to_free) do
-    do_trim_oldest(messages, tokens_to_free, 0)
+    turns = group_into_turns(messages)
+    do_trim_oldest_turns(turns, tokens_to_free, 0)
   end
 
-  defp do_trim_oldest([], _tokens_to_free, freed), do: {freed, []}
+  defp do_trim_oldest_turns([], _tokens_to_free, freed), do: {freed, []}
 
-  defp do_trim_oldest(remaining, tokens_to_free, freed) when freed >= tokens_to_free do
-    {freed, remaining}
+  defp do_trim_oldest_turns(remaining_turns, tokens_to_free, freed) when freed >= tokens_to_free do
+    {freed, List.flatten(remaining_turns)}
   end
 
-  defp do_trim_oldest([msg | rest], tokens_to_free, freed) do
-    msg_tokens = estimate_message_tokens(msg)
-    do_trim_oldest(rest, tokens_to_free, freed + msg_tokens)
+  defp do_trim_oldest_turns([turn | rest], tokens_to_free, freed) do
+    turn_tokens = Enum.reduce(turn, 0, &(estimate_message_tokens(&1) + &2))
+    do_trim_oldest_turns(rest, tokens_to_free, freed + turn_tokens)
+  end
+
+  # Groups messages into turns. A turn starts with a "user" message and includes
+  # all subsequent non-user messages (assistant, tool) until the next user message.
+  # Leading non-user messages (before any user message) form their own group.
+  defp group_into_turns(messages) do
+    {turns, current} =
+      Enum.reduce(messages, {[], []}, fn msg, {turns, current} ->
+        role = msg[:role] || msg["role"]
+
+        if role == "user" and current != [] do
+          {[Enum.reverse(current) | turns], [msg]}
+        else
+          {turns, [msg | current]}
+        end
+      end)
+
+    all_turns =
+      if current != [] do
+        [Enum.reverse(current) | turns]
+      else
+        turns
+      end
+
+    Enum.reverse(all_turns)
   end
 
   defp estimate_message_tokens(message) do

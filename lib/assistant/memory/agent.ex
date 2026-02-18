@@ -80,9 +80,9 @@ defmodule Assistant.Memory.Agent do
 
   use GenServer
 
-  alias Assistant.Config.{Loader, PromptLoader}
+  alias Assistant.Config.PromptLoader
   alias Assistant.Memory.SkillExecutor
-  alias Assistant.Orchestrator.{Limits, Sentinel}
+  alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
   alias Assistant.Skills.{Context, Registry, Result}
 
   require Logger
@@ -504,6 +504,7 @@ defmodule Assistant.Memory.Agent do
 
             send(parent, {:loop_paused, reason, help_tc})
 
+            # Block until orchestrator sends resume (5 min timeout)
             receive do
               {:resume, update} ->
                 resume_content = build_resume_content(update)
@@ -518,6 +519,24 @@ defmodule Assistant.Memory.Agent do
                 new_context = %{context | messages: resumed_messages}
 
                 run_loop(new_context, final_agent_state, final_session, gen_state, parent)
+
+              {:shutdown, reason} ->
+                %{
+                  status: :failed,
+                  result: "Memory agent shut down while awaiting orchestrator: #{inspect(reason)}",
+                  tool_calls_used: final_agent_state.skill_calls
+                }
+            after
+              300_000 ->
+                Logger.warning("MemoryAgent resume timeout after 5 minutes",
+                  user_id: gen_state.user_id
+                )
+
+                %{
+                  status: :failed,
+                  result: "Timed out waiting for orchestrator response (5 minutes).",
+                  tool_calls_used: final_agent_state.skill_calls
+                }
             end
 
           [] ->
@@ -807,6 +826,29 @@ defmodule Assistant.Memory.Agent do
     """
   end
 
+  defp build_mission_text(:save_and_extract, params) do
+    user_msg = params[:user_message] || ""
+    assistant_msg = params[:assistant_response] || ""
+
+    """
+    Analyze the following exchange. Save any noteworthy facts and extract entities.
+
+    User message: #{String.slice(user_msg, 0, 2000)}
+
+    Assistant response: #{String.slice(assistant_msg, 0, 2000)}
+
+    Steps:
+    1. Search existing memories for related content to avoid duplicates.
+    2. Identify facts, decisions, preferences, or important context worth remembering.
+    3. Save concise memory entries for anything new or updated.
+    4. Query the entity graph for any entities mentioned in the text.
+    5. Identify people, projects, tools, concepts, and organizations.
+    6. Extract relations between entities (works_on, uses, knows, part_of, related_to).
+    7. For existing entities with changed attributes, close old relations and open new ones.
+    8. Create new entities and relations for anything not yet in the graph.
+    """
+  end
+
   defp build_mission_text(:extract_entities, params) do
     user_msg = params[:user_message] || ""
     assistant_msg = params[:assistant_response] || ""
@@ -846,14 +888,8 @@ defmodule Assistant.Memory.Agent do
   end
 
   defp build_model_opts(context) do
-    model =
-      case Loader.model_for(:sub_agent) do
-        %{id: id} -> id
-        nil -> nil
-      end
-
-    opts = [tools: context.tools]
-    if model, do: Keyword.put(opts, :model, model), else: opts
+    model = LLMHelpers.resolve_model(:sub_agent)
+    LLMHelpers.build_llm_opts(context.tools, model)
   end
 
   defp build_resume_content(update) do
@@ -887,52 +923,11 @@ defmodule Assistant.Memory.Agent do
   defp extract_result_text(nil), do: nil
   defp extract_result_text(other), do: inspect(other)
 
-  defp extract_last_assistant_text(messages) do
-    messages
-    |> Enum.reverse()
-    |> Enum.find_value(fn
-      %{role: "assistant", content: content} when is_binary(content) and content != "" ->
-        content
+  # --- Response Parsing Helpers (delegated to LLMHelpers) ---
 
-      _ ->
-        nil
-    end)
-  end
-
-  # --- Response Parsing ---
-
-  defp has_text_no_tools?(response) do
-    content = response[:content]
-    tool_calls = response[:tool_calls]
-
-    content != nil and content != "" and
-      (tool_calls == nil or tool_calls == [])
-  end
-
-  defp has_tool_calls?(response) do
-    is_list(response[:tool_calls]) and response[:tool_calls] != []
-  end
-
-  defp extract_function_name(%{function: %{name: name}}), do: name
-  defp extract_function_name(%{"function" => %{"name" => name}}), do: name
-  defp extract_function_name(_), do: "unknown"
-
-  defp extract_function_args(%{function: %{arguments: args}}) when is_binary(args) do
-    case Jason.decode(args) do
-      {:ok, decoded} -> decoded
-      {:error, _} -> %{}
-    end
-  end
-
-  defp extract_function_args(%{function: %{arguments: args}}) when is_map(args), do: args
-
-  defp extract_function_args(%{"function" => %{"arguments" => args}}) when is_binary(args) do
-    case Jason.decode(args) do
-      {:ok, decoded} -> decoded
-      {:error, _} -> %{}
-    end
-  end
-
-  defp extract_function_args(%{"function" => %{"arguments" => args}}) when is_map(args), do: args
-  defp extract_function_args(_), do: %{}
+  defp extract_last_assistant_text(messages), do: LLMHelpers.extract_last_assistant_text(messages)
+  defp has_text_no_tools?(response), do: LLMHelpers.text_response?(response)
+  defp has_tool_calls?(response), do: LLMHelpers.tool_call_response?(response)
+  defp extract_function_name(tc), do: LLMHelpers.extract_function_name(tc)
+  defp extract_function_args(tc), do: LLMHelpers.extract_function_args(tc)
 end

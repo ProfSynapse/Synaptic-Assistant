@@ -47,7 +47,7 @@ defmodule Assistant.Orchestrator.Engine do
   use GenServer
 
   alias Assistant.Config.Loader, as: ConfigLoader
-  alias Assistant.Orchestrator.{AgentScheduler, Context, LoopRunner, Nudger, SubAgent}
+  alias Assistant.Orchestrator.{AgentScheduler, Context, Limits, LoopRunner, Nudger, SubAgent}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults}
   alias Assistant.Resilience.CircuitBreaker
 
@@ -237,29 +237,49 @@ defmodule Assistant.Orchestrator.Engine do
     else
       state = Map.update!(state, :iteration_count, &(&1 + 1))
 
-      # Build context and run one LLM iteration
-      loop_state = build_loop_state(state)
-      context = Context.build(loop_state, state.messages)
+      # Level 4: per-conversation rate limit check
+      case Limits.check_conversation(state.conversation_state) do
+        {:ok, new_conv_state} ->
+          state = Map.put(state, :conversation_state, new_conv_state)
+          run_loop_iteration(state)
 
-      messages = [context.system | context.messages]
-      opts = [tools: context.tools]
+        {:error, :limit_exceeded, details} ->
+          Logger.warning("Conversation rate limit reached",
+            conversation_id: state.conversation_id,
+            details: inspect(details)
+          )
 
-      case LoopRunner.run_iteration(messages, loop_state, opts) do
-        {:text, content, usage} ->
-          state = accumulate_usage(state, usage)
-          {:ok, content, state}
-
-        {:tool_calls, local_results, pending_dispatches, usage} ->
-          state = accumulate_usage(state, usage)
-          handle_tool_calls(state, local_results, pending_dispatches)
-
-        {:wait, mode, timeout_ms, agent_ids, tool_call_id, usage} ->
-          state = accumulate_usage(state, usage)
-          handle_wait(state, mode, timeout_ms, agent_ids, tool_call_id)
-
-        {:error, reason} ->
-          {:error, reason, state}
+          {:ok,
+           "I've reached the processing limit for this conversation window. " <>
+             "Please wait a moment before sending another message.",
+           state}
       end
+    end
+  end
+
+  defp run_loop_iteration(state) do
+    # Build context and run one LLM iteration
+    loop_state = build_loop_state(state)
+    context = Context.build(loop_state, state.messages)
+
+    messages = [context.system | context.messages]
+    opts = [tools: context.tools]
+
+    case LoopRunner.run_iteration(messages, loop_state, opts) do
+      {:text, content, usage} ->
+        state = accumulate_usage(state, usage)
+        {:ok, content, state}
+
+      {:tool_calls, local_results, pending_dispatches, usage} ->
+        state = accumulate_usage(state, usage)
+        handle_tool_calls(state, local_results, pending_dispatches)
+
+      {:wait, mode, timeout_ms, agent_ids, tool_call_id, usage} ->
+        state = accumulate_usage(state, usage)
+        handle_wait(state, mode, timeout_ms, agent_ids, tool_call_id)
+
+      {:error, reason} ->
+        {:error, reason, state}
     end
   end
 

@@ -35,7 +35,12 @@ defmodule Assistant.Memory.TurnClassifier do
   require Logger
 
   alias Assistant.Config.Loader, as: ConfigLoader
-  alias Assistant.Integrations.OpenRouter
+
+  @llm_client Application.compile_env(
+                :assistant,
+                :llm_client,
+                Assistant.Integrations.OpenRouter
+              )
 
   @classification_prompt """
   Classify this conversation exchange. Reply with JSON only:
@@ -100,7 +105,7 @@ defmodule Assistant.Memory.TurnClassifier do
       %{role: "user", content: prompt}
     ]
 
-    case OpenRouter.chat_completion(messages, model: model, temperature: 0.0, max_tokens: 100) do
+    case @llm_client.chat_completion(messages, model: model, temperature: 0.0, max_tokens: 100) do
       {:ok, %{content: content}} ->
         handle_classification(content, conversation_id, user_id, user_message, assistant_response)
 
@@ -120,21 +125,13 @@ defmodule Assistant.Memory.TurnClassifier do
           reason: reason
         )
 
-        dispatch_to_memory_agent(user_id, :save_memory, %{
+        dispatch_to_memory_agent(user_id, :save_and_extract, %{
           conversation_id: conversation_id,
           user_id: user_id,
           user_message: user_message,
           assistant_response: assistant_response,
           trigger: :turn_classifier,
           classification_reason: reason
-        })
-
-        dispatch_to_memory_agent(user_id, :extract_entities, %{
-          conversation_id: conversation_id,
-          user_id: user_id,
-          user_message: user_message,
-          assistant_response: assistant_response,
-          trigger: :turn_classifier
         })
 
       {:ok, "compact", reason} ->
