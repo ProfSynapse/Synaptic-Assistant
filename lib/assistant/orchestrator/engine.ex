@@ -13,6 +13,7 @@
 #   - lib/assistant/orchestrator/loop_runner.ex (pure LLM loop logic)
 #   - lib/assistant/orchestrator/context.ex (context assembly)
 #   - lib/assistant/orchestrator/agent_scheduler.ex (DAG + wave execution)
+#   - lib/assistant/orchestrator/nudger.ex (error→hint mapping from YAML)
 #   - lib/assistant/resilience/circuit_breaker.ex (four-level limits)
 #   - lib/assistant/application.ex (supervision tree)
 
@@ -44,7 +45,7 @@ defmodule Assistant.Orchestrator.Engine do
 
   use GenServer
 
-  alias Assistant.Orchestrator.{AgentScheduler, Context, LoopRunner, SubAgent}
+  alias Assistant.Orchestrator.{AgentScheduler, Context, LoopRunner, Nudger, SubAgent}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults}
   alias Assistant.Resilience.CircuitBreaker
 
@@ -334,13 +335,15 @@ defmodule Assistant.Orchestrator.Engine do
               reason: inspect(reason)
             )
 
-            # Add error messages for each dispatch
+            # Add error messages for each dispatch, with nudge hint if available
             error_messages =
               Enum.map(pending_dispatches, fn {tc, _params} ->
+                base = "Failed to dispatch agents: #{inspect(reason)}"
+
                 %{
                   role: "tool",
                   tool_call_id: tc.id,
-                  content: "Failed to dispatch agents: #{inspect(reason)}"
+                  content: Nudger.format_error(base, reason)
                 }
               end)
 
@@ -353,16 +356,23 @@ defmodule Assistant.Orchestrator.Engine do
           details: inspect(details)
         )
 
-        # Add limit-exceeded messages for each dispatch tool call
+        # Add limit-exceeded messages for each dispatch tool call, with nudge hint
+        base =
+          "Agent dispatch limit reached (#{details.used}/#{details.max} agents this turn). " <>
+            "Complete existing agents before dispatching more, or synthesize a response " <>
+            "with current results."
+
+        nudged = Nudger.format_error(base, :limit_exceeded, %{
+          used: details.used,
+          max: details.max
+        })
+
         limit_messages =
           Enum.map(pending_dispatches, fn {tc, _params} ->
             %{
               role: "tool",
               tool_call_id: tc.id,
-              content:
-                "Agent dispatch limit reached (#{details.used}/#{details.max} agents this turn). " <>
-                  "Complete existing agents before dispatching more, or synthesize a response " <>
-                  "with current results."
+              content: nudged
             }
           end)
 

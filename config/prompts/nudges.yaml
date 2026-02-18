@@ -1,0 +1,35 @@
+# config/prompts/nudges.yaml — Error recovery hints for the orchestrator LLM.
+#
+# Each section key is an error atom name. Values are short EEx templates
+# rendered with optional detail variables (e.g., <%= @overage_tokens %>).
+# The Nudger module looks up hints by error atom and appends them to tool
+# error results so the LLM can self-correct.
+#
+# To add a new nudge: add a key below. No code changes required.
+#
+# Related files:
+#   - lib/assistant/orchestrator/nudger.ex (consumer)
+#   - lib/assistant/config/prompt_loader.ex (ETS loader)
+
+system: |
+  Error recovery nudges loaded.
+
+sections:
+  context_budget_exceeded: |
+    Context exceeds the model's window by ~<%= @overage_tokens %> tokens.
+    Options: (1) use a higher-context model tier, (2) pass fewer files, (3) summarize large files first.
+
+  model_not_configured: |
+    No model configured for this role. Check config/config.yaml models section and ensure the role has a mapping.
+
+  circuit_breaker_open: |
+    The circuit breaker for this component is open. Retry after a short delay or check skill health.
+
+  no_model_specified: |
+    No model was specified for this LLM call. Ensure dispatch_agent includes a model or that the role has a default in config/config.yaml.
+
+  skill_not_found: |
+    Skill not found in registry. Use get_skill to browse available skills by domain.
+
+  sub_agent_turn_limit_exceeded: |
+    Sub-agent reached its per-turn iteration limit. Simplify the mission, break it into smaller tasks, or increase the limit in config/config.yaml.
