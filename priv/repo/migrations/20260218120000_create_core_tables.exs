@@ -131,8 +131,8 @@ defmodule Assistant.Repo.Migrations.CreateCoreTables do
     create index(:memory_entries, [:source_conversation_id])
     create index(:memory_entries, [:category])
     create index(:memory_entries, [:source_type])
-    create index(:memory_entries, [:importance], order: [desc: :importance])
-    create index(:memory_entries, [:inserted_at], order: [desc: :inserted_at])
+    create index(:memory_entries, [:importance])
+    create index(:memory_entries, [:inserted_at])
 
     create index(:memory_entries, [:segment_start_message_id],
              where: "segment_start_message_id IS NOT NULL"
