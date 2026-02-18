@@ -33,3 +33,6 @@ sections:
 
   sub_agent_turn_limit_exceeded: |
     Sub-agent reached its per-turn iteration limit. Simplify the mission, break it into smaller tasks, or increase the limit in config/config.yaml.
+
+  memory_write_without_search: |
+    You attempted to write to memory without first searching. Call search_memories or query_entity_graph to check for existing entries before writing. This prevents duplicate or conflicting records.
