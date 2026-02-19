@@ -42,12 +42,18 @@ defmodule Assistant.Auth.MagicLink do
   (latest-wins policy per plan decision). Stores the SHA-256 hash of the token
   in the `auth_tokens` table.
 
+  If `:pending_intent` is provided, a PendingIntentWorker Oban job is inserted
+  with `scheduled_at` 24 hours in the future (parked). The returned `oban_job_id`
+  is stored in the auth_token row so the OAuthController can reschedule it after
+  successful token exchange.
+
   ## Parameters
 
     * `user_id` - The user's UUID
     * `opts` - Keyword list:
       * `:purpose` - Token purpose (default: `"oauth_google"`)
-      * `:oban_job_id` - The parked PendingIntentWorker Oban job ID (optional)
+      * `:pending_intent` - Map with keys: `:message`, `:conversation_id`,
+        `:channel`, `:reply_context`. When provided, a parked Oban job is created.
 
   ## Returns
 
@@ -59,7 +65,7 @@ defmodule Assistant.Auth.MagicLink do
           | {:error, term()}
   def generate(user_id, opts \\ []) do
     purpose = Keyword.get(opts, :purpose, "oauth_google")
-    oban_job_id = Keyword.get(opts, :oban_job_id)
+    pending_intent = Keyword.get(opts, :pending_intent)
 
     raw_token = :crypto.strong_rand_bytes(@token_bytes) |> Base.url_encode64(padding: false)
     token_hash = hash_token(raw_token)
@@ -68,6 +74,9 @@ defmodule Assistant.Auth.MagicLink do
     Repo.transaction(fn ->
       # Invalidate existing pending magic links for this user+purpose (latest-wins)
       invalidate_pending(user_id, purpose)
+
+      # Park a PendingIntentWorker Oban job if pending_intent is provided
+      oban_job_id = maybe_insert_pending_intent_job(user_id, pending_intent)
 
       attrs = %{
         user_id: user_id,
@@ -84,6 +93,7 @@ defmodule Assistant.Auth.MagicLink do
           Logger.info("Magic link generated",
             user_id: user_id,
             purpose: purpose,
+            oban_job_id: oban_job_id,
             expires_at: DateTime.to_iso8601(expires_at)
           )
 
@@ -182,6 +192,41 @@ defmodule Assistant.Auth.MagicLink do
   end
 
   # --- Private Helpers ---
+
+  # Insert a parked PendingIntentWorker Oban job scheduled 24h in the future.
+  # Returns the oban_job_id on success, or nil if no pending_intent was provided.
+  defp maybe_insert_pending_intent_job(_user_id, nil), do: nil
+
+  defp maybe_insert_pending_intent_job(user_id, pending_intent) when is_map(pending_intent) do
+    far_future = DateTime.add(DateTime.utc_now(), 24 * 60 * 60, :second)
+
+    job_args = %{
+      user_id: user_id,
+      conversation_id: pending_intent[:conversation_id] || pending_intent["conversation_id"] || "",
+      original_message: pending_intent[:message] || pending_intent["message"] || "",
+      channel: pending_intent[:channel] || pending_intent["channel"] || "unknown",
+      reply_context: pending_intent[:reply_context] || pending_intent["reply_context"] || %{}
+    }
+
+    case Assistant.Workers.PendingIntentWorker.new(job_args, scheduled_at: far_future)
+         |> Oban.insert() do
+      {:ok, %Oban.Job{id: job_id}} ->
+        Logger.info("Parked PendingIntentWorker job",
+          oban_job_id: job_id,
+          user_id: user_id
+        )
+
+        job_id
+
+      {:error, reason} ->
+        Logger.error("Failed to insert PendingIntentWorker job",
+          user_id: user_id,
+          reason: inspect(reason)
+        )
+
+        nil
+    end
+  end
 
   defp hash_token(raw_token) do
     :crypto.hash(:sha256, raw_token) |> Base.encode16(case: :lower)

@@ -104,6 +104,7 @@ defmodule Assistant.Workers.PendingIntentWorker do
 
   # --- Private ---
 
+  defp intent_stale?(nil), do: false
   defp intent_stale?(inserted_at) do
     age = DateTime.diff(DateTime.utc_now(), inserted_at)
     age > @intent_ttl_seconds

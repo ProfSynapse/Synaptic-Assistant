@@ -42,8 +42,13 @@ defmodule AssistantWeb.OAuthControllerTest do
 
     Application.put_env(:assistant, AssistantWeb.Endpoint, merged)
 
-    # Ensure ETS table exists for PKCE storage
-    AssistantWeb.OAuthController.ensure_pkce_table()
+    # Ensure ETS table exists for PKCE storage.
+    # In production, Application.start/2 creates this table. In tests, we
+    # create it here if it doesn't already exist (test process may not share
+    # the application supervisor's ETS table).
+    if :ets.whereis(:oauth_pkce_verifiers) == :undefined do
+      :ets.new(:oauth_pkce_verifiers, [:set, :public, :named_table])
+    end
 
     on_exit(fn ->
       Application.delete_env(:assistant, :google_oauth_client_id)

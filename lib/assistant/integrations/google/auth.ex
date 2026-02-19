@@ -40,6 +40,7 @@ defmodule Assistant.Integrations.Google.Auth do
 
   alias Assistant.Auth.OAuth
   alias Assistant.Auth.TokenStore
+  alias Assistant.Repo
 
   @goth_name Assistant.Goth
 
@@ -96,7 +97,24 @@ defmodule Assistant.Integrations.Google.Auth do
         if TokenStore.token_valid?(oauth_token) do
           {:ok, oauth_token.access_token}
         else
-          refresh_user_token(user_id, oauth_token)
+          # Serialize refresh attempts per-user via PostgreSQL advisory lock.
+          # This prevents a TOCTOU race where two concurrent requests both see
+          # an expired token, both refresh, and the second refresh causes
+          # Google to revoke the first — deleting the just-saved token.
+          with_user_advisory_lock(user_id, fn ->
+            # Re-check inside the lock — another request may have refreshed already
+            case TokenStore.get_token(user_id) do
+              {:error, :not_found} ->
+                {:error, :not_connected}
+
+              {:ok, fresh_token} ->
+                if TokenStore.token_valid?(fresh_token) do
+                  {:ok, fresh_token.access_token}
+                else
+                  refresh_user_token(user_id, fresh_token)
+                end
+            end
+          end)
         end
     end
   end
@@ -137,6 +155,39 @@ defmodule Assistant.Integrations.Google.Auth do
   end
 
   # --- Private ---
+
+  # Serialize an operation per user via a PostgreSQL advisory transaction lock.
+  # Uses a deterministic lock key derived from the user_id. The lock is released
+  # automatically when the transaction commits/rolls back.
+  defp with_user_advisory_lock(user_id, fun) do
+    lock_key = user_id_to_lock_key(user_id)
+
+    Repo.transaction(fn ->
+      case Ecto.Adapters.SQL.query(Repo, "SELECT pg_advisory_xact_lock($1)", [lock_key]) do
+        {:ok, _} ->
+          fun.()
+
+        {:error, reason} ->
+          Logger.error("Failed to acquire advisory lock for token refresh",
+            user_id: user_id,
+            reason: inspect(reason)
+          )
+
+          {:error, :refresh_failed}
+      end
+    end)
+    |> case do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Convert a UUID string to a deterministic 64-bit integer for pg_advisory_xact_lock.
+  # Uses the first 8 bytes of the binary UUID as a signed 64-bit integer.
+  defp user_id_to_lock_key(user_id) do
+    <<key::signed-integer-64, _rest::binary>> = :crypto.hash(:sha256, user_id)
+    key
+  end
 
   defp refresh_user_token(user_id, oauth_token) do
     case OAuth.refresh_token(oauth_token.refresh_token) do

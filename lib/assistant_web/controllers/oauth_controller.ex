@@ -124,27 +124,19 @@ defmodule AssistantWeb.OAuthController do
   end
 
   # --- PKCE ETS Storage ---
-
-  @doc false
-  def ensure_pkce_table do
-    case :ets.whereis(@pkce_table) do
-      :undefined ->
-        :ets.new(@pkce_table, [:set, :public, :named_table])
-
-      _ref ->
-        @pkce_table
-    end
-  end
+  # The :oauth_pkce_verifiers ETS table is created in Application.start/2
+  # (owned by the application process for stable lifetime).
 
   defp store_code_verifier(state, code_verifier, raw_token) do
-    ensure_pkce_table()
     expires_at = System.monotonic_time(:millisecond) + @pkce_ttl_ms
     :ets.insert(@pkce_table, {state, code_verifier, raw_token, expires_at})
+
+    # Opportunistic sweep: remove expired entries to prevent slow memory leak
+    # from abandoned OAuth flows. Runs on each /start request (cheap — ETS scan).
+    sweep_expired_pkce_entries()
   end
 
   defp retrieve_code_verifier(state) do
-    ensure_pkce_table()
-
     case :ets.lookup(@pkce_table, state) do
       [{^state, code_verifier, raw_token, expires_at}] ->
         :ets.delete(@pkce_table, state)
@@ -157,6 +149,22 @@ defmodule AssistantWeb.OAuthController do
 
       [] ->
         {:error, :pkce_not_found}
+    end
+  end
+
+  # Remove all ETS entries whose TTL has passed. Called opportunistically
+  # on each /start request. Uses :ets.select_delete/2 with a match spec
+  # for O(n) table scan — acceptable given the small table size.
+  defp sweep_expired_pkce_entries do
+    now = System.monotonic_time(:millisecond)
+
+    # Match spec: {_state, _verifier, _token, expires_at} where expires_at <= now
+    match_spec = [{{:_, :_, :_, :"$1"}, [{:"=<", :"$1", now}], [true]}]
+
+    count = :ets.select_delete(@pkce_table, match_spec)
+
+    if count > 0 do
+      Logger.info("Swept expired PKCE entries", count: count)
     end
   end
 
