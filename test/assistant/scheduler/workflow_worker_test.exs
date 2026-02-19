@@ -94,9 +94,9 @@ defmodule Assistant.Scheduler.WorkflowWorkerTest do
   # ---------------------------------------------------------------
 
   describe "perform/1 error cases" do
-    test "returns error for missing workflow file" do
+    test "returns error for absolute path (path traversal prevention)" do
       job = %Oban.Job{args: %{"workflow_path" => "/nonexistent/path/workflow.md"}}
-      assert {:error, {:workflow_not_found, _}} = WorkflowWorker.perform(job)
+      assert {:error, :path_not_allowed} = WorkflowWorker.perform(job)
     end
 
     test "returns error when workflow_path key is missing" do
@@ -107,6 +107,27 @@ defmodule Assistant.Scheduler.WorkflowWorkerTest do
     test "returns error for empty args" do
       job = %Oban.Job{args: %{}}
       assert {:error, :missing_workflow_path} = WorkflowWorker.perform(job)
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # perform/1 path traversal prevention
+  # ---------------------------------------------------------------
+
+  describe "perform/1 path traversal prevention" do
+    test "rejects absolute paths" do
+      job = %Oban.Job{args: %{"workflow_path" => "/etc/passwd"}}
+      assert {:error, :path_not_allowed} = WorkflowWorker.perform(job)
+    end
+
+    test "rejects directory traversal with .." do
+      job = %Oban.Job{args: %{"workflow_path" => "../../etc/passwd"}}
+      assert {:error, :path_not_allowed} = WorkflowWorker.perform(job)
+    end
+
+    test "rejects hidden traversal with ../ in middle" do
+      job = %Oban.Job{args: %{"workflow_path" => "legit/../../../etc/shadow"}}
+      assert {:error, :path_not_allowed} = WorkflowWorker.perform(job)
     end
   end
 

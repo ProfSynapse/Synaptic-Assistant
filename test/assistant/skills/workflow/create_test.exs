@@ -236,6 +236,59 @@ defmodule Assistant.Skills.Workflow.CreateTest do
   end
 
   # ---------------------------------------------------------------
+  # YAML injection prevention (validate_no_newlines)
+  # ---------------------------------------------------------------
+
+  describe "execute/2 YAML injection prevention" do
+    test "rejects newline in description" do
+      flags = Map.put(valid_flags(), "description", "legit\nevil_key: injected")
+      result = Create.execute(flags, build_context())
+
+      assert {:ok, %Result{status: :error, content: content}} = result
+      assert content =~ "description"
+      assert content =~ "newlines"
+    end
+
+    test "rejects carriage return in description" do
+      flags = Map.put(valid_flags(), "description", "legit\revil_key: injected")
+      result = Create.execute(flags, build_context())
+
+      assert {:ok, %Result{status: :error, content: content}} = result
+      assert content =~ "description"
+      assert content =~ "newlines"
+    end
+
+    test "rejects newline in channel" do
+      flags = Map.put(valid_flags(), "channel", "spaces/ABC\nevil_key: injected")
+      result = Create.execute(flags, build_context())
+
+      assert {:ok, %Result{status: :error, content: content}} = result
+      assert content =~ "channel"
+      assert content =~ "newlines"
+    end
+
+    test "rejects carriage return in channel" do
+      flags = Map.put(valid_flags(), "channel", "spaces/ABC\revil_key: injected")
+      result = Create.execute(flags, build_context())
+
+      assert {:ok, %Result{status: :error, content: content}} = result
+      assert content =~ "channel"
+      assert content =~ "newlines"
+    end
+
+    test "accepts description without newlines" do
+      {:ok, result} = Create.execute(valid_flags(), build_context())
+      assert result.status == :ok
+    end
+
+    test "accepts channel without newlines" do
+      flags = Map.put(valid_flags(), "channel", "spaces/ABC123")
+      {:ok, result} = Create.execute(flags, build_context())
+      assert result.status == :ok
+    end
+  end
+
+  # ---------------------------------------------------------------
   # Conflict detection
   # ---------------------------------------------------------------
 

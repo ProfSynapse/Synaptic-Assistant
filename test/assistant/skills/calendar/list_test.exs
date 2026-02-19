@@ -214,4 +214,18 @@ defmodule Assistant.Skills.Calendar.ListTest do
       assert result.content =~ "Calendar query failed"
     end
   end
+
+  # ---------------------------------------------------------------
+  # No Calendar integration
+  # ---------------------------------------------------------------
+
+  describe "execute/2 without Calendar integration" do
+    test "returns error when calendar integration is nil" do
+      context = build_context(%{integrations: %{}})
+      {:ok, result} = List.execute(%{}, context)
+
+      assert result.status == :error
+      assert result.content =~ "Google Calendar integration not configured"
+    end
+  end
 end

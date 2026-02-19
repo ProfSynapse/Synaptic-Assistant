@@ -177,4 +177,19 @@ defmodule Assistant.Skills.Calendar.UpdateTest do
       assert result.content =~ "Failed to update event"
     end
   end
+
+  # ---------------------------------------------------------------
+  # No Calendar integration
+  # ---------------------------------------------------------------
+
+  describe "execute/2 without Calendar integration" do
+    test "returns error when calendar integration is nil" do
+      context = build_context(%{integrations: %{}})
+      flags = %{"id" => "evt_123", "title" => "New Title"}
+      {:ok, result} = Update.execute(flags, context)
+
+      assert result.status == :error
+      assert result.content =~ "Google Calendar integration not configured"
+    end
+  end
 end
