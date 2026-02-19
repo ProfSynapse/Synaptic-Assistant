@@ -1,6 +1,7 @@
-# lib/assistant_web/router.ex — Phoenix router for webhook endpoints.
+# lib/assistant_web/router.ex — Phoenix router for webhook and OAuth endpoints.
 #
-# All routes are JSON API endpoints. No browser pipeline.
+# Routes include JSON API endpoints for webhooks and browser-facing HTML
+# endpoints for the OAuth2 authorization flow (magic link start + callback).
 # Webhook routes will be added as channel adapters are implemented.
 
 defmodule AssistantWeb.Router do
@@ -35,6 +36,11 @@ defmodule AssistantWeb.Router do
     post "/telegram", WebhookController, :telegram
   end
 
-  # Dev routes can be added here when needed (e.g., debug endpoints)
-  # This is a webhooks-only application — no browser/HTML routes.
+  # OAuth2 browser flow — magic link start + Google callback.
+  # These routes serve HTML (not JSON) and are outside any auth pipeline.
+  # Security is enforced by magic link validation (start) and HMAC state (callback).
+  scope "/auth/google", AssistantWeb do
+    get "/start", OAuthController, :start
+    get "/callback", OAuthController, :callback
+  end
 end

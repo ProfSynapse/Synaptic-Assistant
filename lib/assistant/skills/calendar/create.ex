@@ -28,17 +28,18 @@ defmodule Assistant.Skills.Calendar.Create do
         {:ok, %Result{status: :error, content: "Google Calendar integration not configured."}}
 
       calendar ->
+        token = context.google_token
         calendar_id = Map.get(flags, "calendar", "primary")
 
         case build_params(flags) do
-          {:ok, params} -> create_event(calendar, params, calendar_id)
+          {:ok, params} -> create_event(calendar, token, params, calendar_id)
           {:error, message} -> {:ok, %Result{status: :error, content: message}}
         end
     end
   end
 
-  defp create_event(calendar, params, calendar_id) do
-    case calendar.create_event(params, calendar_id) do
+  defp create_event(calendar, token, params, calendar_id) do
+    case calendar.create_event(token, params, calendar_id) do
       {:ok, event} ->
         content = format_confirmation(event)
 

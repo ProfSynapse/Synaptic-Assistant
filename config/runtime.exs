@@ -56,8 +56,9 @@ if api_key = System.get_env("OPENROUTER_API_KEY") do
   config :assistant, :openrouter_api_key, api_key
 end
 
-# Google service account credentials (inline JSON string or file path to JSON key)
-# Goth requires a decoded map, so we parse JSON here at config time.
+# Google service account credentials (inline JSON string or file path to JSON key).
+# Now used ONLY for Google Chat bot operations (chat.bot scope).
+# Per-user Gmail/Drive/Calendar access uses OAuth2 client credentials below.
 if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
   credentials =
     if String.starts_with?(String.trim(google_creds), "{") do
@@ -69,11 +70,15 @@ if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
   config :assistant, :google_credentials, credentials
 end
 
-# Google domain-wide delegation — impersonate this user's mailbox and calendar.
-# Required for Gmail/Calendar API access via service account.
-# Set to the email of the workspace user to act on behalf of (e.g., "user@company.com").
-if impersonate_email = System.get_env("GOOGLE_IMPERSONATE_EMAIL") do
-  config :assistant, :google_impersonate_email, impersonate_email
+# Google OAuth2 client credentials — for per-user authorization flow.
+# Obtain from Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client ID.
+# Required for Gmail, Drive, and Calendar per-user access.
+if client_id = System.get_env("GOOGLE_OAUTH_CLIENT_ID") do
+  config :assistant, :google_oauth_client_id, client_id
+end
+
+if client_secret = System.get_env("GOOGLE_OAUTH_CLIENT_SECRET") do
+  config :assistant, :google_oauth_client_secret, client_secret
 end
 
 # Google Cloud project number (used for Google Chat JWT audience verification)
@@ -109,8 +114,19 @@ if api_key = System.get_env("HUBSPOT_API_KEY") do
   config :assistant, :hubspot_api_key, api_key
 end
 
-# Cloak encryption key for Ecto field encryption
-if encryption_key = System.get_env("CLOAK_ENCRYPTION_KEY") do
+# Cloak encryption key for Ecto field encryption.
+# Required in production — OAuth tokens are encrypted at rest via Cloak AES-GCM.
+# In dev/test, omitting this env var means the Vault starts with no ciphers
+# (encrypted fields will error on read/write, which is acceptable for tests
+# that don't exercise token storage).
+if config_env() == :prod do
+  encryption_key =
+    System.get_env("CLOAK_ENCRYPTION_KEY") ||
+      raise """
+      environment variable CLOAK_ENCRYPTION_KEY is missing.
+      Generate a 256-bit key: :crypto.strong_rand_bytes(32) |> Base.encode64()
+      """
+
   config :assistant, Assistant.Vault,
     ciphers: [
       default: {
@@ -118,4 +134,15 @@ if encryption_key = System.get_env("CLOAK_ENCRYPTION_KEY") do
         tag: "AES.GCM.V1", key: Base.decode64!(encryption_key)
       }
     ]
+else
+  if encryption_key = System.get_env("CLOAK_ENCRYPTION_KEY") do
+    config :assistant, Assistant.Vault,
+      ciphers: [
+        default: {
+          Cloak.Ciphers.AES.GCM,
+          tag: "AES.GCM.V1",
+          key: Base.decode64!(encryption_key)
+        }
+      ]
+  end
 end

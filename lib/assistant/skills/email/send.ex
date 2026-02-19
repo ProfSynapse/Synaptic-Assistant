@@ -31,8 +31,10 @@ defmodule Assistant.Skills.Email.Send do
         {:ok, %Result{status: :error, content: "Gmail integration not configured."}}
 
       gmail ->
+        token = context.google_token
+
         case validate_params(flags) do
-          {:ok, params} -> send_email(gmail, params)
+          {:ok, params} -> send_email(gmail, token, params)
           {:error, message} -> {:ok, %Result{status: :error, content: message}}
         end
     end
@@ -68,10 +70,10 @@ defmodule Assistant.Skills.Email.Send do
     end
   end
 
-  defp send_email(gmail, %{to: to, subject: subject, body: body, cc: cc}) do
+  defp send_email(gmail, token, %{to: to, subject: subject, body: body, cc: cc}) do
     opts = if cc, do: [cc: cc], else: []
 
-    case gmail.send_message(to, subject, body, opts) do
+    case gmail.send_message(token, to, subject, body, opts) do
       {:ok, sent} ->
         Logger.info("Email sent",
           message_id: sent[:id],

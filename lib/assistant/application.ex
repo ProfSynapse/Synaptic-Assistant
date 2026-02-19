@@ -28,6 +28,8 @@ defmodule Assistant.Application do
         {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Assistant.PubSub}
       ] ++
+        # Google Chat bot service account (conditional — only when credentials are configured).
+        # Used ONLY for chat.bot scope. Per-user OAuth2 is stateless (no supervised process).
         maybe_goth() ++
         [
           # Cron scheduler (before Oban — scheduled jobs may enqueue Oban work)
@@ -76,12 +78,10 @@ defmodule Assistant.Application do
     :ok
   end
 
-  # Returns Goth child spec if Google credentials are configured, empty list otherwise.
-  # This allows the app to start in dev environments without Google credentials.
-  #
-  # When GOOGLE_IMPERSONATE_EMAIL is set, adds a "sub" claim to the JWT for
-  # domain-wide delegation. This lets the service account act on behalf of a
-  # workspace user (required for Gmail and Calendar API access).
+  # Returns Goth child spec if Google service account credentials are configured.
+  # Goth is now used ONLY for the Chat bot (chat.bot scope).
+  # Per-user OAuth2 tokens are refreshed statelessly via Goth.Token.fetch/1
+  # and do NOT require a supervised Goth process.
   defp maybe_goth do
     case Application.get_env(:assistant, :google_credentials) do
       nil ->
@@ -89,25 +89,12 @@ defmodule Assistant.Application do
 
       credentials when is_map(credentials) ->
         scopes = Assistant.Integrations.Google.Auth.scopes()
-        goth_opts = goth_source_opts(scopes)
 
         [
-          {Goth, name: Assistant.Goth, source: {:service_account, credentials, goth_opts}}
+          {Goth,
+           name: Assistant.Goth,
+           source: {:service_account, credentials, [scopes: scopes]}}
         ]
-    end
-  end
-
-  # When an impersonate email is configured, use claims (with "sub" for domain-wide
-  # delegation) instead of plain scopes. Goth ignores :scopes when :claims is present,
-  # so we include the scope string inside the claims map.
-  defp goth_source_opts(scopes) do
-    case Application.get_env(:assistant, :google_impersonate_email) do
-      nil ->
-        [scopes: scopes]
-
-      email when is_binary(email) ->
-        scope_string = Enum.join(scopes, " ")
-        [claims: %{"scope" => scope_string, "sub" => email}]
     end
   end
 end

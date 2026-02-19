@@ -31,8 +31,10 @@ defmodule Assistant.Skills.Email.Draft do
         {:ok, %Result{status: :error, content: "Gmail integration not configured."}}
 
       gmail ->
+        token = context.google_token
+
         case validate_params(flags) do
-          {:ok, params} -> create_draft(gmail, params)
+          {:ok, params} -> create_draft(gmail, token, params)
           {:error, message} -> {:ok, %Result{status: :error, content: message}}
         end
     end
@@ -68,10 +70,10 @@ defmodule Assistant.Skills.Email.Draft do
     end
   end
 
-  defp create_draft(gmail, %{to: to, subject: subject, body: body, cc: cc}) do
+  defp create_draft(gmail, token, %{to: to, subject: subject, body: body, cc: cc}) do
     opts = if cc, do: [cc: cc], else: []
 
-    case gmail.create_draft(to, subject, body, opts) do
+    case gmail.create_draft(token, to, subject, body, opts) do
       {:ok, draft} ->
         Logger.info("Draft created",
           draft_id: draft[:id],
