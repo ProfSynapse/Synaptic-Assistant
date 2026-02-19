@@ -21,6 +21,7 @@ defmodule Assistant.Skills.Email.Read do
 
   require Logger
 
+  alias Assistant.Skills.Email.Helpers
   alias Assistant.Skills.Result
 
   @divider "\n\n---\n\n"
@@ -60,7 +61,7 @@ defmodule Assistant.Skills.Email.Read do
   defp fetch_one(gmail, id) do
     case gmail.get_message(id) do
       {:ok, msg} ->
-        Logger.info("Email read", message_id: id, subject: truncate_log(msg[:subject]))
+        Logger.info("Email read", message_id: id, subject: Helpers.truncate_log(msg[:subject] || "(none)"))
         {id, format_message(msg)}
 
       {:error, :not_found} ->
@@ -83,7 +84,4 @@ defmodule Assistant.Skills.Email.Read do
     Enum.join(header_lines, "\n") <> "\n\n" <> body
   end
 
-  defp truncate_log(nil), do: "(none)"
-  defp truncate_log(s) when byte_size(s) <= 50, do: s
-  defp truncate_log(s), do: String.slice(s, 0, 47) <> "..."
 end

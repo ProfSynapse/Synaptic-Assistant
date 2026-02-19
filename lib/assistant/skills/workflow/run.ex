@@ -34,16 +34,25 @@ defmodule Assistant.Skills.Workflow.Run do
          content: "Missing required flag: --name"
        }}
     else
-      path = workflow_path(name)
-
-      if File.exists?(path) do
-        enqueue_workflow(name, path)
-      else
+      unless valid_workflow_name?(name) do
         {:ok,
          %Result{
            status: :error,
-           content: "Workflow '#{name}' not found. Use `/workflow.list` to see available workflows."
+           content:
+             "Invalid workflow name: must be lowercase alphanumeric with hyphens or underscores, starting with a letter."
          }}
+      else
+        path = workflow_path(name)
+
+        if File.exists?(path) do
+          enqueue_workflow(name, path)
+        else
+          {:ok,
+           %Result{
+             status: :error,
+             content: "Workflow '#{name}' not found. Use `/workflow.list` to see available workflows."
+           }}
+        end
       end
     end
   end
@@ -73,6 +82,10 @@ defmodule Assistant.Skills.Workflow.Run do
            content: "Failed to enqueue workflow '#{name}': #{inspect(reason)}"
          }}
     end
+  end
+
+  defp valid_workflow_name?(name) do
+    Regex.match?(~r/^[a-z][a-z0-9_-]*$/, name)
   end
 
   defp workflow_path(name) do

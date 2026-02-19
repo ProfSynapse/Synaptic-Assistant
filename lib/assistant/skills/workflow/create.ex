@@ -29,8 +29,8 @@ defmodule Assistant.Skills.Workflow.Create do
   def execute(flags, _context) do
     with :ok <- validate_required(flags),
          :ok <- validate_name(flags["name"]),
-         :ok <- validate_no_newlines("description", flags["description"]),
-         :ok <- validate_no_newlines("channel", flags["channel"]),
+         :ok <- validate_field("description", flags["description"]),
+         :ok <- validate_field("channel", flags["channel"]),
          :ok <- validate_cron(flags["cron"]),
          :ok <- validate_no_conflict(flags["name"]) do
       path = write_workflow(flags)
@@ -164,13 +164,18 @@ defmodule Assistant.Skills.Workflow.Create do
     end
   end
 
-  defp validate_no_newlines(_field, nil), do: :ok
+  defp validate_field(_field, nil), do: :ok
 
-  defp validate_no_newlines(field, value) do
-    if String.contains?(value, ["\n", "\r"]) do
-      {:error, "The #{field} field must not contain newlines."}
-    else
-      :ok
+  defp validate_field(field, value) do
+    cond do
+      String.contains?(value, ["\n", "\r"]) ->
+        {:error, "The #{field} field must not contain newlines."}
+
+      String.contains?(value, "\"") ->
+        {:error, "The #{field} field must not contain double-quote characters."}
+
+      true ->
+        :ok
     end
   end
 

@@ -18,9 +18,8 @@ defmodule Assistant.Skills.Calendar.Update do
 
   @behaviour Assistant.Skills.Handler
 
+  alias Assistant.Skills.Calendar.Helpers
   alias Assistant.Skills.Result
-
-  @datetime_short_regex ~r/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
 
   @impl true
   def execute(flags, context) do
@@ -60,34 +59,13 @@ defmodule Assistant.Skills.Calendar.Update do
 
   defp build_params(flags) do
     %{}
-    |> maybe_put(:summary, Map.get(flags, "title"))
-    |> maybe_put(:start, normalize_datetime(Map.get(flags, "start")))
-    |> maybe_put(:end, normalize_datetime(Map.get(flags, "end")))
-    |> maybe_put(:description, Map.get(flags, "description"))
-    |> maybe_put(:location, Map.get(flags, "location"))
-    |> maybe_put(:attendees, parse_attendees(Map.get(flags, "attendees")))
+    |> Helpers.maybe_put(:summary, Map.get(flags, "title"))
+    |> Helpers.maybe_put(:start, Helpers.normalize_datetime(Map.get(flags, "start")))
+    |> Helpers.maybe_put(:end, Helpers.normalize_datetime(Map.get(flags, "end")))
+    |> Helpers.maybe_put(:description, Map.get(flags, "description"))
+    |> Helpers.maybe_put(:location, Map.get(flags, "location"))
+    |> Helpers.maybe_put(:attendees, Helpers.parse_attendees(Map.get(flags, "attendees")))
   end
-
-  defp normalize_datetime(nil), do: nil
-
-  defp normalize_datetime(dt) do
-    if Regex.match?(@datetime_short_regex, dt) do
-      String.replace(dt, " ", "T") <> ":00Z"
-    else
-      dt
-    end
-  end
-
-  defp parse_attendees(nil), do: nil
-  defp parse_attendees(""), do: nil
-
-  defp parse_attendees(str) do
-    result = str |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
-    if result == [], do: nil, else: result
-  end
-
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp format_confirmation(event) do
     title = event[:summary] || "(No title)"

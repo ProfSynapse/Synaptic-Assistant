@@ -11,9 +11,7 @@
 #   - lib/assistant/scheduler/quantum_loader.ex (also uses this pattern)
 
 defmodule Assistant.Skills.Workflow.Helpers do
-  @moduledoc """
-  Shared utility functions for workflow skill handlers.
-  """
+  @moduledoc false
 
   @workflows_dir Application.compile_env(:assistant, :workflows_dir, "priv/workflows")
 

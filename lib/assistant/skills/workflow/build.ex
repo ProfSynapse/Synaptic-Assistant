@@ -36,6 +36,7 @@ defmodule Assistant.Skills.Workflow.Build do
 
     with :ok <- validate_required(flags),
          :ok <- validate_name(flags["name"]),
+         :ok <- validate_no_field_newlines(flags),
          full_name = "#{domain}.#{flags["name"]}",
          :ok <- validate_no_conflict(full_name) do
       content = generate_workflow_file(full_name, flags)
@@ -89,6 +90,16 @@ defmodule Assistant.Skills.Workflow.Build do
     else
       :ok
     end
+  end
+
+  defp validate_no_field_newlines(flags) do
+    ["description", "schedule"]
+    |> Enum.filter(&Map.has_key?(flags, &1))
+    |> Enum.find_value(:ok, fn field ->
+      if String.contains?(flags[field], ["\n", "\r"]) do
+        {:error, "Field '#{field}' must not contain newlines."}
+      end
+    end)
   end
 
   defp generate_workflow_file(full_name, flags) do

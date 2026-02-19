@@ -18,12 +18,10 @@ defmodule Assistant.Skills.Calendar.List do
 
   @behaviour Assistant.Skills.Handler
 
+  alias Assistant.Skills.Calendar.Helpers
   alias Assistant.Skills.Result
 
-  @default_limit 10
-  @max_limit 50
   @date_regex ~r/^\d{4}-\d{2}-\d{2}$/
-  @datetime_short_regex ~r/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
 
   @impl true
   def execute(flags, context) do
@@ -33,7 +31,7 @@ defmodule Assistant.Skills.Calendar.List do
 
       calendar ->
         calendar_id = Map.get(flags, "calendar", "primary")
-        limit = parse_limit(Map.get(flags, "limit"))
+        limit = Helpers.parse_limit(Map.get(flags, "limit"))
 
         case build_opts(flags) do
           {:ok, opts} ->
@@ -74,8 +72,8 @@ defmodule Assistant.Skills.Calendar.List do
 
       from != nil or to != nil ->
         opts = []
-        opts = if from, do: [{:time_min, normalize_datetime(from)} | opts], else: opts
-        opts = if to, do: [{:time_max, normalize_datetime(to)} | opts], else: opts
+        opts = if from, do: [{:time_min, Helpers.normalize_datetime(from)} | opts], else: opts
+        opts = if to, do: [{:time_max, Helpers.normalize_datetime(to)} | opts], else: opts
         {:ok, opts}
 
       true ->
@@ -88,14 +86,6 @@ defmodule Assistant.Skills.Calendar.List do
       {:ok, date <> "T00:00:00Z", date <> "T23:59:59Z"}
     else
       {:error, "Invalid --date format. Expected YYYY-MM-DD, got: #{date}"}
-    end
-  end
-
-  defp normalize_datetime(dt) do
-    if Regex.match?(@datetime_short_regex, dt) do
-      String.replace(dt, " ", "T") <> ":00Z"
-    else
-      dt
     end
   end
 
@@ -114,15 +104,4 @@ defmodule Assistant.Skills.Calendar.List do
     "- #{title} | #{start_time} - #{end_time}#{location}"
   end
 
-  defp parse_limit(nil), do: @default_limit
-
-  defp parse_limit(limit) when is_binary(limit) do
-    case Integer.parse(limit) do
-      {n, _} -> min(max(n, 1), @max_limit)
-      :error -> @default_limit
-    end
-  end
-
-  defp parse_limit(limit) when is_integer(limit), do: min(max(limit, 1), @max_limit)
-  defp parse_limit(_), do: @default_limit
 end

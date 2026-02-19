@@ -8,9 +8,12 @@
 #   - lib/assistant/skills/email/draft.ex  (uses has_newlines?, truncate_log)
 #   - lib/assistant/skills/email/list.ex   (uses parse_limit, full_mode?, truncate)
 #   - lib/assistant/skills/email/search.ex (uses parse_limit, full_mode?, truncate)
+#   - lib/assistant/skills/helpers.ex      (cross-domain parse_limit)
 
 defmodule Assistant.Skills.Email.Helpers do
   @moduledoc false
+
+  alias Assistant.Skills.Helpers, as: SkillsHelpers
 
   @default_limit 10
   @max_limit 50
@@ -23,15 +26,7 @@ defmodule Assistant.Skills.Email.Helpers do
   def truncate(str, max) when byte_size(str) <= max, do: str
   def truncate(str, max), do: String.slice(str, 0, max - 3) <> "..."
 
-  def parse_limit(nil), do: @default_limit
-  def parse_limit(limit) when is_binary(limit) do
-    case Integer.parse(limit) do
-      {n, _} -> min(max(n, 1), @max_limit)
-      :error -> @default_limit
-    end
-  end
-  def parse_limit(limit) when is_integer(limit), do: min(max(limit, 1), @max_limit)
-  def parse_limit(_), do: @default_limit
+  def parse_limit(value), do: SkillsHelpers.parse_limit(value, @default_limit, @max_limit)
 
   def full_mode?(flags) do
     case Map.get(flags, "full") do

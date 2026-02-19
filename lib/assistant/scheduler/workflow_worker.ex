@@ -108,11 +108,23 @@ defmodule Assistant.Scheduler.WorkflowWorker do
       workflows_dir = Helpers.resolve_workflows_dir()
       resolved = Path.join(workflows_dir, path) |> Path.expand()
 
-      if String.starts_with?(resolved, Path.expand(workflows_dir)) do
-        {:ok, resolved}
-      else
-        {:error, :path_not_allowed}
+      cond do
+        not String.starts_with?(resolved, Path.expand(workflows_dir)) ->
+          {:error, :path_not_allowed}
+
+        contains_symlink?(resolved) ->
+          {:error, :path_not_allowed}
+
+        true ->
+          {:ok, resolved}
       end
+    end
+  end
+
+  defp contains_symlink?(path) do
+    case File.lstat(path) do
+      {:ok, %File.Stat{type: :symlink}} -> true
+      _ -> false
     end
   end
 
