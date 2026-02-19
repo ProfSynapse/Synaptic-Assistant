@@ -1,0 +1,122 @@
+# config/runtime.exs — Runtime configuration loaded at application boot.
+#
+# ALL secrets and environment-specific values go here.
+# This file is evaluated at runtime (not compile time), making it safe
+# for production releases where env vars are injected at deploy time.
+
+import Config
+
+# Start server if PHX_SERVER is set (used by releases)
+if System.get_env("PHX_SERVER") do
+  config :assistant, AssistantWeb.Endpoint, server: true
+end
+
+# PORT configuration for all environments
+config :assistant, AssistantWeb.Endpoint,
+  http: [port: String.to_integer(System.get_env("PORT") || "4000")]
+
+if config_env() == :prod do
+  database_url =
+    System.get_env("DATABASE_URL") ||
+      raise """
+      environment variable DATABASE_URL is missing.
+      For example: ecto://USER:PASS@HOST/DATABASE
+      """
+
+  maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
+
+  config :assistant, Assistant.Repo,
+    url: database_url,
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+    socket_options: maybe_ipv6
+
+  secret_key_base =
+    System.get_env("SECRET_KEY_BASE") ||
+      raise """
+      environment variable SECRET_KEY_BASE is missing.
+      You can generate one by calling: mix phx.gen.secret
+      """
+
+  host = System.get_env("PHX_HOST") || "example.com"
+
+  config :assistant, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+
+  config :assistant, AssistantWeb.Endpoint,
+    url: [host: host, port: 443, scheme: "https"],
+    http: [
+      ip: {0, 0, 0, 0, 0, 0, 0, 0}
+    ],
+    secret_key_base: secret_key_base
+end
+
+# --- API Keys (all environments, optional) ---
+
+# OpenRouter — LLM provider (chat completions, tool calling, STT)
+if api_key = System.get_env("OPENROUTER_API_KEY") do
+  config :assistant, :openrouter_api_key, api_key
+end
+
+# Google service account credentials (inline JSON string or file path to JSON key)
+# Goth requires a decoded map, so we parse JSON here at config time.
+if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
+  credentials =
+    if String.starts_with?(String.trim(google_creds), "{") do
+      Jason.decode!(google_creds)
+    else
+      google_creds |> File.read!() |> Jason.decode!()
+    end
+
+  config :assistant, :google_credentials, credentials
+end
+
+# Google domain-wide delegation — impersonate this user's mailbox and calendar.
+# Required for Gmail/Calendar API access via service account.
+# Set to the email of the workspace user to act on behalf of (e.g., "user@company.com").
+if impersonate_email = System.get_env("GOOGLE_IMPERSONATE_EMAIL") do
+  config :assistant, :google_impersonate_email, impersonate_email
+end
+
+# Google Cloud project number (used for Google Chat JWT audience verification)
+if project_number = System.get_env("GOOGLE_CLOUD_PROJECT_NUMBER") do
+  config :assistant, :google_cloud_project_number, project_number
+end
+
+# ElevenLabs — Text-to-Speech
+if api_key = System.get_env("ELEVENLABS_API_KEY") do
+  config :assistant, :elevenlabs_api_key, api_key
+end
+
+if voice_id = System.get_env("ELEVENLABS_VOICE_ID") do
+  config :assistant, :elevenlabs_voice_id, voice_id
+end
+
+# Telegram Bot
+if token = System.get_env("TELEGRAM_BOT_TOKEN") do
+  config :assistant, :telegram_bot_token, token
+end
+
+if secret = System.get_env("TELEGRAM_WEBHOOK_SECRET") do
+  config :assistant, :telegram_webhook_secret, secret
+end
+
+# Google Chat
+if webhook_url = System.get_env("GOOGLE_CHAT_WEBHOOK_URL") do
+  config :assistant, :google_chat_webhook_url, webhook_url
+end
+
+# HubSpot
+if api_key = System.get_env("HUBSPOT_API_KEY") do
+  config :assistant, :hubspot_api_key, api_key
+end
+
+# Cloak encryption key for Ecto field encryption
+if encryption_key = System.get_env("CLOAK_ENCRYPTION_KEY") do
+  config :assistant, Assistant.Vault,
+    ciphers: [
+      default: {
+        Cloak.Ciphers.AES.GCM,
+        tag: "AES.GCM.V1",
+        key: Base.decode64!(encryption_key)
+      }
+    ]
+end

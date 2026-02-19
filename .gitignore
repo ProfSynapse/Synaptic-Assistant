@@ -1,3 +1,33 @@
+# Environment & secrets
 .env
+.env.*
+!.env.example
+
+# Elixir/Phoenix
+/_build/
+/deps/
+/*.ez
+/cover/
+/doc/
+/.fetch
+
+# Database
+*.db
+*.db-journal
+
+# Generated on crash by the VM
+erl_crash.dump
+
+# Dialyzer PLTs
+/priv/plts/
+
+# IDE
 .history/
 .worktrees/
+.elixir_ls/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
