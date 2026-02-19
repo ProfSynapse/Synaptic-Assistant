@@ -35,6 +35,18 @@ All workflow skills that take a `name` flag must validate with `~r/^[a-z][a-z0-9
 ### YAML Frontmatter Safety
 `workflow/create.ex` validates user-controlled fields with `validate_field/2`: rejects embedded newlines (`\n`, `\r`) and double-quotes (`"`). Apply same pattern to any new skill that writes YAML files.
 
+### Google OAuth2 Architecture (PR #11)
+Per-user OAuth2 merged to main. Key patterns:
+- **Dual-mode auth**: `Auth.service_token/0` (Chat bot, Goth service account) vs `Auth.user_token/1` (per-user, stateless Goth refresh)
+- **Lazy auth**: skill invoked → no token → `maybe_require_google_auth/3` in `sub_agent.ex` → magic link sent → `PendingIntentWorker` auto-replays original command after OAuth
+- **Token errors**: `:not_connected` (never authed), `:token_expired` (needs refresh), `:refresh_failed` (grant revoked)
+- **Schema location**: `lib/assistant/schemas/OAuthToken` + `AuthToken` (NOT `lib/assistant/accounts/`)
+- **PKCE stored in DB**: `auth_tokens.code_verifier` column — ETS removed entirely
+- **Oban queue**: `:oauth_replay` for `PendingIntentWorker`; `AuthTokenCleanupWorker` cron daily at 03:00 UTC
+- **Test env vars required**: `ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-voice-id CLOAK_ENCRYPTION_KEY=$(openssl rand -base64 32)`
+- **Drive/Gmail/Calendar**: all public functions accept `access_token` as first param; `context.google_token` threaded through all 13 skill files
+
 ### Phase Status
 - Phase 1-4 complete and merged (PR #9). Branch: `main`.
 - Phase 4 covers: Gmail (5 skills), Calendar (3 skills), Workflow scheduler (4 skills + WorkflowWorker + QuantumLoader).
+- Phase 5 (PR #11): Per-user Google OAuth2 with magic link authorization flow. All Google skills now use per-user tokens.
