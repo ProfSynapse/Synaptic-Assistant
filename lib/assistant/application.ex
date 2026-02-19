@@ -30,8 +30,14 @@ defmodule Assistant.Application do
         # Google OAuth2 (conditional — only when credentials are configured)
         maybe_goth() ++
         [
+          # Cron scheduler (before Oban — scheduled jobs may enqueue Oban work)
+          Assistant.Scheduler,
+
           # Job processing
           {Oban, Application.fetch_env!(:assistant, Oban)},
+
+          # Workflow cron loader (after Scheduler + Oban — registers cron jobs for workflows)
+          Assistant.Scheduler.QuantumLoader,
 
           # Skill system (Task.Supervisor must start before Registry and Executor)
           {Task.Supervisor, name: Assistant.Skills.TaskSupervisor},
@@ -72,6 +78,10 @@ defmodule Assistant.Application do
 
   # Returns Goth child spec if Google credentials are configured, empty list otherwise.
   # This allows the app to start in dev environments without Google credentials.
+  #
+  # When GOOGLE_IMPERSONATE_EMAIL is set, adds a "sub" claim to the JWT for
+  # domain-wide delegation. This lets the service account act on behalf of a
+  # workspace user (required for Gmail and Calendar API access).
   defp maybe_goth do
     case Application.get_env(:assistant, :google_credentials) do
       nil ->
@@ -79,12 +89,27 @@ defmodule Assistant.Application do
 
       credentials when is_map(credentials) ->
         scopes = Assistant.Integrations.Google.Auth.scopes()
+        goth_opts = goth_source_opts(scopes)
 
         [
           {Goth,
            name: Assistant.Goth,
-           source: {:service_account, credentials, scopes: scopes}}
+           source: {:service_account, credentials, goth_opts}}
         ]
+    end
+  end
+
+  # When an impersonate email is configured, use claims (with "sub" for domain-wide
+  # delegation) instead of plain scopes. Goth ignores :scopes when :claims is present,
+  # so we include the scope string inside the claims map.
+  defp goth_source_opts(scopes) do
+    case Application.get_env(:assistant, :google_impersonate_email) do
+      nil ->
+        [scopes: scopes]
+
+      email when is_binary(email) ->
+        scope_string = Enum.join(scopes, " ")
+        [claims: %{"scope" => scope_string, "sub" => email}]
     end
   end
 end

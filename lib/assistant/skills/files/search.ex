@@ -18,6 +18,7 @@ defmodule Assistant.Skills.Files.Search do
 
   @behaviour Assistant.Skills.Handler
 
+  alias Assistant.Skills.Helpers, as: SkillsHelpers
   alias Assistant.Skills.Result
   alias Assistant.Integrations.Google.Drive
 
@@ -33,7 +34,7 @@ defmodule Assistant.Skills.Files.Search do
     query = Map.get(flags, "query")
     type = Map.get(flags, "type")
     folder = Map.get(flags, "folder")
-    limit = parse_limit(Map.get(flags, "limit"))
+    limit = SkillsHelpers.parse_limit(Map.get(flags, "limit"), @default_limit, @max_limit)
 
     case build_query(query, type, folder) do
       {:ok, q} ->
@@ -162,18 +163,6 @@ defmodule Assistant.Skills.Files.Search do
   defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
   defp format_bytes(bytes) when bytes < 1_048_576, do: "#{Float.round(bytes / 1024, 1)} KB"
   defp format_bytes(bytes), do: "#{Float.round(bytes / 1_048_576, 1)} MB"
-
-  defp parse_limit(nil), do: @default_limit
-
-  defp parse_limit(limit) when is_binary(limit) do
-    case Integer.parse(limit) do
-      {n, _} -> min(max(n, 1), @max_limit)
-      :error -> @default_limit
-    end
-  end
-
-  defp parse_limit(limit) when is_integer(limit), do: min(max(limit, 1), @max_limit)
-  defp parse_limit(_), do: @default_limit
 
   defp validate_drive_id(id) do
     if Regex.match?(@valid_drive_id, id) do

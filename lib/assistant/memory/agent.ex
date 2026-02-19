@@ -880,6 +880,7 @@ defmodule Assistant.Memory.Agent do
       conversation_id: get_in(gen_state, [:current_mission, :conversation_id]) || "unknown",
       execution_id: Ecto.UUID.generate(),
       user_id: gen_state.user_id,
+      integrations: Assistant.Integrations.Registry.default_integrations(),
       metadata: %{
         agent_id: "memory_agent:#{gen_state.user_id}",
         agent_type: :memory_agent

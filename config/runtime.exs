@@ -69,6 +69,13 @@ if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
   config :assistant, :google_credentials, credentials
 end
 
+# Google domain-wide delegation — impersonate this user's mailbox and calendar.
+# Required for Gmail/Calendar API access via service account.
+# Set to the email of the workspace user to act on behalf of (e.g., "user@company.com").
+if impersonate_email = System.get_env("GOOGLE_IMPERSONATE_EMAIL") do
+  config :assistant, :google_impersonate_email, impersonate_email
+end
+
 # Google Cloud project number (used for Google Chat JWT audience verification)
 if project_number = System.get_env("GOOGLE_CLOUD_PROJECT_NUMBER") do
   config :assistant, :google_cloud_project_number, project_number

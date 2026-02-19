@@ -1152,6 +1152,7 @@ defmodule Assistant.Orchestrator.SubAgent do
       execution_id: Ecto.UUID.generate(),
       user_id: engine_state[:user_id] || "unknown",
       channel: engine_state[:channel],
+      integrations: Assistant.Integrations.Registry.default_integrations(),
       metadata: %{
         agent_id: dispatch_params.agent_id,
         root_conversation_id: root_conversation_id,

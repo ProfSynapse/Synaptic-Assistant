@@ -240,7 +240,8 @@ defmodule Assistant.Orchestrator.LoopRunner do
       conversation_id: loop_state[:conversation_id] || "unknown",
       execution_id: Ecto.UUID.generate(),
       user_id: loop_state[:user_id] || "unknown",
-      channel: loop_state[:channel]
+      channel: loop_state[:channel],
+      integrations: Assistant.Integrations.Registry.default_integrations()
     }
   end
 end
