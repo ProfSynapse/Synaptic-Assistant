@@ -54,8 +54,7 @@ defmodule Assistant.Resilience.CircuitBreaker do
     fuse_name = skill_fuse_name(skill_name)
 
     opts =
-      {{:standard, @skill_max_melts, @skill_melt_period_ms},
-       {:reset, @skill_reset_ms}}
+      {{:standard, @skill_max_melts, @skill_melt_period_ms}, {:reset, @skill_reset_ms}}
 
     case :fuse.install(fuse_name, opts) do
       :ok -> :ok
@@ -335,8 +334,7 @@ defmodule Assistant.Resilience.CircuitBreaker do
           level: 4
         )
 
-        {:error, :limit_exceeded,
-         Map.merge(details, %{level: 4, scope: :conversation})}
+        {:error, :limit_exceeded, Map.merge(details, %{level: 4, scope: :conversation})}
     end
   end
 

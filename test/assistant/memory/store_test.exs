@@ -28,7 +28,10 @@ defmodule Assistant.Memory.StoreTest do
   # Helper to insert a test user
   defp create_test_user do
     %User{}
-    |> User.changeset(%{external_id: "test-user-#{System.unique_integer([:positive])}", channel: "test"})
+    |> User.changeset(%{
+      external_id: "test-user-#{System.unique_integer([:positive])}",
+      channel: "test"
+    })
     |> Repo.insert!()
   end
 

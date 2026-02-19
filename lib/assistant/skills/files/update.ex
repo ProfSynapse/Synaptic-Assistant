@@ -34,10 +34,15 @@ defmodule Assistant.Skills.Files.Update do
         {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
 
       is_nil(search) || search == "" ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --search (text to find)."}}
+        {:ok,
+         %Result{status: :error, content: "Missing required parameter: --search (text to find)."}}
 
       is_nil(replace) ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --replace (replacement text)."}}
+        {:ok,
+         %Result{
+           status: :error,
+           content: "Missing required parameter: --replace (replacement text)."
+         }}
 
       true ->
         do_update(drive, file_id, search, replace, replace_all?)
@@ -50,27 +55,31 @@ defmodule Assistant.Skills.Files.Update do
          {:ok, file} <- drive.update_file_content(file_id, updated) do
       count = count_replacements(content, search, replace_all?)
 
-      {:ok, %Result{
-        status: :ok,
-        content: "Updated #{file.name}: replaced #{count} occurrence(s) of '#{search}'.",
-        side_effects: [:file_updated],
-        metadata: %{file_id: file.id, file_name: file.name, replacements: count}
-      }}
+      {:ok,
+       %Result{
+         status: :ok,
+         content: "Updated #{file.name}: replaced #{count} occurrence(s) of '#{search}'.",
+         side_effects: [:file_updated],
+         metadata: %{file_id: file.id, file_name: file.name, replacements: count}
+       }}
     else
       :unchanged ->
         {:ok, %Result{status: :ok, content: "No changes made (pattern not found)."}}
 
       {:error, :not_found} ->
-        {:ok, %Result{
-          status: :error,
-          content: "File not found: #{file_id}. Check the file ID and ensure the service account has access."
-        }}
+        {:ok,
+         %Result{
+           status: :error,
+           content:
+             "File not found: #{file_id}. Check the file ID and ensure the service account has access."
+         }}
 
       {:error, reason} ->
-        {:ok, %Result{
-          status: :error,
-          content: "Failed to update file #{file_id}: #{inspect(reason)}"
-        }}
+        {:ok,
+         %Result{
+           status: :error,
+           content: "Failed to update file #{file_id}: #{inspect(reason)}"
+         }}
     end
   end
 

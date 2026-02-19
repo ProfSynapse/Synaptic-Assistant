@@ -125,12 +125,16 @@ defmodule Assistant.Memory.AgentTest do
     test "save_memory cast accepted from idle state", %{user_id: user_id} do
       {:ok, pid} = MemoryAgent.start_link(user_id: user_id)
 
-      GenServer.cast(pid, {:mission, :save_memory, %{
-        conversation_id: "conv-1",
-        user_id: user_id,
-        user_message: "Hello",
-        assistant_response: "Hi"
-      }})
+      GenServer.cast(
+        pid,
+        {:mission, :save_memory,
+         %{
+           conversation_id: "conv-1",
+           user_id: user_id,
+           user_message: "Hello",
+           assistant_response: "Hi"
+         }}
+      )
 
       # Agent eventually returns to idle (LLM fails without real client)
       wait_for_idle(user_id, 2_000)
@@ -170,11 +174,15 @@ defmodule Assistant.Memory.AgentTest do
     test "agent returns to idle after LLM error (no real client)", %{user_id: user_id} do
       {:ok, pid} = MemoryAgent.start_link(user_id: user_id)
 
-      GenServer.cast(pid, {:mission, :compact_conversation, %{
-        conversation_id: "conv-1",
-        user_id: user_id,
-        message_range: {1, 50}
-      }})
+      GenServer.cast(
+        pid,
+        {:mission, :compact_conversation,
+         %{
+           conversation_id: "conv-1",
+           user_id: user_id,
+           message_range: {1, 50}
+         }}
+      )
 
       wait_for_idle(user_id, 2_000)
 
@@ -236,7 +244,9 @@ defmodule Assistant.Memory.AgentTest do
       :ok
     else
       tmp_dir = System.tmp_dir!()
-      config_path = Path.join(tmp_dir, "test_config_agent_#{System.unique_integer([:positive])}.yaml")
+
+      config_path =
+        Path.join(tmp_dir, "test_config_agent_#{System.unique_integer([:positive])}.yaml")
 
       yaml = """
       defaults:

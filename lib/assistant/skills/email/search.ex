@@ -42,7 +42,12 @@ defmodule Assistant.Skills.Email.Search do
   defp search_messages(gmail, query, limit, full?) do
     case gmail.search_messages(query, limit: limit) do
       {:ok, []} ->
-        {:ok, %Result{status: :ok, content: "No messages found matching the given criteria.", metadata: %{count: 0}}}
+        {:ok,
+         %Result{
+           status: :ok,
+           content: "No messages found matching the given criteria.",
+           metadata: %{count: 0}
+         }}
 
       {:ok, messages} ->
         content = format_output(messages, full?)
@@ -80,6 +85,7 @@ defmodule Assistant.Skills.Email.Search do
       "To: #{msg[:to] || "unknown"}",
       "Date: #{msg[:date] || "unknown"}"
     ]
+
     body = msg[:body] || "(no body content)"
     Enum.join(headers, "\n") <> "\n\n" <> body
   end
@@ -105,5 +111,4 @@ defmodule Assistant.Skills.Email.Search do
   defp maybe_add_unread(parts, nil), do: parts
   defp maybe_add_unread(parts, "false"), do: parts
   defp maybe_add_unread(parts, _), do: parts ++ ["is:unread"]
-
 end

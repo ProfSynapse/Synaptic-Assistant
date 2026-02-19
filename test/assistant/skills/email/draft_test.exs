@@ -74,8 +74,8 @@ defmodule Assistant.Skills.Email.DraftTest do
     test "passes correct arguments to Gmail client" do
       Draft.execute(valid_flags(), build_context())
 
-      assert_received {:gmail_draft, "recipient@example.com", "Draft Subject",
-                       "Draft body text.", []}
+      assert_received {:gmail_draft, "recipient@example.com", "Draft Subject", "Draft body text.",
+                       []}
     end
 
     test "includes cc option when provided" do

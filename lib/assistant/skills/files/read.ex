@@ -48,36 +48,47 @@ defmodule Assistant.Skills.Files.Read do
         {display_content, truncated?} = maybe_truncate(content)
 
         header = build_header(drive, file_id)
-        truncation_note = if truncated?, do: "\n\n...content truncated at #{@max_content_length} characters. Full file available in Drive.", else: ""
 
-        {:ok, %Result{
-          status: :ok,
-          content: header <> display_content <> truncation_note,
-          metadata: %{
-            file_id: file_id,
-            content_length: byte_size(content),
-            truncated: truncated?
-          }
-        }}
+        truncation_note =
+          if truncated?,
+            do:
+              "\n\n...content truncated at #{@max_content_length} characters. Full file available in Drive.",
+            else: ""
+
+        {:ok,
+         %Result{
+           status: :ok,
+           content: header <> display_content <> truncation_note,
+           metadata: %{
+             file_id: file_id,
+             content_length: byte_size(content),
+             truncated: truncated?
+           }
+         }}
 
       {:error, :not_found} ->
-        {:ok, %Result{
-          status: :error,
-          content: "File not found: #{file_id}. Check the file ID and ensure the service account has access."
-        }}
+        {:ok,
+         %Result{
+           status: :error,
+           content:
+             "File not found: #{file_id}. Check the file ID and ensure the service account has access."
+         }}
 
       {:error, reason} ->
-        {:ok, %Result{
-          status: :error,
-          content: "Failed to read file #{file_id}: #{inspect(reason)}"
-        }}
+        {:ok,
+         %Result{
+           status: :error,
+           content: "Failed to read file #{file_id}: #{inspect(reason)}"
+         }}
     end
   end
 
   defp build_header(drive, file_id) do
     case drive.get_file(file_id) do
       {:ok, metadata} ->
-        type_label = if Drive.google_workspace_type?(metadata.mime_type), do: " (exported as text)", else: ""
+        type_label =
+          if Drive.google_workspace_type?(metadata.mime_type), do: " (exported as text)", else: ""
+
         "## #{metadata.name}#{type_label}\n\n"
 
       {:error, _} ->

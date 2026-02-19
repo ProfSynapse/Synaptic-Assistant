@@ -259,7 +259,10 @@ defmodule Assistant.TaskManager.Queries do
 
   defp add_history_entries(multi, task, changes, attrs) do
     user_id = Map.get(attrs, :changed_by_user_id) || Map.get(attrs, "changed_by_user_id")
-    conv_id = Map.get(attrs, :changed_via_conversation_id) || Map.get(attrs, "changed_via_conversation_id")
+
+    conv_id =
+      Map.get(attrs, :changed_via_conversation_id) ||
+        Map.get(attrs, "changed_via_conversation_id")
 
     @tracked_fields
     |> Enum.filter(&Map.has_key?(changes, &1))
@@ -321,10 +324,14 @@ defmodule Assistant.TaskManager.Queries do
   def delete_task(id, opts, user_id) do
     reason = Keyword.get(opts, :archive_reason, "cancelled")
 
-    update_task(id, %{
-      archived_at: DateTime.utc_now(),
-      archive_reason: reason
-    }, user_id)
+    update_task(
+      id,
+      %{
+        archived_at: DateTime.utc_now(),
+        archive_reason: reason
+      },
+      user_id
+    )
   end
 
   # --------------------------------------------------------------------

@@ -98,9 +98,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     dispatch_params = Keyword.fetch!(opts, :dispatch_params)
     agent_id = dispatch_params.agent_id
 
-    GenServer.start_link(__MODULE__, opts,
-      name: via_tuple(agent_id)
-    )
+    GenServer.start_link(__MODULE__, opts, name: via_tuple(agent_id))
   end
 
   @doc """
@@ -275,7 +273,13 @@ defmodule Assistant.Orchestrator.SubAgent do
 
         task =
           Task.async(fn ->
-            run_loop(context, agent_limit_state, state.dispatch_params, state.engine_state, parent)
+            run_loop(
+              context,
+              agent_limit_state,
+              state.dispatch_params,
+              state.engine_state,
+              parent
+            )
           end)
 
         {:noreply, %{state | loop_task: task, loop_ref: task.ref}}
@@ -317,7 +321,8 @@ defmodule Assistant.Orchestrator.SubAgent do
       # Send the resume signal to the loop task (it's waiting on receive)
       send(state.loop_task.pid, {:resume, update})
 
-      {:reply, :ok, %{state | status: :running, awaiting_reason: nil, awaiting_partial_history: nil}}
+      {:reply, :ok,
+       %{state | status: :running, awaiting_reason: nil, awaiting_partial_history: nil}}
     end
   end
 
@@ -356,7 +361,12 @@ defmodule Assistant.Orchestrator.SubAgent do
           Map.put(map, :duration_ms, duration_ms)
 
         other ->
-          %{status: :completed, result: other, tool_calls_used: state.tool_calls_used, duration_ms: duration_ms}
+          %{
+            status: :completed,
+            result: other,
+            tool_calls_used: state.tool_calls_used,
+            duration_ms: duration_ms
+          }
       end
 
     Logger.info("Sub-agent completed",
@@ -413,7 +423,14 @@ defmodule Assistant.Orchestrator.SubAgent do
 
     case @llm_client.chat_completion(context.messages, model_opts) do
       {:ok, response} ->
-        handle_response(response, context, agent_state, dispatch_params, engine_state, genserver_pid)
+        handle_response(
+          response,
+          context,
+          agent_state,
+          dispatch_params,
+          engine_state,
+          genserver_pid
+        )
 
       {:error, reason} ->
         Logger.error("Sub-agent LLM call failed",
@@ -430,7 +447,14 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp handle_response(response, context, agent_state, dispatch_params, engine_state, genserver_pid) do
+  defp handle_response(
+         response,
+         context,
+         agent_state,
+         dispatch_params,
+         engine_state,
+         genserver_pid
+       ) do
     cond do
       # Text response — mission complete
       has_text_no_tools?(response) ->
@@ -462,7 +486,15 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_tool_calls(tool_calls, _response, context, agent_state, dispatch_params, engine_state, genserver_pid) do
+  defp execute_tool_calls(
+         tool_calls,
+         _response,
+         context,
+         agent_state,
+         dispatch_params,
+         engine_state,
+         genserver_pid
+       ) do
     call_count = length(tool_calls)
 
     case Limits.check_agent(agent_state, call_count) do
@@ -522,9 +554,17 @@ defmodule Assistant.Orchestrator.SubAgent do
 
                 # Update dispatch_params with any new skills
                 updated_dispatch = maybe_add_skills(dispatch_params, update[:skills])
-                updated_context = update_context_with_new_tools(context, resumed_messages, updated_dispatch)
 
-                run_loop(updated_context, final_agent_state, updated_dispatch, engine_state, genserver_pid)
+                updated_context =
+                  update_context_with_new_tools(context, resumed_messages, updated_dispatch)
+
+                run_loop(
+                  updated_context,
+                  final_agent_state,
+                  updated_dispatch,
+                  engine_state,
+                  genserver_pid
+                )
 
               {:shutdown, reason} ->
                 %{
@@ -1085,7 +1125,8 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp wait_for_completion(_agent_id, monitor_ref) do
     receive do
-      {:DOWN, ^monitor_ref, :process, _pid, {:shutdown, {:error, {:context_budget_exceeded, _}} = error}} ->
+      {:DOWN, ^monitor_ref, :process, _pid,
+       {:shutdown, {:error, {:context_budget_exceeded, _}} = error}} ->
         # Context budget exceeded — return the error directly
         error
 

@@ -62,7 +62,9 @@ defmodule Assistant.Scheduler.QuantumLoaderTest do
 
   defp safe_stop(name) do
     case Process.whereis(name) do
-      nil -> :ok
+      nil ->
+        :ok
+
       pid ->
         try do
           GenServer.stop(pid, :normal, 5_000)

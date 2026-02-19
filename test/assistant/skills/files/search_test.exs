@@ -229,10 +229,13 @@ defmodule Assistant.Skills.Files.SearchTest do
     end
 
     test "formats multiple files" do
-      set_mock_response({:ok, [
-        mock_file(%{id: "f1", name: "Doc One"}),
-        mock_file(%{id: "f2", name: "Doc Two"})
-      ]})
+      set_mock_response(
+        {:ok,
+         [
+           mock_file(%{id: "f1", name: "Doc One"}),
+           mock_file(%{id: "f2", name: "Doc Two"})
+         ]}
+      )
 
       {:ok, result} = Search.execute(%{}, build_context())
 

@@ -31,15 +31,16 @@ defmodule Assistant.Channels.GoogleChatTest do
     end
 
     test "uses argumentText over text when available" do
-      event = build_message_event(%{
-        "message" => %{
-          "name" => "spaces/AAAA/messages/msg1",
-          "text" => "@Bot do something",
-          "argumentText" => "do something",
-          "sender" => %{"name" => "users/1", "displayName" => "User"},
-          "thread" => %{"name" => "spaces/AAAA/threads/t1"}
-        }
-      })
+      event =
+        build_message_event(%{
+          "message" => %{
+            "name" => "spaces/AAAA/messages/msg1",
+            "text" => "@Bot do something",
+            "argumentText" => "do something",
+            "sender" => %{"name" => "users/1", "displayName" => "User"},
+            "thread" => %{"name" => "spaces/AAAA/threads/t1"}
+          }
+        })
 
       {:ok, msg} = GoogleChat.normalize(event)
       assert msg.content == "do something"
@@ -47,14 +48,15 @@ defmodule Assistant.Channels.GoogleChatTest do
     end
 
     test "trims whitespace from content" do
-      event = build_message_event(%{
-        "message" => %{
-          "name" => "spaces/AAAA/messages/msg1",
-          "text" => "  spaced out  ",
-          "sender" => %{"name" => "users/1"},
-          "thread" => %{"name" => "spaces/AAAA/threads/t1"}
-        }
-      })
+      event =
+        build_message_event(%{
+          "message" => %{
+            "name" => "spaces/AAAA/messages/msg1",
+            "text" => "  spaced out  ",
+            "sender" => %{"name" => "users/1"},
+            "thread" => %{"name" => "spaces/AAAA/threads/t1"}
+          }
+        })
 
       {:ok, msg} = GoogleChat.normalize(event)
       assert msg.content == "spaced out"
@@ -78,13 +80,14 @@ defmodule Assistant.Channels.GoogleChatTest do
     end
 
     test "handles missing thread gracefully" do
-      event = build_message_event(%{
-        "message" => %{
-          "name" => "spaces/AAAA/messages/msg1",
-          "text" => "no thread",
-          "sender" => %{"name" => "users/1"}
-        }
-      })
+      event =
+        build_message_event(%{
+          "message" => %{
+            "name" => "spaces/AAAA/messages/msg1",
+            "text" => "no thread",
+            "sender" => %{"name" => "users/1"}
+          }
+        })
 
       {:ok, msg} = GoogleChat.normalize(event)
       assert msg.thread_id == nil
@@ -107,21 +110,22 @@ defmodule Assistant.Channels.GoogleChatTest do
     end
 
     test "extracts attachments when present" do
-      event = build_message_event(%{
-        "message" => %{
-          "name" => "spaces/AAAA/messages/msg1",
-          "text" => "see attached",
-          "sender" => %{"name" => "users/1"},
-          "thread" => %{"name" => "spaces/AAAA/threads/t1"},
-          "attachment" => [
-            %{
-              "attachmentDataRef" => %{"resourceName" => "res/123"},
-              "contentType" => "image/png",
-              "contentName" => "screenshot.png"
-            }
-          ]
-        }
-      })
+      event =
+        build_message_event(%{
+          "message" => %{
+            "name" => "spaces/AAAA/messages/msg1",
+            "text" => "see attached",
+            "sender" => %{"name" => "users/1"},
+            "thread" => %{"name" => "spaces/AAAA/threads/t1"},
+            "attachment" => [
+              %{
+                "attachmentDataRef" => %{"resourceName" => "res/123"},
+                "contentType" => "image/png",
+                "contentName" => "screenshot.png"
+              }
+            ]
+          }
+        })
 
       {:ok, msg} = GoogleChat.normalize(event)
       assert length(msg.attachments) == 1

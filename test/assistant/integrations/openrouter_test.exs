@@ -37,7 +37,8 @@ defmodule Assistant.Integrations.OpenRouterTest do
       messages = [%{role: "user", content: "Hello"}]
       tools = [%{type: "function", function: %{name: "test_tool"}}]
 
-      assert {:ok, body} = OpenRouter.build_request_body(messages, model: "test/model", tools: tools)
+      assert {:ok, body} =
+               OpenRouter.build_request_body(messages, model: "test/model", tools: tools)
 
       assert is_list(body.tools)
       assert body.tool_choice == "auto"
@@ -67,13 +68,19 @@ defmodule Assistant.Integrations.OpenRouterTest do
 
     test "includes temperature when specified" do
       messages = [%{role: "user", content: "Hello"}]
-      assert {:ok, body} = OpenRouter.build_request_body(messages, model: "test/model", temperature: 0.5)
+
+      assert {:ok, body} =
+               OpenRouter.build_request_body(messages, model: "test/model", temperature: 0.5)
+
       assert body.temperature == 0.5
     end
 
     test "includes max_tokens when specified" do
       messages = [%{role: "user", content: "Hello"}]
-      assert {:ok, body} = OpenRouter.build_request_body(messages, model: "test/model", max_tokens: 4096)
+
+      assert {:ok, body} =
+               OpenRouter.build_request_body(messages, model: "test/model", max_tokens: 4096)
+
       assert body.max_tokens == 4096
     end
 
@@ -98,7 +105,8 @@ defmodule Assistant.Integrations.OpenRouterTest do
         %{type: "function", function: %{name: "middle_tool"}}
       ]
 
-      assert {:ok, body} = OpenRouter.build_request_body(messages, model: "test/model", tools: tools)
+      assert {:ok, body} =
+               OpenRouter.build_request_body(messages, model: "test/model", tools: tools)
 
       names = Enum.map(body.tools, fn t -> t.function.name end)
       assert names == ["alpha_tool", "middle_tool", "zebra_tool"]
@@ -127,7 +135,9 @@ defmodule Assistant.Integrations.OpenRouterTest do
       ]
 
       sorted = OpenRouter.sort_tools(tools)
-      assert [%{"function" => %{"name" => "a_tool"}}, %{"function" => %{"name" => "z_tool"}}] = sorted
+
+      assert [%{"function" => %{"name" => "a_tool"}}, %{"function" => %{"name" => "z_tool"}}] =
+               sorted
     end
 
     test "handles empty list" do
@@ -146,10 +156,12 @@ defmodule Assistant.Integrations.OpenRouterTest do
       ]
 
       sorted = OpenRouter.sort_tools(tools)
-      names = Enum.map(sorted, fn
-        %{function: %{name: n}} -> n
-        %{"function" => %{"name" => n}} -> n
-      end)
+
+      names =
+        Enum.map(sorted, fn
+          %{function: %{name: n}} -> n
+          %{"function" => %{"name" => n}} -> n
+        end)
 
       assert names == ["alpha", "beta"]
     end
@@ -174,6 +186,55 @@ defmodule Assistant.Integrations.OpenRouterTest do
       assert result.type == "text"
       assert result.text == "System prompt text"
       assert result.cache_control == %{type: "ephemeral", ttl: "1h"}
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # build_image_request_body/2
+  # ---------------------------------------------------------------
+
+  describe "build_image_request_body/2" do
+    test "returns error when no model specified" do
+      assert {:error, :no_model_specified} =
+               OpenRouter.build_image_request_body("A cat in space", [])
+    end
+
+    test "builds minimal image body with default modalities" do
+      assert {:ok, body} =
+               OpenRouter.build_image_request_body("A cat in space",
+                 model: "openai/gpt-5-image-mini"
+               )
+
+      assert body.model == "openai/gpt-5-image-mini"
+      assert body.modalities == ["image", "text"]
+      assert body.messages == [%{role: "user", content: "A cat in space"}]
+      refute Map.has_key?(body, :image)
+    end
+
+    test "includes image options when provided" do
+      assert {:ok, body} =
+               OpenRouter.build_image_request_body("A cat in space",
+                 model: "openai/gpt-5-image-mini",
+                 n: 2,
+                 size: "1024x1024",
+                 aspect_ratio: "16:9"
+               )
+
+      assert body.image.n == 2
+      assert body.image.size == "1024x1024"
+      assert body.image.aspect_ratio == "16:9"
+    end
+
+    test "ignores invalid image options" do
+      assert {:ok, body} =
+               OpenRouter.build_image_request_body("A cat in space",
+                 model: "openai/gpt-5-image-mini",
+                 n: 0,
+                 size: "",
+                 aspect_ratio: ""
+               )
+
+      refute Map.has_key?(body, :image)
     end
   end
 
@@ -206,6 +267,17 @@ defmodule Assistant.Integrations.OpenRouterTest do
     test "returns error when no model specified" do
       messages = [%{role: "user", content: "Hello"}]
       assert {:error, :no_model_specified} = OpenRouter.chat_completion(messages)
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # image_generation/2 — error paths
+  # ---------------------------------------------------------------
+
+  describe "image_generation/2" do
+    test "returns error when no model specified" do
+      assert {:error, :no_model_specified} =
+               OpenRouter.image_generation("A cat in space")
     end
   end
 end

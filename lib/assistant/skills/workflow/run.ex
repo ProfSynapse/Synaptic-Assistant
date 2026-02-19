@@ -50,7 +50,8 @@ defmodule Assistant.Skills.Workflow.Run do
           {:ok,
            %Result{
              status: :error,
-             content: "Workflow '#{name}' not found. Use `/workflow.list` to see available workflows."
+             content:
+               "Workflow '#{name}' not found. Use `/workflow.list` to see available workflows."
            }}
         end
       end

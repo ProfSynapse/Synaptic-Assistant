@@ -77,7 +77,8 @@ defmodule Assistant.Skills.Workflow.Build do
         {:error, "Name '#{name}' is reserved (used by get_skill routing)"}
 
       not Regex.match?(~r/^[a-z][a-z0-9_]*$/, name) ->
-        {:error, "Workflow name must be lowercase alphanumeric + underscore, starting with a letter"}
+        {:error,
+         "Workflow name must be lowercase alphanumeric + underscore, starting with a letter"}
 
       true ->
         :ok

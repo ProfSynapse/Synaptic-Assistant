@@ -67,12 +67,13 @@ defmodule Assistant.Memory.TurnClassifierTest do
       Phoenix.PubSub.broadcast(
         Assistant.PubSub,
         "memory:turn_completed",
-        {:turn_completed, %{
-          conversation_id: "conv-1",
-          user_id: "user-1",
-          user_message: "I work at Acme Corp",
-          assistant_response: "That's interesting!"
-        }}
+        {:turn_completed,
+         %{
+           conversation_id: "conv-1",
+           user_id: "user-1",
+           user_message: "I work at Acme Corp",
+           assistant_response: "That's interesting!"
+         }}
       )
 
       # Give the async task time to run (and fail)

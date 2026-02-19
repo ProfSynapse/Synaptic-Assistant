@@ -306,7 +306,9 @@ defmodule Assistant.Skills.RegistryTest do
 
   describe "empty skills directory" do
     test "starts with empty dir" do
-      empty_dir = Path.join(System.tmp_dir!(), "empty_skills_#{System.unique_integer([:positive])}")
+      empty_dir =
+        Path.join(System.tmp_dir!(), "empty_skills_#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(empty_dir)
 
       {:ok, pid} = Registry.start_link(skills_dir: empty_dir)

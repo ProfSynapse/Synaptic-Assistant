@@ -200,7 +200,9 @@ defmodule Assistant.Memory.TurnClassifier do
   defp resolve_classification_model do
     # Prefer sentinel role (cheapest fast-tier model), fall back to compaction, then hardcoded
     case ConfigLoader.model_for(:sentinel) do
-      %{id: id} -> id
+      %{id: id} ->
+        id
+
       nil ->
         case ConfigLoader.model_for(:compaction) do
           %{id: id} -> id

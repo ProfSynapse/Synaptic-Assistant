@@ -175,7 +175,13 @@ defmodule Assistant.Memory.SkillExecutorTest do
         SkillExecutor.execute("memory.query_entity_graph", nil, %{}, context, session)
 
       assert {:ok, %Result{}, _} =
-               SkillExecutor.execute("memory.extract_entities", nil, %{}, context, session_after_read)
+               SkillExecutor.execute(
+                 "memory.extract_entities",
+                 nil,
+                 %{},
+                 context,
+                 session_after_read
+               )
     end
 
     test "multiple writes allowed after single read" do

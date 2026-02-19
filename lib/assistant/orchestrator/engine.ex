@@ -75,9 +75,7 @@ defmodule Assistant.Orchestrator.Engine do
   """
   @spec start_link(String.t(), keyword()) :: GenServer.on_start()
   def start_link(conversation_id, opts \\ []) do
-    GenServer.start_link(__MODULE__, {conversation_id, opts},
-      name: via_tuple(conversation_id)
-    )
+    GenServer.start_link(__MODULE__, {conversation_id, opts}, name: via_tuple(conversation_id))
   end
 
   @doc """
@@ -251,8 +249,7 @@ defmodule Assistant.Orchestrator.Engine do
 
           {:ok,
            "I've reached the processing limit for this conversation window. " <>
-             "Please wait a moment before sending another message.",
-           state}
+             "Please wait a moment before sending another message.", state}
       end
     end
   end
@@ -391,10 +388,11 @@ defmodule Assistant.Orchestrator.Engine do
             "Complete existing agents before dispatching more, or synthesize a response " <>
             "with current results."
 
-        nudged = Nudger.format_error(base, :limit_exceeded, %{
-          used: details.used,
-          max: details.max
-        })
+        nudged =
+          Nudger.format_error(base, :limit_exceeded, %{
+            used: details.used,
+            max: details.max
+          })
 
         limit_messages =
           Enum.map(pending_dispatches, fn {tc, _params} ->
@@ -521,8 +519,7 @@ defmodule Assistant.Orchestrator.Engine do
     |> Map.update!(:total_usage, fn current ->
       %{
         prompt_tokens: (current[:prompt_tokens] || 0) + (usage[:prompt_tokens] || 0),
-        completion_tokens:
-          (current[:completion_tokens] || 0) + (usage[:completion_tokens] || 0)
+        completion_tokens: (current[:completion_tokens] || 0) + (usage[:completion_tokens] || 0)
       }
     end)
     # Track the most recent prompt_tokens for usage-based context trimming.
@@ -560,12 +557,13 @@ defmodule Assistant.Orchestrator.Engine do
     Phoenix.PubSub.broadcast(
       Assistant.PubSub,
       "memory:turn_completed",
-      {:turn_completed, %{
-        conversation_id: state.conversation_id,
-        user_id: state.user_id,
-        user_message: user_message,
-        assistant_response: assistant_response
-      }}
+      {:turn_completed,
+       %{
+         conversation_id: state.conversation_id,
+         user_id: state.user_id,
+         user_message: user_message,
+         assistant_response: assistant_response
+       }}
     )
   end
 

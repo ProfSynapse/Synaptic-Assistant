@@ -21,6 +21,7 @@ defmodule Assistant.Integrations.OpenRouter do
 
     - Non-streaming chat completions (default mode)
     - Streaming completions via SSE with callback
+    - Image generation via chat completions (`modalities: ["image", "text"]`)
     - Tool-calling with OpenAI-format tool definitions
     - Prompt caching with `cache_control` breakpoints (Anthropic: max 4 breakpoints)
     - Audio input via chat completions (STT for voice channel)
@@ -113,10 +114,12 @@ defmodule Assistant.Integrations.OpenRouter do
 
         {:ok, %{status: status, body: resp_body}} when status >= 400 ->
           error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+
           Logger.error("OpenRouter API error",
             status: status,
             error: error_message
           )
+
           {:error, {:api_error, status, error_message}}
 
         {:error, %Req.TransportError{reason: reason}} ->
@@ -201,6 +204,91 @@ defmodule Assistant.Integrations.OpenRouter do
           Logger.error("OpenRouter streaming request failed", reason: inspect(reason))
           {:error, {:request_failed, reason}}
       end
+    end
+  end
+
+  @doc """
+  Generate images using OpenRouter's chat completions image modality.
+
+  Sends a user prompt with `modalities: ["image", "text"]` and optional
+  image options (`n`, `size`, `aspect_ratio`) via the `/chat/completions`
+  endpoint.
+
+  ## Options (required)
+
+    - `:model` — Image-capable model ID (for example, `"openai/gpt-5-image-mini"`).
+
+  ## Options (optional)
+
+    - `:n` — Number of images requested
+    - `:size` — Image size string (for example, `"1024x1024"`)
+    - `:aspect_ratio` — Aspect ratio string (for example, `"16:9"`)
+
+  Returns `{:error, :no_model_specified}` if `:model` is missing.
+  """
+  @spec image_generation(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def image_generation(prompt, opts \\ []) when is_binary(prompt) do
+    with {:ok, body} <- build_image_request_body(prompt, opts) do
+      case do_request(body) do
+        {:ok, %{status: 200, body: response_body}} ->
+          parse_image_completion(response_body)
+
+        {:ok, %{status: 429} = response} ->
+          retry_after = extract_retry_after(response)
+          {:error, {:rate_limited, retry_after}}
+
+        {:ok, %{status: 402, body: resp_body}} ->
+          {:error, {:insufficient_credits, get_in(resp_body, ["error", "message"])}}
+
+        {:ok, %{status: status, body: resp_body}} when status >= 400 ->
+          error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+          Logger.error("OpenRouter image API error", status: status, error: error_message)
+          {:error, {:api_error, status, error_message}}
+
+        {:error, %Req.TransportError{reason: reason}} ->
+          Logger.error("OpenRouter image connection error", reason: inspect(reason))
+          {:error, {:connection_error, reason}}
+
+        {:error, reason} ->
+          Logger.error("OpenRouter image request failed", reason: inspect(reason))
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  # --- Image Request Building ---
+
+  @doc false
+  def build_image_request_body(prompt, opts) do
+    case Keyword.fetch(opts, :model) do
+      {:ok, model} ->
+        base_body = %{
+          model: model,
+          messages: [%{role: "user", content: prompt}],
+          modalities: ["image", "text"]
+        }
+
+        image_opts =
+          %{}
+          |> maybe_put_image_opt(:n, Keyword.get(opts, :n), &valid_positive_integer?/1)
+          |> maybe_put_image_opt(:size, Keyword.get(opts, :size), &valid_non_empty_string?/1)
+          |> maybe_put_image_opt(
+            :aspect_ratio,
+            Keyword.get(opts, :aspect_ratio),
+            &valid_non_empty_string?/1
+          )
+
+        body =
+          if map_size(image_opts) > 0 do
+            Map.put(base_body, :image, image_opts)
+          else
+            base_body
+          end
+
+        {:ok, body}
+
+      :error ->
+        {:error, :no_model_specified}
     end
   end
 
@@ -317,6 +405,27 @@ defmodule Assistant.Integrations.OpenRouter do
     end
   end
 
+  defp parse_image_completion(body) do
+    with %{"choices" => [choice | _]} <- body,
+         %{"message" => message, "finish_reason" => finish_reason} <- choice do
+      usage = parse_usage(body)
+
+      {:ok,
+       %{
+         id: body["id"],
+         model: body["model"],
+         content: extract_text_content(message["content"]),
+         images: parse_images(message),
+         finish_reason: finish_reason,
+         usage: usage
+       }}
+    else
+      _ ->
+        Logger.error("OpenRouter unexpected image response format", body: inspect(body))
+        {:error, {:unexpected_response, body}}
+    end
+  end
+
   defp parse_tool_calls(%{"tool_calls" => tool_calls}) when is_list(tool_calls) do
     Enum.map(tool_calls, fn tc ->
       %{
@@ -331,6 +440,35 @@ defmodule Assistant.Integrations.OpenRouter do
   end
 
   defp parse_tool_calls(_), do: []
+
+  defp parse_images(%{"images" => images}) when is_list(images) do
+    images
+    |> Enum.map(fn image ->
+      url = get_in(image, ["image_url", "url"])
+
+      if is_binary(url) and url != "" do
+        %{
+          type: image["type"] || "image_url",
+          url: url,
+          mime_type: extract_mime_type(url)
+        }
+      else
+        nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp parse_images(_), do: []
+
+  defp extract_mime_type("data:" <> _ = data_url) do
+    case Regex.run(~r/^data:([^;]+);base64,/, data_url, capture: :all_but_first) do
+      [mime_type] -> mime_type
+      _ -> "image/png"
+    end
+  end
+
+  defp extract_mime_type(_url), do: "image/png"
 
   # Strip reasoning trace content from LLM responses, keeping only final text.
   #
@@ -440,6 +578,19 @@ defmodule Assistant.Integrations.OpenRouter do
       usage -> Map.put(result, :usage, parse_usage(%{"usage" => usage}))
     end
   end
+
+  defp maybe_put_image_opt(image_opts, _key, nil, _validator), do: image_opts
+
+  defp maybe_put_image_opt(image_opts, key, value, validator) do
+    if validator.(value) do
+      Map.put(image_opts, key, value)
+    else
+      image_opts
+    end
+  end
+
+  defp valid_positive_integer?(value), do: is_integer(value) and value > 0
+  defp valid_non_empty_string?(value), do: is_binary(value) and String.trim(value) != ""
 
   # --- HTTP Client ---
 

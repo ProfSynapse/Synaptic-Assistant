@@ -100,12 +100,16 @@ defmodule Assistant.Memory.ContextMonitor do
           utilization: Float.round(utilization, 3)
         )
 
-        GenServer.cast(pid, {:mission, :compact_conversation, %{
-          conversation_id: conversation_id,
-          user_id: user_id,
-          trigger: :context_utilization,
-          utilization: utilization
-        }})
+        GenServer.cast(
+          pid,
+          {:mission, :compact_conversation,
+           %{
+             conversation_id: conversation_id,
+             user_id: user_id,
+             trigger: :context_utilization,
+             utilization: utilization
+           }}
+        )
 
       [] ->
         Logger.warning("Memory agent not found for user, skipping compaction",

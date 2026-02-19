@@ -34,7 +34,8 @@ defmodule Assistant.Skills.Files.Write do
         {:ok, %Result{status: :error, content: "Missing required parameter: --name (file name)."}}
 
       is_nil(content) ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --content (file content)."}}
+        {:ok,
+         %Result{status: :error, content: "Missing required parameter: --content (file content)."}}
 
       true ->
         create_file(drive, name, content, folder, mime_type)
@@ -51,18 +52,20 @@ defmodule Assistant.Skills.Files.Write do
       {:ok, file} ->
         link_line = if file[:web_view_link], do: "\nLink: #{file.web_view_link}", else: ""
 
-        {:ok, %Result{
-          status: :ok,
-          content: "File created successfully.\nName: #{file.name}\nID: #{file.id}#{link_line}",
-          side_effects: [:file_created],
-          metadata: %{file_id: file.id, file_name: file.name}
-        }}
+        {:ok,
+         %Result{
+           status: :ok,
+           content: "File created successfully.\nName: #{file.name}\nID: #{file.id}#{link_line}",
+           side_effects: [:file_created],
+           metadata: %{file_id: file.id, file_name: file.name}
+         }}
 
       {:error, reason} ->
-        {:ok, %Result{
-          status: :error,
-          content: "Failed to create file '#{name}': #{inspect(reason)}"
-        }}
+        {:ok,
+         %Result{
+           status: :error,
+           content: "Failed to create file '#{name}': #{inspect(reason)}"
+         }}
     end
   end
 

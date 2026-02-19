@@ -217,7 +217,10 @@ defmodule Assistant.Orchestrator.Context do
             role: "user",
             content: [
               OpenRouter.cached_content(context_block),
-              %{type: "text", text: "[Context injected by system. Proceed with the conversation below.]"}
+              %{
+                type: "text",
+                text: "[Context injected by system. Proceed with the conversation below.]"
+              }
             ]
           },
           %{
@@ -249,7 +252,9 @@ defmodule Assistant.Orchestrator.Context do
       end
 
     # Available = (max_context * utilization_target) - response_reserve
-    available = trunc(max_context * limits.context_utilization_target) - limits.response_reserve_tokens
+    available =
+      trunc(max_context * limits.context_utilization_target) - limits.response_reserve_tokens
+
     max(available, 1_000)
   end
 
@@ -339,7 +344,8 @@ defmodule Assistant.Orchestrator.Context do
 
   defp do_trim_oldest_turns([], _tokens_to_free, freed), do: {freed, []}
 
-  defp do_trim_oldest_turns(remaining_turns, tokens_to_free, freed) when freed >= tokens_to_free do
+  defp do_trim_oldest_turns(remaining_turns, tokens_to_free, freed)
+       when freed >= tokens_to_free do
     {freed, List.flatten(remaining_turns)}
   end
 

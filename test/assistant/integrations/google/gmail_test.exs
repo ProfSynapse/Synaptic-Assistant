@@ -24,7 +24,9 @@ defmodule Assistant.Integrations.Google.GmailTest do
 
   describe "send_message/4 header injection prevention" do
     test "rejects \\r\\n in to field" do
-      result = Gmail.send_message("evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
+      result =
+        Gmail.send_message("evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
+
       assert {:error, :header_injection} = result
     end
 
@@ -44,7 +46,11 @@ defmodule Assistant.Integrations.Google.GmailTest do
     end
 
     test "rejects \\r\\n in cc option" do
-      result = Gmail.send_message("to@example.com", "Subject", "Body", cc: "cc@example.com\r\nBcc: victim")
+      result =
+        Gmail.send_message("to@example.com", "Subject", "Body",
+          cc: "cc@example.com\r\nBcc: victim"
+        )
+
       assert {:error, :header_injection} = result
     end
 
@@ -56,7 +62,9 @@ defmodule Assistant.Integrations.Google.GmailTest do
 
   describe "create_draft/4 header injection prevention" do
     test "rejects \\r\\n in to field" do
-      result = Gmail.create_draft("evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
+      result =
+        Gmail.create_draft("evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
+
       assert {:error, :header_injection} = result
     end
 
@@ -66,7 +74,11 @@ defmodule Assistant.Integrations.Google.GmailTest do
     end
 
     test "rejects \\r\\n in cc option" do
-      result = Gmail.create_draft("to@example.com", "Subject", "Body", cc: "cc@example.com\r\nBcc: victim")
+      result =
+        Gmail.create_draft("to@example.com", "Subject", "Body",
+          cc: "cc@example.com\r\nBcc: victim"
+        )
+
       assert {:error, :header_injection} = result
     end
   end

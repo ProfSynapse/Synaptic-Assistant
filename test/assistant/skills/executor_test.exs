@@ -30,9 +30,10 @@ defmodule Assistant.Skills.ExecutorTest do
 
   describe "execute/4 — success" do
     test "returns {:ok, result} when handler succeeds", %{context: context} do
-      handler = build_handler(fn _flags, _ctx ->
-        {:ok, %Result{status: :ok, content: "Skill completed successfully"}}
-      end)
+      handler =
+        build_handler(fn _flags, _ctx ->
+          {:ok, %Result{status: :ok, content: "Skill completed successfully"}}
+        end)
 
       assert {:ok, %Result{status: :ok, content: "Skill completed successfully"}} =
                Executor.execute(handler, %{}, context)
@@ -41,10 +42,11 @@ defmodule Assistant.Skills.ExecutorTest do
     test "passes flags and context to handler", %{context: context} do
       test_pid = self()
 
-      handler = build_handler(fn flags, ctx ->
-        send(test_pid, {:handler_called, flags, ctx})
-        {:ok, %Result{status: :ok, content: "ok"}}
-      end)
+      handler =
+        build_handler(fn flags, ctx ->
+          send(test_pid, {:handler_called, flags, ctx})
+          {:ok, %Result{status: :ok, content: "ok"}}
+        end)
 
       flags = %{"key" => "value"}
       Executor.execute(handler, flags, context)
@@ -59,9 +61,10 @@ defmodule Assistant.Skills.ExecutorTest do
 
   describe "execute/4 — error" do
     test "returns {:error, reason} when handler returns error", %{context: context} do
-      handler = build_handler(fn _flags, _ctx ->
-        {:error, :validation_failed}
-      end)
+      handler =
+        build_handler(fn _flags, _ctx ->
+          {:error, :validation_failed}
+        end)
 
       assert {:error, :validation_failed} =
                Executor.execute(handler, %{}, context)
@@ -74,9 +77,10 @@ defmodule Assistant.Skills.ExecutorTest do
 
   describe "execute/4 — crash" do
     test "returns {:error, {:skill_crash, reason}} when handler crashes", %{context: context} do
-      handler = build_handler(fn _flags, _ctx ->
-        raise "handler crash"
-      end)
+      handler =
+        build_handler(fn _flags, _ctx ->
+          raise "handler crash"
+        end)
 
       assert {:error, {:skill_crash, _reason}} =
                Executor.execute(handler, %{}, context)
@@ -89,10 +93,11 @@ defmodule Assistant.Skills.ExecutorTest do
 
   describe "execute/4 — timeout" do
     test "returns {:error, :timeout} when handler exceeds timeout", %{context: context} do
-      handler = build_handler(fn _flags, _ctx ->
-        Process.sleep(5_000)
-        {:ok, %Result{status: :ok, content: "too late"}}
-      end)
+      handler =
+        build_handler(fn _flags, _ctx ->
+          Process.sleep(5_000)
+          {:ok, %Result{status: :ok, content: "too late"}}
+        end)
 
       assert {:error, :timeout} =
                Executor.execute(handler, %{}, context, timeout: 50)
@@ -113,12 +118,16 @@ defmodule Assistant.Skills.ExecutorTest do
 
     module_name = :"TestHandler_#{System.unique_integer([:positive])}"
 
-    Module.create(module_name, quote do
-      def execute(flags, context) do
-        [{:fn, fun}] = :ets.lookup(unquote(table_name), :fn)
-        fun.(flags, context)
-      end
-    end, Macro.Env.location(__ENV__))
+    Module.create(
+      module_name,
+      quote do
+        def execute(flags, context) do
+          [{:fn, fun}] = :ets.lookup(unquote(table_name), :fn)
+          fun.(flags, context)
+        end
+      end,
+      Macro.Env.location(__ENV__)
+    )
 
     module_name
   end

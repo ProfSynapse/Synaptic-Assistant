@@ -33,50 +33,51 @@ defmodule Assistant.Repo.Migrations.HardenMemoryEntityGraph do
 
     # Partial index for efficient active-relation queries
     create index(:memory_entity_relations, [:source_entity_id],
-      name: :memory_entity_relations_active_source_idx,
-      where: "valid_to IS NULL"
-    )
+             name: :memory_entity_relations_active_source_idx,
+             where: "valid_to IS NULL"
+           )
 
     create index(:memory_entity_relations, [:target_entity_id],
-      name: :memory_entity_relations_active_target_idx,
-      where: "valid_to IS NULL"
-    )
+             name: :memory_entity_relations_active_target_idx,
+             where: "valid_to IS NULL"
+           )
 
     # Replace old unique index with one scoped to active relations only.
     # Multiple closed (valid_to IS NOT NULL) relations of the same type
     # between the same entities are allowed (historical records).
     drop unique_index(:memory_entity_relations, [
-      :source_entity_id,
-      :target_entity_id,
-      :relation_type
-    ])
+           :source_entity_id,
+           :target_entity_id,
+           :relation_type
+         ])
 
     create unique_index(
-      :memory_entity_relations,
-      [:source_entity_id, :target_entity_id, :relation_type],
-      name: :memory_entity_relations_active_unique,
-      where: "valid_to IS NULL"
-    )
+             :memory_entity_relations,
+             [:source_entity_id, :target_entity_id, :relation_type],
+             name: :memory_entity_relations_active_unique,
+             where: "valid_to IS NULL"
+           )
 
     # ── 3. Confidence + provenance on relations ─────────────────────
     alter table(:memory_entity_relations) do
       add :confidence, :decimal, null: false, default: 0.80
+
       add :source_memory_entry_id,
           references(:memory_entries, type: :binary_id, on_delete: :nilify_all)
     end
 
     create index(:memory_entity_relations, [:source_memory_entry_id],
-      where: "source_memory_entry_id IS NOT NULL"
-    )
+             where: "source_memory_entry_id IS NOT NULL"
+           )
 
     # ── 4. Relation type validation ─────────────────────────────────
     create constraint(:memory_entity_relations, :valid_relation_type,
-      check: """
-      relation_type IN (
-        'works_at', 'works_with', 'manages', 'reports_to',
-        'part_of', 'owns', 'related_to', 'located_in', 'supersedes'
-      )
-      """
-    )
+             check: """
+             relation_type IN (
+               'works_at', 'works_with', 'manages', 'reports_to',
+               'part_of', 'owns', 'related_to', 'located_in', 'supersedes'
+             )
+             """
+           )
   end
 end

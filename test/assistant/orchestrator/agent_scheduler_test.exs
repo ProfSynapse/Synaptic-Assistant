@@ -275,15 +275,17 @@ defmodule Assistant.Orchestrator.AgentSchedulerTest do
     end
 
     test "wait_any returns at least one result", %{supervisor: sup} do
-      task_a = Task.Supervisor.async_nolink(sup, fn ->
-        Process.sleep(10)
-        %{status: :completed, result: "fast"}
-      end)
+      task_a =
+        Task.Supervisor.async_nolink(sup, fn ->
+          Process.sleep(10)
+          %{status: :completed, result: "fast"}
+        end)
 
-      task_b = Task.Supervisor.async_nolink(sup, fn ->
-        Process.sleep(5_000)
-        %{status: :completed, result: "slow"}
-      end)
+      task_b =
+        Task.Supervisor.async_nolink(sup, fn ->
+          Process.sleep(5_000)
+          %{status: :completed, result: "slow"}
+        end)
 
       agent_tasks = %{"a" => task_a, "b" => task_b}
       results = AgentScheduler.wait_for_agents(agent_tasks, ["a", "b"], :wait_any, 2_000)

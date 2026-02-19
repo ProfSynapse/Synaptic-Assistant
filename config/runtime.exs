@@ -115,8 +115,7 @@ if encryption_key = System.get_env("CLOAK_ENCRYPTION_KEY") do
     ciphers: [
       default: {
         Cloak.Ciphers.AES.GCM,
-        tag: "AES.GCM.V1",
-        key: Base.decode64!(encryption_key)
+        tag: "AES.GCM.V1", key: Base.decode64!(encryption_key)
       }
     ]
 end

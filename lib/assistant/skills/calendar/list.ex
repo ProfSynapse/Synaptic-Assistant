@@ -103,5 +103,4 @@ defmodule Assistant.Skills.Calendar.List do
 
     "- #{title} | #{start_time} - #{end_time}#{location}"
   end
-
 end
