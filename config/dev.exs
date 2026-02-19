@@ -4,6 +4,8 @@
 
 import Config
 
+config :assistant, :dev_routes, true
+
 # Database configuration for development
 config :assistant, Assistant.Repo,
   username: "postgres",

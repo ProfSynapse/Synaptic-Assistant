@@ -58,9 +58,29 @@
 
   const Hooks = {}
 
+  Hooks.ProfileTimezone = {
+    mounted() {
+      const input = this.el.querySelector("#profile-timezone-input")
+
+      if (!input) return
+
+      try {
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+        if (timezone && timezone.trim() !== "" && input.value !== timezone) {
+          input.value = timezone
+          input.dispatchEvent(new Event("change", { bubbles: true }))
+        }
+      } catch (_error) {
+        // Ignore browser timezone detection errors and keep existing value.
+      }
+    },
+  }
+
   Hooks.WorkflowRichEditor = {
     mounted() {
-      this.statusEl = document.getElementById("workflow-editor-status")
+      const statusTarget = this.el.dataset.statusTarget || "workflow-editor-status"
+      this.statusEl = document.getElementById(statusTarget)
       this.saveEvent = this.el.dataset.saveEvent || "autosave_body"
 
       this.handleInput = debounce(() => {
@@ -74,23 +94,33 @@
         this.handleInput()
       })
 
-      this.bindToolbarButtons()
+      this.bindToolbarControls()
     },
 
-    bindToolbarButtons() {
+    bindToolbarControls() {
       const selector = `[data-editor-target="${this.el.id}"]`
-      const buttons = document.querySelectorAll(selector)
+      const controls = document.querySelectorAll(selector)
 
-      buttons.forEach((button) => {
-        button.addEventListener("click", () => {
-          const cmd = button.dataset.editorCmd
+      controls.forEach((control) => {
+        if (control.tagName === "SELECT") {
+          control.addEventListener("change", () => {
+            const cmd = control.dataset.editorCmd
+            this.applyCommand(cmd, control.value)
+            this.el.dispatchEvent(new Event("input", { bubbles: true }))
+          })
+
+          return
+        }
+
+        control.addEventListener("click", () => {
+          const cmd = control.dataset.editorCmd
           this.applyCommand(cmd)
           this.el.dispatchEvent(new Event("input", { bubbles: true }))
         })
       })
     },
 
-    applyCommand(cmd) {
+    applyCommand(cmd, value = null) {
       this.el.focus()
 
       switch (cmd) {
@@ -100,11 +130,16 @@
         case "italic":
           document.execCommand("italic", false)
           break
-        case "h1":
-          document.execCommand("formatBlock", false, "h1")
+        case "heading": {
+          const level = (value || "p").toLowerCase()
+          const block = ["h1", "h2", "h3"].includes(level) ? level : "p"
+          document.execCommand("formatBlock", false, block)
           break
+        }
+        case "h1":
         case "h2":
-          document.execCommand("formatBlock", false, "h2")
+        case "h3":
+          document.execCommand("formatBlock", false, cmd)
           break
         case "ul":
           document.execCommand("insertUnorderedList", false)
@@ -158,4 +193,3 @@
     window.liveSocket = liveSocket
   }
 })()
-

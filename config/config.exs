@@ -5,6 +5,19 @@
 
 import Config
 
+config :assistant, :scopes,
+  settings_user: [
+    default: true,
+    module: Assistant.Accounts.Scope,
+    assign_key: :current_scope,
+    access_path: [:settings_user, :id],
+    schema_key: :settings_user_id,
+    schema_type: :binary_id,
+    schema_table: :settings_users,
+    test_data_fixture: Assistant.AccountsFixtures,
+    test_setup_helper: :register_and_log_in_settings_user
+  ]
+
 # General application configuration
 config :assistant,
   ecto_repos: [Assistant.Repo],
@@ -23,6 +36,10 @@ config :assistant, AssistantWeb.Endpoint,
 
 # JSON library for Phoenix
 config :phoenix, :json_library, Jason
+
+# Mailer
+config :assistant, Assistant.Mailer, adapter: Swoosh.Adapters.Local
+config :swoosh, :api_client, false
 
 # Suppress Tesla deprecation warnings from Google API libraries
 config :tesla, disable_deprecated_builder_warning: true

@@ -25,13 +25,13 @@ defmodule AssistantWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={get_csrf_token()} />
         <title>Synaptic Assistant</title>
-        <link rel="stylesheet" href={~p"/assets/app.css"} />
+        <link rel="stylesheet" href={~p"/assets/app.css?v=authrefresh5"} />
       </head>
       <body>
         {@inner_content}
         <script defer src="/vendor/phoenix/phoenix.min.js"></script>
         <script defer src="/vendor/phoenix_live_view/phoenix_live_view.min.js"></script>
-        <script defer src={~p"/assets/app.js"}></script>
+        <script defer src={~p"/assets/app.js?v=editorrefresh2"}></script>
       </body>
     </html>
     """

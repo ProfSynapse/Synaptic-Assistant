@@ -56,6 +56,15 @@ if api_key = System.get_env("OPENROUTER_API_KEY") do
   config :assistant, :openrouter_api_key, api_key
 end
 
+# Google OAuth client credentials for browser "Sign in with Google"
+if client_id = System.get_env("GOOGLE_OAUTH_CLIENT_ID") do
+  config :assistant, :google_oauth_client_id, client_id
+end
+
+if client_secret = System.get_env("GOOGLE_OAUTH_CLIENT_SECRET") do
+  config :assistant, :google_oauth_client_secret, client_secret
+end
+
 # Google service account credentials (inline JSON string or file path to JSON key)
 # Goth requires a decoded map, so we parse JSON here at config time.
 if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do

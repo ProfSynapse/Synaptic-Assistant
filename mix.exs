@@ -47,10 +47,13 @@ defmodule Assistant.MixProject do
 
   defp deps do
     [
+      {:bcrypt_elixir, "~> 3.0"},
       # Phoenix core (webhooks-only, no HTML)
       {:phoenix, "~> 1.8"},
+      {:phoenix_ecto, "~> 4.6"},
       {:phoenix_html, "~> 4.2"},
       {:phoenix_live_view, "~> 1.0"},
+      {:swoosh, "~> 1.17"},
       {:bandit, "~> 1.0"},
       {:jason, "~> 1.4"},
       {:dns_cluster, "~> 0.1"},
@@ -93,7 +96,8 @@ defmodule Assistant.MixProject do
       {:stream_data, "~> 1.1", only: :test},
       {:bypass, "~> 2.1", only: :test},
       {:excoveralls, "~> 0.18", only: :test},
-      {:floki, ">= 0.30.0", only: :test}
+      {:floki, ">= 0.30.0", only: :test},
+      {:lazy_html, ">= 0.1.0", only: :test}
     ]
   end
 

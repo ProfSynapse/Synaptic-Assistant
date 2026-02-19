@@ -4,6 +4,9 @@
 
 import Config
 
+# Only in tests, remove the complexity from the password hashing algorithm
+config :bcrypt_elixir, :log_rounds, 1
+
 # Required for config/config.yaml interpolation when app boots in test.
 System.put_env("ENV_VAR", "test")
 System.put_env("ELEVENLABS_VOICE_ID", "test-voice-id")
@@ -31,6 +34,9 @@ config :assistant, :openrouter_api_key, "test-openrouter-key"
 
 # Reduce log noise in tests
 config :logger, level: :warning
+
+# Use test mail adapter for auth/notification tests.
+config :assistant, Assistant.Mailer, adapter: Swoosh.Adapters.Test
 
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime

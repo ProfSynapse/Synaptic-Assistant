@@ -24,7 +24,7 @@ defmodule AssistantWeb.WorkflowEditorLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(:current_scope, nil)
+     |> assign_new(:current_scope, fn -> nil end)
      |> assign(:workflow, nil)
      |> assign(:weekday_options, @weekday_options)
      |> assign(:recurrence_options, @recurrence_options)
@@ -168,15 +168,41 @@ defmodule AssistantWeb.WorkflowEditorLive do
         </.form>
 
         <section class="sa-card">
-          <div class="sa-editor-toolbar">
-            <button type="button" class="sa-icon-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="bold">B</button>
-            <button type="button" class="sa-icon-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="italic">I</button>
-            <button type="button" class="sa-icon-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="h1">H1</button>
-            <button type="button" class="sa-icon-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="h2">H2</button>
-            <button type="button" class="sa-icon-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="ul">UL</button>
-            <button type="button" class="sa-icon-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="ol">OL</button>
-            <button type="button" class="sa-icon-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="link">Link</button>
-            <button type="button" class="sa-icon-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="code">Code</button>
+          <div class="sa-editor-toolbar" role="toolbar" aria-label="Workflow markdown formatting">
+            <div class="sa-toolbar-group sa-toolbar-group-heading">
+              <select
+                class="sa-toolbar-select"
+                data-editor-target="workflow-editor-canvas"
+                data-editor-cmd="heading"
+                aria-label="Heading level"
+              >
+                <option value="p">Paragraph</option>
+                <option value="h1">Heading 1</option>
+                <option value="h2">Heading 2</option>
+                <option value="h3">Heading 3</option>
+              </select>
+            </div>
+
+            <div class="sa-toolbar-group">
+              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="bold" aria-label="Bold" title="Bold">
+                <.icon name="hero-bold" class="h-4 w-4" />
+              </button>
+              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="italic" aria-label="Italic" title="Italic">
+                <.icon name="hero-italic" class="h-4 w-4" />
+              </button>
+              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="ul" aria-label="Bulleted list" title="Bulleted list">
+                <.icon name="hero-list-bullet" class="h-4 w-4" />
+              </button>
+              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="ol" aria-label="Numbered list" title="Numbered list">
+                <.icon name="hero-numbered-list" class="h-4 w-4" />
+              </button>
+              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="link" aria-label="Insert link" title="Insert link">
+                <.icon name="hero-link" class="h-4 w-4" />
+              </button>
+              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="code" aria-label="Inline code" title="Inline code">
+                <.icon name="hero-code-bracket" class="h-4 w-4" />
+              </button>
+            </div>
           </div>
 
           <div
