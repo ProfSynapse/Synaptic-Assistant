@@ -11,109 +11,108 @@ defmodule AssistantWeb.SettingsUserLive.Login do
     assigns = assign(assigns, :logo_url, @logo_url)
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="sa-auth-shell sa-auth-shell-cloud">
-        <header class="sa-auth-top">
-          <img src={@logo_url} alt="Synaptic Assistant" class="sa-auth-logo-wide" />
-        </header>
+    <Layouts.flash_group flash={@flash} />
 
-        <section :if={@live_action != :magic} class="sa-auth-card sa-auth-login-card">
-          <.form
-            :let={f}
-            for={@form}
-            id="login_form_password"
-            action={~p"/settings_users/log-in"}
-            phx-submit="submit_password"
-            phx-trigger-action={@trigger_submit}
-          >
-            <.input
-              readonly={!!@current_scope}
-              field={f[:email]}
-              type="email"
-              label="Email"
-              autocomplete="email"
-              required
-              phx-mounted={JS.focus()}
-            />
-            <.input
-              field={@form[:password]}
-              type="password"
-              label="Password"
-              autocomplete="current-password"
-              required
-            />
-            <.button class="w-full sa-auth-primary-btn" name={@form[:remember_me].name} value="true">
-              Sign In
-            </.button>
-          </.form>
+    <div class="sa-auth-shell sa-auth-shell-cloud">
+      <header class="sa-auth-top">
+        <img src={@logo_url} alt="Synaptic Assistant" class="sa-auth-logo-wide" />
+      </header>
 
-          <div class="sa-auth-divider">
-            <span>or continue with</span>
-          </div>
+      <section :if={@live_action != :magic} class="sa-auth-card sa-auth-login-card">
+        <.form
+          :let={f}
+          for={@form}
+          id="login_form_password"
+          action={~p"/settings_users/log-in"}
+          phx-submit="submit_password"
+          phx-trigger-action={@trigger_submit}
+        >
+          <.field
+            readonly={!!@current_scope}
+            field={f[:email]}
+            type="email"
+            label="Email"
+            autocomplete="email"
+            required
+            no_margin
+            phx-mounted={JS.focus()}
+          />
+          <.field
+            field={@form[:password]}
+            type="password"
+            label="Password"
+            autocomplete="current-password"
+            required
+            no_margin
+          />
+          <.button class="w-full sa-auth-primary-btn" name={@form[:remember_me].name} value="true">
+            Sign In
+          </.button>
+        </.form>
 
-          <.link href={~p"/settings_users/auth/google"} class="sa-btn secondary sa-auth-google-btn w-full">
-            <img src="/images/apps/google.svg" alt="" class="sa-auth-social-icon" />
-            Sign in with Google
+        <div class="sa-auth-divider">
+          <span>or</span>
+        </div>
+
+        <.link href={~p"/settings_users/auth/google"} class="sa-btn secondary sa-auth-google-btn w-full">
+          <img src="/images/apps/google.svg" alt="" class="sa-auth-social-icon" />
+          Sign in with Google
+        </.link>
+
+        <div class="sa-auth-secondary-links">
+          <.link navigate={~p"/settings_users/magic-link"} class="sa-auth-inline-link">
+            Send Magic Link
           </.link>
+          <.link navigate={~p"/settings_users/register"} class="sa-auth-inline-link">
+            Create Account
+          </.link>
+        </div>
+      </section>
 
-          <div class="sa-auth-secondary-links">
-            <.link navigate={~p"/settings_users/register"} class="sa-auth-inline-link">
-              Create account
-            </.link>
-            <.link navigate={~p"/settings_users/magic-link"} class="sa-auth-inline-link">
-              Use magic link
-            </.link>
+      <section :if={@live_action == :magic} class="sa-auth-card sa-auth-login-card">
+        <h1 class="sa-auth-title">Magic Link Login</h1>
+        <p class="sa-auth-subtitle">Enter your email and we will send a one-time sign-in link.</p>
+
+        <div :if={local_mail_adapter?()} class="sa-auth-alert">
+          <.icon name="hero-information-circle" class="size-6 shrink-0" />
+          <div>
+            <p>Local mail adapter is active.</p>
+            <p>
+              View delivered emails in <.link href="/dev/mailbox">/dev/mailbox</.link>.
+            </p>
           </div>
-        </section>
+        </div>
 
-        <section :if={@live_action == :magic} class="sa-auth-card sa-auth-login-card">
-          <h1 class="sa-auth-title">Magic Link Login</h1>
-          <p class="sa-auth-subtitle">Enter your email and we will send a one-time sign-in link.</p>
+        <.form
+          :let={f}
+          for={@form}
+          id="login_form_magic"
+          action={~p"/settings_users/log-in"}
+          phx-submit="submit_magic"
+        >
+          <.field
+            readonly={!!@current_scope}
+            field={f[:email]}
+            type="email"
+            label="Email"
+            autocomplete="email"
+            required
+            no_margin
+            phx-mounted={JS.focus()}
+          />
+          <.button class="w-full sa-auth-primary-btn">Send Sign-In Link</.button>
+        </.form>
 
-          <div :if={local_mail_adapter?()} class="sa-auth-alert">
-            <.icon name="hero-information-circle" class="size-6 shrink-0" />
-            <div>
-              <p>Local mail adapter is active.</p>
-              <p>
-                View delivered emails in <.link href="/dev/mailbox">/dev/mailbox</.link>.
-              </p>
-            </div>
-          </div>
-
-          <.form
-            :let={f}
-            for={@form}
-            id="login_form_magic"
-            action={~p"/settings_users/log-in"}
-            phx-submit="submit_magic"
-          >
-            <.input
-              readonly={!!@current_scope}
-              field={f[:email]}
-              type="email"
-              label="Email"
-              autocomplete="email"
-              required
-              phx-mounted={JS.focus()}
-            />
-            <.button class="w-full sa-auth-primary-btn">Send Sign-In Link</.button>
-          </.form>
-
-          <div class="sa-auth-secondary-links">
-            <.link navigate={~p"/settings_users/log-in"} class="sa-auth-inline-link">
-              Back to password login
-            </.link>
-            <.link navigate={~p"/settings_users/register"} class="sa-auth-inline-link">
-              Create account
-            </.link>
-          </div>
-        </section>
-
-        <p :if={@live_action != :magic} class="sa-auth-note">
-          Use your organizational email tied to Synaptic Assistant access.
-        </p>
-      </div>
-    </Layouts.app>
+        <div class="sa-auth-secondary-links">
+          <.link navigate={~p"/settings_users/log-in"} class="sa-auth-inline-link">
+            Back to password login
+          </.link>
+          <.link navigate={~p"/settings_users/register"} class="sa-auth-inline-link">
+            Create Account
+          </.link>
+        </div>
+      </section>
+    </div>
     """
   end
 

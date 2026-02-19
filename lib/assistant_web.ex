@@ -75,6 +75,9 @@ defmodule AssistantWeb do
     quote do
       import Phoenix.HTML
 
+      use PetalComponents
+      # Nullify Petal's Icon import — CoreComponents.icon/1 is the single provider
+      import PetalComponents.Icon, only: []
       import AssistantWeb.CoreComponents
       alias AssistantWeb.Layouts
 

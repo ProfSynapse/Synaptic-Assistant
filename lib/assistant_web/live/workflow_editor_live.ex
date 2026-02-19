@@ -29,7 +29,6 @@ defmodule AssistantWeb.WorkflowEditorLive do
      |> assign(:weekday_options, @weekday_options)
      |> assign(:recurrence_options, @recurrence_options)
      |> assign(:tools, Workflows.available_tools())
-     |> assign(:save_status, "Saved")
      |> assign(:meta_form, to_form(%{}, as: :workflow))}
   end
 
@@ -49,30 +48,35 @@ defmodule AssistantWeb.WorkflowEditorLive do
 
   @impl true
   def handle_event("save_metadata", %{"workflow" => params}, socket) do
+    socket = notify_autosave(socket, "saving", "Saving workflow settings...")
+
     case Workflows.update_metadata(socket.assigns.workflow.name, params) do
       {:ok, workflow} ->
         {:noreply,
          socket
          |> assign(:workflow, workflow)
-         |> assign(:save_status, "Saved")}
+         |> notify_autosave("saved", "All changes saved")}
 
       {:error, reason} ->
         {:noreply,
          socket
-         |> assign(:save_status, "Error")
+         |> notify_autosave("error", "Could not save workflow settings")
          |> put_flash(:error, "Failed to save workflow metadata: #{inspect(reason)}")}
     end
   end
 
   def handle_event("autosave_body", %{"body" => body}, socket) do
+    socket = notify_autosave(socket, "saving", "Saving workflow...")
+
     case Workflows.update_body(socket.assigns.workflow.name, body) do
       {:ok, workflow} ->
-        {:noreply, socket |> assign(:workflow, workflow) |> assign(:save_status, "Saved")}
+        {:noreply,
+         socket |> assign(:workflow, workflow) |> notify_autosave("saved", "All changes saved")}
 
       {:error, reason} ->
         {:noreply,
          socket
-         |> assign(:save_status, "Error")
+         |> notify_autosave("error", "Could not save workflow")
          |> put_flash(:error, "Failed to save workflow body: #{inspect(reason)}")}
     end
   end
@@ -82,6 +86,10 @@ defmodule AssistantWeb.WorkflowEditorLive do
       :ok -> {:noreply, put_flash(socket, :info, "Scheduler reloaded")}
       _ -> {:noreply, put_flash(socket, :error, "Failed to reload scheduler")}
     end
+  end
+
+  defp notify_autosave(socket, state, message) do
+    push_event(socket, "autosave:status", %{state: state, message: message})
   end
 
   defp recurrence(assigns), do: assigns.workflow.schedule.recurrence
@@ -168,53 +176,19 @@ defmodule AssistantWeb.WorkflowEditorLive do
         </.form>
 
         <section class="sa-card">
-          <div class="sa-editor-toolbar" role="toolbar" aria-label="Workflow markdown formatting">
-            <div class="sa-toolbar-group sa-toolbar-group-heading">
-              <select
-                class="sa-toolbar-select"
-                data-editor-target="workflow-editor-canvas"
-                data-editor-cmd="heading"
-                aria-label="Heading level"
-              >
-                <option value="p">Paragraph</option>
-                <option value="h1">Heading 1</option>
-                <option value="h2">Heading 2</option>
-                <option value="h3">Heading 3</option>
-              </select>
-            </div>
-
-            <div class="sa-toolbar-group">
-              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="bold" aria-label="Bold" title="Bold">
-                <.icon name="hero-bold" class="h-4 w-4" />
-              </button>
-              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="italic" aria-label="Italic" title="Italic">
-                <.icon name="hero-italic" class="h-4 w-4" />
-              </button>
-              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="ul" aria-label="Bulleted list" title="Bulleted list">
-                <.icon name="hero-list-bullet" class="h-4 w-4" />
-              </button>
-              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="ol" aria-label="Numbered list" title="Numbered list">
-                <.icon name="hero-numbered-list" class="h-4 w-4" />
-              </button>
-              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="link" aria-label="Insert link" title="Insert link">
-                <.icon name="hero-link" class="h-4 w-4" />
-              </button>
-              <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="workflow-editor-canvas" data-editor-cmd="code" aria-label="Inline code" title="Inline code">
-                <.icon name="hero-code-bracket" class="h-4 w-4" />
-              </button>
-            </div>
-          </div>
+          <.editor_toolbar target="workflow-editor-canvas" label="Workflow markdown formatting" />
 
           <div
             id="workflow-editor-canvas"
             class="sa-editor-canvas"
             contenteditable="true"
+            role="textbox"
+            aria-multiline="true"
+            aria-label="Workflow body"
             phx-hook="WorkflowRichEditor"
             phx-update="ignore"
             data-save-event="autosave_body"
           ><%= Phoenix.HTML.raw(@workflow.body_html) %></div>
-
-          <p id="workflow-editor-status" class="sa-muted">Status: {@save_status}</p>
         </section>
       </section>
     </Layouts.app>

@@ -65,6 +65,17 @@ config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
   metadata: [:request_id, :conversation_id, :skill, :agent_id]
 
+# Tailwind CSS (standalone CLI, no Node.js required)
+config :tailwind,
+  version: "4.0.9",
+  default: [
+    args: ~w(
+      --input=assets/css/app.css
+      --output=priv/static/assets/app.css
+    ),
+    cd: Path.expand("..", __DIR__)
+  ]
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

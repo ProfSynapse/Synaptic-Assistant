@@ -12,52 +12,52 @@ defmodule AssistantWeb.SettingsUserLive.Registration do
     assigns = assign(assigns, :logo_url, @logo_url)
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="sa-auth-shell">
-        <header class="sa-auth-top">
-          <img src={@logo_url} alt="Synaptic Assistant" class="sa-auth-logo sa-auth-logo-lg" />
-          <p class="sa-auth-product">Synaptic Assistant</p>
-        </header>
+    <Layouts.flash_group flash={@flash} />
 
-        <section class="sa-auth-card sa-auth-card-compact">
-          <h1 class="sa-auth-title">Create Account</h1>
-          <p class="sa-auth-subtitle">Use your organizational email to create access.</p>
+    <div class="sa-auth-shell sa-auth-shell-cloud">
+      <header class="sa-auth-top">
+        <img src={@logo_url} alt="Synaptic Assistant" class="sa-auth-logo-wide" />
+      </header>
 
-          <.link href={~p"/settings_users/auth/google"} class="sa-btn secondary sa-auth-google-btn w-full">
-            <img src="/images/apps/google.svg" alt="" class="sa-auth-social-icon" />
-            Continue with Google
+      <section class="sa-auth-card sa-auth-card-compact">
+        <h1 class="sa-auth-title">Create Account</h1>
+        <p class="sa-auth-subtitle">Use your organizational email to create access.</p>
+
+        <.link href={~p"/settings_users/auth/google"} class="sa-btn secondary sa-auth-google-btn w-full">
+          <img src="/images/apps/google.svg" alt="" class="sa-auth-social-icon" />
+          Continue with Google
+        </.link>
+
+        <div class="sa-auth-divider">
+          <span>or sign up with email</span>
+        </div>
+
+        <.form for={@form} id="registration_form" phx-submit="save" phx-change="validate">
+          <.field
+            field={@form[:email]}
+            type="email"
+            label="Email"
+            autocomplete="username"
+            required
+            no_margin
+            phx-mounted={JS.focus()}
+          />
+
+          <.button phx-disable-with="Creating account..." class="w-full sa-auth-primary-btn">
+            Create Account
+          </.button>
+        </.form>
+
+        <div class="sa-auth-secondary-links">
+          <.link navigate={~p"/settings_users/log-in"} class="sa-auth-inline-link">
+            Back to Sign In
           </.link>
-
-          <div class="sa-auth-divider">
-            <span>or sign up with email</span>
-          </div>
-
-          <.form for={@form} id="registration_form" phx-submit="save" phx-change="validate">
-            <.input
-              field={@form[:email]}
-              type="email"
-              label="Email"
-              autocomplete="username"
-              required
-              phx-mounted={JS.focus()}
-            />
-
-            <.button phx-disable-with="Creating account..." class="w-full sa-auth-primary-btn">
-              Create Account
-            </.button>
-          </.form>
-
-          <div class="sa-auth-actions">
-            <.link navigate={~p"/settings_users/log-in"} class="sa-btn secondary w-full">
-              Back to Password Login
-            </.link>
-            <.link navigate={~p"/settings_users/magic-link"} class="sa-btn secondary w-full">
-              Use Magic Link
-            </.link>
-          </div>
-        </section>
-      </div>
-    </Layouts.app>
+          <.link navigate={~p"/settings_users/magic-link"} class="sa-auth-inline-link">
+            Use Magic Link
+          </.link>
+        </div>
+      </section>
+    </div>
     """
   end
 

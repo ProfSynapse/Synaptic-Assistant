@@ -30,7 +30,9 @@ config :assistant, AssistantWeb.Endpoint,
       ~r"lib/assistant_web/(controllers|live|components)/.*(ex|heex)$"
     ]
   ],
-  watchers: []
+  watchers: [
+    tailwind: {Tailwind, :install_and_run, [:default, ~w(--watch)]}
+  ]
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

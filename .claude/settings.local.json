@@ -71,7 +71,9 @@
       "Bash(ELEVENLABS_VOICE_ID=test-voice-id mix test:*)",
       "Bash(ENV_VAR=placeholder mix test:*)",
       "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-id mix test:*)",
-      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-id CLOAK_ENCRYPTION_KEY=\"d+s1PrsXSgtp4cREYCzeqP+bhk6PlFcY2RhspbKrEJA=\" mix test:*)"
+      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-id CLOAK_ENCRYPTION_KEY=\"d+s1PrsXSgtp4cREYCzeqP+bhk6PlFcY2RhspbKrEJA=\" mix test:*)",
+      "Bash(lsof:*)",
+      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test mix compile:*)"
     ]
   }
 }

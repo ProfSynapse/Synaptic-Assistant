@@ -1,6 +1,8 @@
 defmodule AssistantWeb.SettingsLive do
   use AssistantWeb, :live_view
 
+  alias Phoenix.LiveView.JS
+
   alias Assistant.Analytics
   alias Assistant.Accounts
   alias Assistant.Accounts.Scope
@@ -107,7 +109,6 @@ defmodule AssistantWeb.SettingsLive do
      |> assign(:models, [])
      |> assign(:profile, %{"display_name" => "", "email" => "", "timezone" => "UTC"})
      |> assign(:profile_form, to_form(%{}, as: :profile))
-     |> assign(:profile_save_status, "Saved")
      |> assign(:orchestrator_prompt_text, "")
      |> assign(:orchestrator_prompt_html, "")
      |> assign(:model_options, [])
@@ -182,6 +183,19 @@ defmodule AssistantWeb.SettingsLive do
     end
   end
 
+  def handle_event("new_workflow", _params, socket) do
+    case Workflows.create_workflow() do
+      {:ok, workflow} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Created workflow: #{workflow.name}")
+         |> push_navigate(to: ~p"/settings/workflows/#{workflow.name}/edit")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to create workflow: #{inspect(reason)}")}
+    end
+  end
+
   def handle_event("duplicate_workflow", %{"name" => name}, socket) do
     case Workflows.duplicate(name) do
       {:ok, copied} ->
@@ -201,6 +215,13 @@ defmodule AssistantWeb.SettingsLive do
 
   def handle_event("close_add_app_modal", _params, socket) do
     {:noreply, assign(socket, :apps_modal_open, false)}
+  end
+
+  def handle_event("close_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:model_modal_open, false)
+     |> assign(:apps_modal_open, false)}
   end
 
   def handle_event("add_catalog_app", %{"id" => app_id}, socket) do
@@ -294,16 +315,21 @@ defmodule AssistantWeb.SettingsLive do
 
   def handle_event("autosave_orchestrator_prompt", %{"body" => body}, socket) do
     content = body |> to_string()
+    socket = notify_autosave(socket, "saving", "Saving system instructions...")
 
     case OrchestratorSystemPrompt.save_prompt(content) do
       :ok ->
         {:noreply,
          socket
          |> assign(:orchestrator_prompt_text, content)
-         |> assign(:orchestrator_prompt_html, markdown_to_html(content))}
+         |> assign(:orchestrator_prompt_html, markdown_to_html(content))
+         |> notify_autosave("saved", "All changes saved")}
 
       {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to save prompt: #{inspect(reason)}")}
+        {:noreply,
+         socket
+         |> notify_autosave("error", "Could not save system instructions")
+         |> put_flash(:error, "Failed to save prompt: #{inspect(reason)}")}
     end
   end
 
@@ -483,7 +509,6 @@ defmodule AssistantWeb.SettingsLive do
     socket
     |> assign(:profile, profile)
     |> assign(:profile_form, to_form(profile, as: :profile))
-    |> assign(:profile_save_status, "Saved")
   end
 
   defp load_orchestrator_prompt(socket) do
@@ -734,13 +759,13 @@ defmodule AssistantWeb.SettingsLive do
       socket
       |> assign(:profile, merged_profile)
       |> assign(:profile_form, to_form(merged_profile, as: :profile))
-      |> assign(:profile_save_status, "Saving...")
+      |> notify_autosave("saving", "Saving profile...")
 
     case current_settings_user(socket) do
       nil ->
         socket =
           socket
-          |> assign(:profile_save_status, "Error: not signed in")
+          |> notify_autosave("error", "Could not save profile")
           |> maybe_put_profile_flash(
             flash?,
             :error,
@@ -756,6 +781,7 @@ defmodule AssistantWeb.SettingsLive do
               socket
               |> assign(:current_scope, Scope.for_settings_user(updated_user))
               |> load_profile()
+              |> notify_autosave("saved", "All changes saved")
               |> maybe_put_profile_flash(flash?, :info, "Profile updated")
 
             {:noreply, socket}
@@ -765,7 +791,7 @@ defmodule AssistantWeb.SettingsLive do
 
             socket =
               socket
-              |> assign(:profile_save_status, "Error: #{message}")
+              |> notify_autosave("error", "Could not save profile")
               |> maybe_put_profile_flash(flash?, :error, "Failed to save profile: #{message}")
 
             {:noreply, socket}
@@ -775,7 +801,7 @@ defmodule AssistantWeb.SettingsLive do
 
             socket =
               socket
-              |> assign(:profile_save_status, "Error: #{message}")
+              |> notify_autosave("error", "Could not save profile")
               |> maybe_put_profile_flash(flash?, :error, "Failed to save profile: #{message}")
 
             {:noreply, socket}
@@ -785,6 +811,10 @@ defmodule AssistantWeb.SettingsLive do
 
   defp maybe_put_profile_flash(socket, true, kind, message), do: put_flash(socket, kind, message)
   defp maybe_put_profile_flash(socket, false, _kind, _message), do: socket
+
+  defp notify_autosave(socket, state, message) do
+    push_event(socket, "autosave:status", %{state: state, message: message})
+  end
 
   defp merge_profile_params(existing_profile, params) do
     %{
@@ -836,7 +866,7 @@ defmodule AssistantWeb.SettingsLive do
               <div class="sa-brand-mark">A</div>
               <span :if={!@sidebar_collapsed}>Synaptic Assistant</span>
             </div>
-            <button type="button" class="sa-icon-btn sa-sidebar-toggle" phx-click="toggle_sidebar">
+            <button type="button" class="sa-icon-btn sa-sidebar-toggle" phx-click="toggle_sidebar" aria-label="Toggle sidebar">
               <.icon name="hero-bars-3" class="h-4 w-4" />
             </button>
           </div>
@@ -855,7 +885,7 @@ defmodule AssistantWeb.SettingsLive do
 
           <div class="sa-sidebar-footer">
             <.link href={~p"/settings_users/log-out"} method="delete" class="sa-sidebar-link" title="Log Out">
-              <.icon name="hero-arrow-path" class="h-4 w-4" />
+              <.icon name="hero-arrow-right-on-rectangle" class="h-4 w-4" />
               <span :if={!@sidebar_collapsed}>Log Out</span>
             </.link>
           </div>
@@ -904,7 +934,6 @@ defmodule AssistantWeb.SettingsLive do
                   name="profile[timezone]"
                   value={@profile["timezone"]}
                 />
-                <p class="sa-muted">Timezone is auto-detected from your browser.</p>
 
                 <div class="sa-form-actions">
                   <.link navigate={~p"/settings_users/settings"} class="sa-btn secondary">
@@ -912,7 +941,6 @@ defmodule AssistantWeb.SettingsLive do
                   </.link>
                 </div>
               </.form>
-              <p class="sa-muted">Profile autosaves. Status: {@profile_save_status}</p>
             </article>
 
             <article class="sa-card">
@@ -921,54 +949,19 @@ defmodule AssistantWeb.SettingsLive do
                 Tune personality and preferences. This is injected into the orchestrator system prompt.
               </p>
 
-              <div class="sa-editor-toolbar" role="toolbar" aria-label="Orchestrator prompt formatting">
-                <div class="sa-toolbar-group sa-toolbar-group-heading">
-                  <select
-                    class="sa-toolbar-select"
-                    data-editor-target="orchestrator-editor-canvas"
-                    data-editor-cmd="heading"
-                    aria-label="Heading level"
-                  >
-                    <option value="p">Paragraph</option>
-                    <option value="h1">Heading 1</option>
-                    <option value="h2">Heading 2</option>
-                    <option value="h3">Heading 3</option>
-                  </select>
-                </div>
-
-                <div class="sa-toolbar-group">
-                  <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="orchestrator-editor-canvas" data-editor-cmd="bold" aria-label="Bold" title="Bold">
-                    <.icon name="hero-bold" class="h-4 w-4" />
-                  </button>
-                  <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="orchestrator-editor-canvas" data-editor-cmd="italic" aria-label="Italic" title="Italic">
-                    <.icon name="hero-italic" class="h-4 w-4" />
-                  </button>
-                  <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="orchestrator-editor-canvas" data-editor-cmd="ul" aria-label="Bulleted list" title="Bulleted list">
-                    <.icon name="hero-list-bullet" class="h-4 w-4" />
-                  </button>
-                  <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="orchestrator-editor-canvas" data-editor-cmd="ol" aria-label="Numbered list" title="Numbered list">
-                    <.icon name="hero-numbered-list" class="h-4 w-4" />
-                  </button>
-                  <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="orchestrator-editor-canvas" data-editor-cmd="link" aria-label="Insert link" title="Insert link">
-                    <.icon name="hero-link" class="h-4 w-4" />
-                  </button>
-                  <button type="button" class="sa-icon-btn sa-toolbar-btn" data-editor-target="orchestrator-editor-canvas" data-editor-cmd="code" aria-label="Inline code" title="Inline code">
-                    <.icon name="hero-code-bracket" class="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
+              <.editor_toolbar target="orchestrator-editor-canvas" label="Orchestrator prompt formatting" />
 
               <div
                 id="orchestrator-editor-canvas"
                 class="sa-editor-canvas sa-system-prompt-input"
                 contenteditable="true"
+                role="textbox"
+                aria-multiline="true"
+                aria-label="Orchestrator system prompt"
                 phx-hook="WorkflowRichEditor"
                 phx-update="ignore"
                 data-save-event="autosave_orchestrator_prompt"
-                data-status-target="orchestrator-editor-status"
               ><%= Phoenix.HTML.raw(@orchestrator_prompt_html) %></div>
-
-              <p id="orchestrator-editor-status" class="sa-muted">Status: Saved</p>
             </article>
           </section>
 
@@ -1033,37 +1026,28 @@ defmodule AssistantWeb.SettingsLive do
               </tbody>
             </table>
 
-            <div :if={@model_modal_open} class="sa-modal-backdrop" phx-click="close_model_modal">
-              <div class="sa-modal" phx-click-away="close_model_modal">
+            <.modal :if={@model_modal_open} id="model-modal" title="Model Details" max_width="md" on_cancel={JS.push("close_model_modal")}>
+              <.form for={@model_form} id="model-form" phx-submit="save_model">
+                <.input name="model[id]" label="Model ID" value={@model_form.params["id"]} />
+                <.input name="model[name]" label="Display Name" value={@model_form.params["name"]} />
+                <.input
+                  name="model[input_cost]"
+                  label="Input Cost"
+                  value={@model_form.params["input_cost"]}
+                />
+                <.input
+                  name="model[output_cost]"
+                  label="Output Cost"
+                  value={@model_form.params["output_cost"]}
+                />
                 <div class="sa-row">
-                  <h3>Model Details</h3>
-                  <button type="button" class="sa-icon-btn" phx-click="close_model_modal">
-                    <.icon name="hero-x-mark" class="h-4 w-4" />
+                  <button type="button" class="sa-btn secondary" phx-click="close_model_modal">
+                    Cancel
                   </button>
+                  <button type="submit" class="sa-btn">Save Model</button>
                 </div>
-
-                <.form for={@model_form} id="model-form" phx-submit="save_model">
-                  <.input name="model[id]" label="Model ID" value={@model_form.params["id"]} />
-                  <.input name="model[name]" label="Display Name" value={@model_form.params["name"]} />
-                  <.input
-                    name="model[input_cost]"
-                    label="Input Cost"
-                    value={@model_form.params["input_cost"]}
-                  />
-                  <.input
-                    name="model[output_cost]"
-                    label="Output Cost"
-                    value={@model_form.params["output_cost"]}
-                  />
-                  <div class="sa-row">
-                    <button type="button" class="sa-btn secondary" phx-click="close_model_modal">
-                      Cancel
-                    </button>
-                    <button type="submit" class="sa-btn">Save Model</button>
-                  </div>
-                </.form>
-              </div>
-            </div>
+              </.form>
+            </.modal>
           </div>
 
           <div :if={@section == "analytics"} class="sa-card-grid">
@@ -1398,39 +1382,31 @@ defmodule AssistantWeb.SettingsLive do
               </article>
             </div>
 
-            <div :if={@apps_modal_open} class="sa-modal-backdrop" phx-click="close_add_app_modal">
-              <div class="sa-modal" phx-click-away="close_add_app_modal">
-                <div class="sa-row">
-                  <h3>Add App</h3>
-                  <button type="button" class="sa-icon-btn" phx-click="close_add_app_modal">
-                    <.icon name="hero-x-mark" class="h-4 w-4" />
+            <.modal :if={@apps_modal_open} id="apps-modal" title="Add App" max_width="lg" on_cancel={JS.push("close_add_app_modal")}>
+              <div class="sa-card-grid">
+                <article :for={app <- @app_catalog} class="sa-card">
+                  <div class="sa-app-title">
+                    <img src={app.icon_path} alt={app.name} class="sa-app-icon" />
+                    <h4>{app.name}</h4>
+                  </div>
+                  <p>{app.scopes}</p>
+                  <button
+                    type="button"
+                    class="sa-btn secondary"
+                    phx-click="add_catalog_app"
+                    phx-value-id={app.id}
+                  >
+                    Add
                   </button>
-                </div>
-                <div class="sa-card-grid">
-                  <article :for={app <- @app_catalog} class="sa-card">
-                    <div class="sa-app-title">
-                      <img src={app.icon_path} alt={app.name} class="sa-app-icon" />
-                      <h4>{app.name}</h4>
-                    </div>
-                    <p>{app.scopes}</p>
-                    <button
-                      type="button"
-                      class="sa-btn secondary"
-                      phx-click="add_catalog_app"
-                      phx-value-id={app.id}
-                    >
-                      Add
-                    </button>
-                  </article>
-                </div>
+                </article>
               </div>
-            </div>
+            </.modal>
           </section>
 
           <section :if={@section == "workflows"} class="sa-card">
             <div class="sa-row">
               <h2>Workflow Cards</h2>
-              <button class="sa-btn" type="button">
+              <button class="sa-btn" type="button" phx-click="new_workflow">
                 <.icon name="hero-plus" class="h-4 w-4" /> New Workflow
               </button>
             </div>
@@ -1449,6 +1425,8 @@ defmodule AssistantWeb.SettingsLive do
                       type="checkbox"
                       checked={workflow.enabled}
                       class="sa-switch-input"
+                      role="switch"
+                      aria-checked={to_string(workflow.enabled)}
                       aria-label={"Toggle #{workflow.name}"}
                       phx-click="toggle_workflow_enabled"
                       phx-value-name={workflow.name}
@@ -1505,6 +1483,8 @@ defmodule AssistantWeb.SettingsLive do
                         type="checkbox"
                         checked={perm.enabled}
                         class="sa-switch-input"
+                        role="switch"
+                        aria-checked={to_string(perm.enabled)}
                         aria-label={"Toggle #{perm.skill_label}"}
                         phx-click="toggle_skill_permission"
                         phx-value-skill={perm.id}

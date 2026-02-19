@@ -29,6 +29,8 @@
       case "em":
       case "i":
         return `*${children}*`
+      case "u":
+        return `<u>${children}</u>`
       case "h1":
         return `# ${children}\n\n`
       case "h2":
@@ -41,8 +43,20 @@
         const href = node.getAttribute("href") || "#"
         return `[${children}](${href})`
       }
-      case "li":
+      case "li": {
+        const parentTag = node.parentElement?.tagName?.toLowerCase()
+
+        if (parentTag === "ol") {
+          const siblings = Array.from(node.parentElement.children).filter(
+            (child) => child.tagName?.toLowerCase() === "li",
+          )
+          const index = siblings.indexOf(node)
+          const order = index >= 0 ? index + 1 : 1
+          return `${order}. ${children}\n`
+        }
+
         return `- ${children}\n`
+      }
       case "ul":
       case "ol":
         return `${children}\n`
@@ -57,6 +71,67 @@
   }
 
   const Hooks = {}
+
+  Hooks.AutosaveToast = {
+    mounted() {
+      this.messageEl = this.el.querySelector("[data-autosave-message]")
+      this.hideTimer = null
+
+      this.handleServerEvent = (payload) => {
+        this.show(payload?.state, payload?.message)
+      }
+
+      this.handleLocalEvent = (event) => {
+        this.show(event?.detail?.state, event?.detail?.message)
+      }
+
+      this.handleEvent("autosave:status", this.handleServerEvent)
+      window.addEventListener("sa:autosave:status", this.handleLocalEvent)
+      this.hide()
+    },
+
+    destroyed() {
+      window.removeEventListener("sa:autosave:status", this.handleLocalEvent)
+      if (this.hideTimer) clearTimeout(this.hideTimer)
+    },
+
+    show(state, message) {
+      const normalizedState = ["saving", "saved", "error"].includes(state) ? state : "saved"
+      const normalizedMessage = this.defaultMessage(normalizedState, message)
+
+      this.el.classList.remove("is-hidden", "is-saving", "is-saved", "is-error")
+      this.el.classList.add("is-visible", `is-${normalizedState}`)
+
+      if (this.messageEl) {
+        this.messageEl.textContent = normalizedMessage
+      }
+
+      if (this.hideTimer) clearTimeout(this.hideTimer)
+
+      if (normalizedState !== "saving") {
+        const waitMs = normalizedState === "error" ? 4500 : 1700
+        this.hideTimer = setTimeout(() => this.hide(), waitMs)
+      }
+    },
+
+    hide() {
+      this.el.classList.remove("is-visible", "is-saving", "is-saved", "is-error")
+      this.el.classList.add("is-hidden")
+    },
+
+    defaultMessage(state, message) {
+      if (message && message.trim() !== "") return message
+
+      switch (state) {
+        case "saving":
+          return "Saving changes..."
+        case "error":
+          return "Could not save changes"
+        default:
+          return "All changes saved"
+      }
+    },
+  }
 
   Hooks.ProfileTimezone = {
     mounted() {
@@ -79,18 +154,19 @@
 
   Hooks.WorkflowRichEditor = {
     mounted() {
-      const statusTarget = this.el.dataset.statusTarget || "workflow-editor-status"
-      this.statusEl = document.getElementById(statusTarget)
       this.saveEvent = this.el.dataset.saveEvent || "autosave_body"
 
       this.handleInput = debounce(() => {
         const markdown = nodeToMarkdown(this.el).replace(/\n{3,}/g, "\n\n").trim()
         this.pushEvent(this.saveEvent, { body: markdown })
-        this.setStatus("Status: Saved")
       }, 500)
 
       this.el.addEventListener("input", () => {
-        this.setStatus("Status: Saving...")
+        window.dispatchEvent(
+          new CustomEvent("sa:autosave:status", {
+            detail: { state: "saving", message: "Saving changes..." },
+          }),
+        )
         this.handleInput()
       })
 
@@ -130,6 +206,9 @@
         case "italic":
           document.execCommand("italic", false)
           break
+        case "underline":
+          document.execCommand("underline", false)
+          break
         case "heading": {
           const level = (value || "p").toLowerCase()
           const block = ["h1", "h2", "h3"].includes(level) ? level : "p"
@@ -168,12 +247,6 @@
         }
         default:
           break
-      }
-    },
-
-    setStatus(text) {
-      if (this.statusEl) {
-        this.statusEl.textContent = text
       }
     },
   }

@@ -12,9 +12,10 @@ defmodule AssistantWeb.SettingsUserLive.Settings do
     assigns = assign(assigns, :logo_url, @logo_url)
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="sa-auth-shell">
-        <section class="sa-auth-card">
+    <Layouts.flash_group flash={@flash} />
+
+    <div class="sa-auth-shell sa-auth-shell-cloud">
+      <section class="sa-auth-card">
           <header class="sa-auth-brand">
             <img src={@logo_url} alt="Synaptic Assistant" class="sa-auth-logo" />
             <div class="sa-auth-brand-copy">
@@ -28,12 +29,13 @@ defmodule AssistantWeb.SettingsUserLive.Settings do
             <section class="sa-auth-pane">
               <h2>Update Email</h2>
               <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email">
-                <.input
+                <.field
                   field={@email_form[:email]}
                   type="email"
                   label="Email"
                   autocomplete="username"
                   required
+                  no_margin
                 />
                 <.button phx-disable-with="Changing..." class="w-full">Change Email</.button>
               </.form>
@@ -57,18 +59,20 @@ defmodule AssistantWeb.SettingsUserLive.Settings do
                   autocomplete="username"
                   value={@current_email}
                 />
-                <.input
+                <.field
                   field={@password_form[:password]}
                   type="password"
                   label="New Password"
                   autocomplete="new-password"
                   required
+                  no_margin
                 />
-                <.input
+                <.field
                   field={@password_form[:password_confirmation]}
                   type="password"
                   label="Confirm New Password"
                   autocomplete="new-password"
+                  no_margin
                 />
                 <.button phx-disable-with="Saving..." class="w-full">Save Password</.button>
               </.form>
@@ -76,7 +80,6 @@ defmodule AssistantWeb.SettingsUserLive.Settings do
           </div>
         </section>
       </div>
-    </Layouts.app>
     """
   end
 

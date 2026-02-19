@@ -83,6 +83,30 @@ defmodule Assistant.Workflows do
   end
 
   @doc """
+  Creates a new blank workflow with a unique name.
+  """
+  @spec create_workflow() :: {:ok, map()} | {:error, term()}
+  def create_workflow do
+    name = "untitled-#{System.os_time(:second)}"
+    path = workflow_path(name)
+
+    frontmatter = %{
+      "name" => name,
+      "description" => "New workflow",
+      "enabled" => false,
+      "allowed_tools" => [],
+      "tags" => []
+    }
+
+    with {:ok, _path} <- persist(path, frontmatter, "") do
+      case load_workflow(path) do
+        nil -> {:error, :write_failed}
+        workflow -> {:ok, workflow}
+      end
+    end
+  end
+
+  @doc """
   Duplicates a workflow and returns the copied workflow.
   """
   @spec duplicate(String.t()) :: {:ok, map()} | {:error, term()}

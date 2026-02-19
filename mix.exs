@@ -53,6 +53,13 @@ defmodule Assistant.MixProject do
       {:phoenix_ecto, "~> 4.6"},
       {:phoenix_html, "~> 4.2"},
       {:phoenix_live_view, "~> 1.0"},
+      {:petal_components, "~> 3.0"},
+      {:heroicons,
+       github: "tailwindlabs/heroicons",
+       tag: "v2.1.5",
+       app: false,
+       compile: false,
+       sparse: "optimized"},
       {:swoosh, "~> 1.17"},
       {:bandit, "~> 1.0"},
       {:jason, "~> 1.4"},
@@ -89,6 +96,7 @@ defmodule Assistant.MixProject do
       # Dev & test tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:tailwind, "~> 0.4", runtime: Mix.env() == :dev},
       {:phoenix_live_reload, "~> 1.5", only: :dev},
 
       # Test only
