@@ -48,6 +48,9 @@ defmodule Assistant.Skills.Workflow.Create do
          side_effects: [:workflow_created],
          metadata: %{workflow_path: path, workflow_name: flags["name"]}
        }}
+    else
+      {:error, message} ->
+        {:ok, %Result{status: :error, content: message}}
     end
   end
 
@@ -61,26 +64,16 @@ defmodule Assistant.Skills.Workflow.Create do
     if missing == [] do
       :ok
     else
-      {:ok,
-       %Result{
-         status: :error,
-         content: "Missing required flags: #{Enum.join(missing, ", ")}"
-       }}
+      {:error, "Missing required flags: #{Enum.join(missing, ", ")}"}
     end
   end
 
   defp validate_name(name) do
-    cond do
-      not Regex.match?(~r/^[a-z][a-z0-9_-]*$/, name) ->
-        {:ok,
-         %Result{
-           status: :error,
-           content:
-             "Workflow name must be lowercase alphanumeric with hyphens or underscores, starting with a letter."
-         }}
-
-      true ->
-        :ok
+    if Regex.match?(~r/^[a-z][a-z0-9_-]*$/, name) do
+      :ok
+    else
+      {:error,
+       "Workflow name must be lowercase alphanumeric with hyphens or underscores, starting with a letter."}
     end
   end
 
@@ -90,11 +83,7 @@ defmodule Assistant.Skills.Workflow.Create do
     case Crontab.CronExpression.Parser.parse(cron) do
       {:ok, _} -> :ok
       {:error, _} ->
-        {:ok,
-         %Result{
-           status: :error,
-           content: "Invalid cron expression: #{cron}. Expected format: \"0 8 * * *\""
-         }}
+        {:error, "Invalid cron expression: #{cron}. Expected format: \"0 8 * * *\""}
     end
   end
 
@@ -102,11 +91,7 @@ defmodule Assistant.Skills.Workflow.Create do
     path = workflow_path(name)
 
     if File.exists?(path) do
-      {:ok,
-       %Result{
-         status: :error,
-         content: "Workflow '#{name}' already exists at #{path}."
-       }}
+      {:error, "Workflow '#{name}' already exists at #{path}."}
     else
       :ok
     end

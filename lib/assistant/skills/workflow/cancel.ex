@@ -56,9 +56,8 @@ defmodule Assistant.Skills.Workflow.Cancel do
   # --- Private ---
 
   defp cancel_workflow(name, path, flags) do
-    # Remove Quantum job
-    job_name = workflow_job_name(name)
-    Assistant.Scheduler.delete_job(job_name)
+    # Remove Quantum job via QuantumLoader (uses ref-based lookup, no atoms)
+    Assistant.Scheduler.QuantumLoader.cancel(name)
 
     # Optionally delete the file
     deleted_file? = delete_flag?(flags) && delete_file(path)
@@ -103,15 +102,6 @@ defmodule Assistant.Skills.Workflow.Cancel do
 
         false
     end
-  end
-
-  defp workflow_job_name(name) do
-    safe_name =
-      name
-      |> String.replace(~r/[^a-zA-Z0-9_-]/, "_")
-      |> String.downcase()
-
-    String.to_atom("workflow_#{safe_name}")
   end
 
   defp workflow_path(name) do

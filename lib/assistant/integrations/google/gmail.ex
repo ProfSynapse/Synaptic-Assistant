@@ -152,7 +152,7 @@ defmodule Assistant.Integrations.Google.Gmail do
   end
 
   defp base64url_encode(data) do
-    Base.encode64(data) |> String.replace("+", "-") |> String.replace("/", "_") |> String.replace("=", "")
+    Base.url_encode64(data, padding: false)
   end
 
   defp validate_headers(to, subject, cc) do
