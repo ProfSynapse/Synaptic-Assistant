@@ -19,35 +19,40 @@ defmodule Assistant.Skills.Files.Update do
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.Result
-  alias Assistant.Integrations.Google.Drive
 
   @impl true
   def execute(flags, context) do
-    drive = Map.get(context.integrations, :drive, Drive)
-    file_id = Map.get(flags, "id")
-    search = Map.get(flags, "search")
-    replace = Map.get(flags, "replace")
-    replace_all? = Map.get(flags, "all", false)
+    case Map.get(context.integrations, :drive) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Google Drive integration not configured."}}
 
-    cond do
-      is_nil(file_id) || file_id == "" ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
+      drive ->
+        token = context.google_token
+        file_id = Map.get(flags, "id")
+        search = Map.get(flags, "search")
+        replace = Map.get(flags, "replace")
+        replace_all? = Map.get(flags, "all", false)
 
-      is_nil(search) || search == "" ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --search (text to find)."}}
+        cond do
+          is_nil(file_id) || file_id == "" ->
+            {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
 
-      is_nil(replace) ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --replace (replacement text)."}}
+          is_nil(search) || search == "" ->
+            {:ok, %Result{status: :error, content: "Missing required parameter: --search (text to find)."}}
 
-      true ->
-        do_update(drive, file_id, search, replace, replace_all?)
+          is_nil(replace) ->
+            {:ok, %Result{status: :error, content: "Missing required parameter: --replace (replacement text)."}}
+
+          true ->
+            do_update(drive, token, file_id, search, replace, replace_all?)
+        end
     end
   end
 
-  defp do_update(drive, file_id, search, replace, replace_all?) do
-    with {:ok, content} <- drive.read_file(file_id),
+  defp do_update(drive, token, file_id, search, replace, replace_all?) do
+    with {:ok, content} <- drive.read_file(token, file_id),
          {:changed, updated} <- apply_replacement(content, search, replace, replace_all?),
-         {:ok, file} <- drive.update_file_content(file_id, updated) do
+         {:ok, file} <- drive.update_file_content(token, file_id, updated) do
       count = count_replacements(content, search, replace_all?)
 
       {:ok, %Result{

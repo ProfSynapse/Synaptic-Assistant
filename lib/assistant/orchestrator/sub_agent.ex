@@ -61,11 +61,16 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   use GenServer
 
+  alias Assistant.Auth.MagicLink
   alias Assistant.Config.{Loader, PromptLoader}
+  alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
   alias Assistant.Skills.{Context, Executor, Registry, Result}
 
   require Logger
+
+  # Google skill domains that require a per-user OAuth2 token.
+  @google_skill_domains ~w(email calendar files)
 
   @llm_client Application.compile_env(
                 :assistant,
@@ -638,14 +643,23 @@ defmodule Assistant.Orchestrator.SubAgent do
           {:ok, skill_def} ->
             skill_context = build_skill_context(dispatch_params, engine_state)
 
-            case execute_handler(skill_def, skill_args, skill_context) do
-              {:ok, %Result{} = result} ->
-                Limits.record_skill_success(skill_name)
-                {tc, result.content}
+            # Lazy auth: if this is a Google skill and the user has no token,
+            # generate a magic link instead of executing.
+            case maybe_require_google_auth(skill_name, skill_context, engine_state) do
+              :ok ->
+                case execute_handler(skill_def, skill_args, skill_context) do
+                  {:ok, %Result{} = result} ->
+                    Limits.record_skill_success(skill_name)
+                    {tc, result.content}
 
-              {:error, reason} ->
-                Limits.record_skill_failure(skill_name)
-                {tc, "Skill execution failed: #{inspect(reason)}"}
+                  {:error, reason} ->
+                    Limits.record_skill_failure(skill_name)
+                    {tc, "Skill execution failed: #{inspect(reason)}"}
+                end
+
+              {:needs_auth, magic_link_url} ->
+                channel = engine_state[:channel]
+                {tc, format_needs_auth_message(magic_link_url, channel)}
             end
 
           {:error, :not_found} ->
@@ -657,6 +671,78 @@ defmodule Assistant.Orchestrator.SubAgent do
          "Skill \"#{skill_name}\" is temporarily unavailable (circuit breaker open). " <>
            "Try a different approach or report this in your result."}
     end
+  end
+
+  # Check if a skill requires Google OAuth and whether the user has a token.
+  # Returns :ok if no auth needed or token is present, {:needs_auth, url}
+  # if the user needs to connect their Google account.
+  defp maybe_require_google_auth(skill_name, skill_context, engine_state) do
+    [domain | _] = String.split(skill_name, ".", parts: 2)
+
+    if domain in @google_skill_domains and is_nil(skill_context.google_token) and
+         GoogleAuth.oauth_configured?() do
+      # Build pending intent for auto-retry after OAuth
+      pending_intent = %{
+        message: engine_state[:original_request] || "",
+        conversation_id:
+          engine_state[:parent_conversation_id] || engine_state[:conversation_id] || "",
+        channel: to_string(engine_state[:channel] || "unknown"),
+        reply_context: %{}
+      }
+
+      case MagicLink.generate(skill_context.user_id, pending_intent: pending_intent) do
+        {:ok, %{url: url}} ->
+          {:needs_auth, url}
+
+        {:error, reason} ->
+          Logger.error("Failed to generate magic link",
+            user_id: skill_context.user_id,
+            reason: inspect(reason)
+          )
+
+          # Fall through to normal execution — the skill will fail with a
+          # "not configured" error, which is acceptable as a degraded path.
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  # Format the "needs Google auth" message per channel. Each channel gets
+  # a format the user can click/tap easily.
+  defp format_needs_auth_message(magic_link_url, :google_chat) do
+    # Google Chat supports the <URL|label> link format in plain text messages.
+    """
+    NEEDS_GOOGLE_AUTH: I need access to your Google account to complete this request.
+
+    <#{magic_link_url}|Connect Google Account> (expires in 10 minutes)
+
+    After connecting, your original request will be automatically resumed.\
+    """
+  end
+
+  defp format_needs_auth_message(magic_link_url, :telegram) do
+    # Telegram markdown supports [label](url) links.
+    """
+    NEEDS_GOOGLE_AUTH: I need access to your Google account to complete this request.
+
+    [Connect Google Account](#{magic_link_url}) (expires in 10 minutes)
+
+    After connecting, your original request will be automatically resumed.\
+    """
+  end
+
+  defp format_needs_auth_message(magic_link_url, _channel) do
+    # Default plain text format for WhatsApp, SMS, or unknown channels.
+    """
+    NEEDS_GOOGLE_AUTH: I need access to your Google account to complete this request. \
+    Please click the link below to connect your account (expires in 10 minutes):
+
+    #{magic_link_url}
+
+    After connecting, your original request will be automatically resumed.\
+    """
   end
 
   defp execute_handler(skill_def, flags, context) do
@@ -1147,12 +1233,16 @@ defmodule Assistant.Orchestrator.SubAgent do
     root_conversation_id =
       engine_state[:parent_conversation_id] || engine_state[:conversation_id] || "unknown"
 
+    user_id = engine_state[:user_id] || "unknown"
+    google_token = resolve_google_token(user_id, dispatch_params.skills)
+
     %Context{
       conversation_id: engine_state[:conversation_id] || "unknown",
       execution_id: Ecto.UUID.generate(),
-      user_id: engine_state[:user_id] || "unknown",
+      user_id: user_id,
       channel: engine_state[:channel],
       integrations: Assistant.Integrations.Registry.default_integrations(),
+      google_token: google_token,
       metadata: %{
         agent_id: dispatch_params.agent_id,
         root_conversation_id: root_conversation_id,
@@ -1160,6 +1250,37 @@ defmodule Assistant.Orchestrator.SubAgent do
       }
     }
   end
+
+  # Resolve the per-user Google OAuth2 access token if any of the dispatched
+  # skills belong to a Google domain (email, calendar, files). Returns the
+  # access token string on success, or nil if the user has not connected their
+  # Google account or the token refresh failed.
+  defp resolve_google_token(user_id, skills) when user_id != "unknown" do
+    needs_google? =
+      Enum.any?(skills, fn skill_name ->
+        [domain | _] = String.split(skill_name, ".", parts: 2)
+        domain in @google_skill_domains
+      end)
+
+    if needs_google? and GoogleAuth.oauth_configured?() do
+      case GoogleAuth.user_token(user_id) do
+        {:ok, access_token} ->
+          access_token
+
+        {:error, reason} when reason in [:not_connected, :refresh_failed] ->
+          Logger.info("Google OAuth token not available for user",
+            user_id: user_id,
+            reason: reason
+          )
+
+          nil
+      end
+    else
+      nil
+    end
+  end
+
+  defp resolve_google_token(_user_id, _skills), do: nil
 
   defp build_model_opts(dispatch_params, context) do
     model =

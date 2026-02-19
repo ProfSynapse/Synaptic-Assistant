@@ -56,8 +56,9 @@ if api_key = System.get_env("OPENROUTER_API_KEY") do
   config :assistant, :openrouter_api_key, api_key
 end
 
-# Google service account credentials (inline JSON string or file path to JSON key)
-# Goth requires a decoded map, so we parse JSON here at config time.
+# Google service account credentials (inline JSON string or file path to JSON key).
+# Now used ONLY for Google Chat bot operations (chat.bot scope).
+# Per-user Gmail/Drive/Calendar access uses OAuth2 client credentials below.
 if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
   credentials =
     if String.starts_with?(String.trim(google_creds), "{") do
@@ -69,11 +70,15 @@ if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
   config :assistant, :google_credentials, credentials
 end
 
-# Google domain-wide delegation — impersonate this user's mailbox and calendar.
-# Required for Gmail/Calendar API access via service account.
-# Set to the email of the workspace user to act on behalf of (e.g., "user@company.com").
-if impersonate_email = System.get_env("GOOGLE_IMPERSONATE_EMAIL") do
-  config :assistant, :google_impersonate_email, impersonate_email
+# Google OAuth2 client credentials — for per-user authorization flow.
+# Obtain from Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client ID.
+# Required for Gmail, Drive, and Calendar per-user access.
+if client_id = System.get_env("GOOGLE_OAUTH_CLIENT_ID") do
+  config :assistant, :google_oauth_client_id, client_id
+end
+
+if client_secret = System.get_env("GOOGLE_OAUTH_CLIENT_SECRET") do
+  config :assistant, :google_oauth_client_secret, client_secret
 end
 
 # Google Cloud project number (used for Google Chat JWT audience verification)

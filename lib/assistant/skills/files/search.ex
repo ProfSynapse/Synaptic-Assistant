@@ -29,24 +29,29 @@ defmodule Assistant.Skills.Files.Search do
 
   @impl true
   def execute(flags, context) do
-    drive = Map.get(context.integrations, :drive, Drive)
+    case Map.get(context.integrations, :drive) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Google Drive integration not configured."}}
 
-    query = Map.get(flags, "query")
-    type = Map.get(flags, "type")
-    folder = Map.get(flags, "folder")
-    limit = SkillsHelpers.parse_limit(Map.get(flags, "limit"), @default_limit, @max_limit)
+      drive ->
+        token = context.google_token
+        query = Map.get(flags, "query")
+        type = Map.get(flags, "type")
+        folder = Map.get(flags, "folder")
+        limit = SkillsHelpers.parse_limit(Map.get(flags, "limit"), @default_limit, @max_limit)
 
-    case build_query(query, type, folder) do
-      {:ok, q} ->
-        search_files(drive, q, limit)
+        case build_query(query, type, folder) do
+          {:ok, q} ->
+            search_files(drive, token, q, limit)
 
-      {:error, reason} ->
-        {:ok, %Result{status: :error, content: reason}}
+          {:error, reason} ->
+            {:ok, %Result{status: :error, content: reason}}
+        end
     end
   end
 
-  defp search_files(drive, query, limit) do
-    case drive.list_files(query, pageSize: limit) do
+  defp search_files(drive, token, query, limit) do
+    case drive.list_files(token, query, pageSize: limit) do
       {:ok, []} ->
         {:ok, %Result{
           status: :ok,

@@ -19,35 +19,40 @@ defmodule Assistant.Skills.Files.Write do
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.Result
-  alias Assistant.Integrations.Google.Drive
 
   @impl true
   def execute(flags, context) do
-    drive = Map.get(context.integrations, :drive, Drive)
-    name = Map.get(flags, "name")
-    content = Map.get(flags, "content", "")
-    folder = Map.get(flags, "folder")
-    mime_type = Map.get(flags, "type")
+    case Map.get(context.integrations, :drive) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Google Drive integration not configured."}}
 
-    cond do
-      is_nil(name) || name == "" ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --name (file name)."}}
+      drive ->
+        token = context.google_token
+        name = Map.get(flags, "name")
+        content = Map.get(flags, "content", "")
+        folder = Map.get(flags, "folder")
+        mime_type = Map.get(flags, "type")
 
-      is_nil(content) ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --content (file content)."}}
+        cond do
+          is_nil(name) || name == "" ->
+            {:ok, %Result{status: :error, content: "Missing required parameter: --name (file name)."}}
 
-      true ->
-        create_file(drive, name, content, folder, mime_type)
+          is_nil(content) ->
+            {:ok, %Result{status: :error, content: "Missing required parameter: --content (file content)."}}
+
+          true ->
+            create_file(drive, token, name, content, folder, mime_type)
+        end
     end
   end
 
-  defp create_file(drive, name, content, folder, mime_type) do
+  defp create_file(drive, token, name, content, folder, mime_type) do
     opts =
       []
       |> maybe_add(:parent_id, folder)
       |> maybe_add(:mime_type, mime_type)
 
-    case drive.create_file(name, content, opts) do
+    case drive.create_file(token, name, content, opts) do
       {:ok, file} ->
         link_line = if file[:web_view_link], do: "\nLink: #{file.web_view_link}", else: ""
 

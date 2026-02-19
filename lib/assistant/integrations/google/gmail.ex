@@ -1,7 +1,9 @@
 # lib/assistant/integrations/google/gmail.ex — Google Gmail API wrapper.
 #
-# Thin wrapper around GoogleApi.Gmail.V1 that handles Goth authentication
-# and normalizes response structs into plain maps. Used by email domain skills.
+# Thin wrapper around GoogleApi.Gmail.V1 that normalizes response structs into
+# plain maps. All public API functions accept an `access_token` as their first
+# parameter — the caller (orchestrator/context builder) is responsible for
+# resolving the token. Used by email domain skills.
 #
 # Related files:
 #   - lib/assistant/integrations/google/auth.ex (token provider)
@@ -11,8 +13,10 @@ defmodule Assistant.Integrations.Google.Gmail do
   @moduledoc """
   Google Gmail API client wrapping `GoogleApi.Gmail.V1`.
 
-  All public functions return normalized plain maps rather than GoogleApi structs.
-  Authentication is handled via `Assistant.Integrations.Google.Auth`.
+  All public functions accept an `access_token` as their first parameter and
+  return normalized plain maps rather than GoogleApi structs. The caller is
+  responsible for resolving the token (via `Auth.user_token/1` or
+  `Auth.service_token/0`).
   """
 
   require Logger
@@ -23,52 +27,94 @@ defmodule Assistant.Integrations.Google.Gmail do
 
   @default_limit 10
 
-  @doc "List message IDs matching a Gmail search query. Returns `{:ok, [%{id, thread_id}]}`."
-  @spec list_messages(String.t(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
-  def list_messages(user_id \\ "me", query, opts \\ []) do
-    with {:ok, conn} <- get_connection() do
-      max = Keyword.get(opts, :max_results, @default_limit)
+  @doc """
+  List message IDs matching a Gmail search query.
 
-      case Users.gmail_users_messages_list(conn, user_id, q: query, maxResults: max) do
-        {:ok, %Model.ListMessagesResponse{messages: messages}} ->
-          {:ok, Enum.map(messages || [], &%{id: &1.id, thread_id: &1.threadId})}
+  ## Parameters
 
-        {:error, reason} ->
-          Logger.warning("Gmail list_messages failed", query: query, error: inspect(reason))
-          {:error, reason}
-      end
+    - `access_token` - OAuth2 access token string
+    - `user_id` - Gmail user ID (default `"me"`)
+    - `query` - Gmail search query string
+    - `opts` - Optional keyword list:
+      - `:max_results` - Max results (default 10)
+
+  ## Returns
+
+    - `{:ok, [%{id, thread_id}]}` on success
+    - `{:error, term()}` on failure
+  """
+  @spec list_messages(String.t(), String.t(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def list_messages(access_token, user_id \\ "me", query, opts \\ []) do
+    conn = get_connection(access_token)
+    max = Keyword.get(opts, :max_results, @default_limit)
+
+    case Users.gmail_users_messages_list(conn, user_id, q: query, maxResults: max) do
+      {:ok, %Model.ListMessagesResponse{messages: messages}} ->
+        {:ok, Enum.map(messages || [], &%{id: &1.id, thread_id: &1.threadId})}
+
+      {:error, reason} ->
+        Logger.warning("Gmail list_messages failed", query: query, error: inspect(reason))
+        {:error, reason}
     end
   end
 
-  @doc "Get a full message by ID. Normalizes headers/body into a plain map."
-  @spec get_message(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def get_message(message_id, user_id \\ "me", _opts \\ []) do
-    with {:ok, conn} <- get_connection() do
-      case Users.gmail_users_messages_get(conn, user_id, message_id, format: "full") do
-        {:ok, %Model.Message{} = msg} ->
-          {:ok, normalize_message(msg)}
+  @doc """
+  Get a full message by ID. Normalizes headers/body into a plain map.
 
-        {:error, %Tesla.Env{status: 404}} ->
-          {:error, :not_found}
+  ## Parameters
 
-        {:error, reason} ->
-          Logger.warning("Gmail get_message failed", message_id: message_id, error: inspect(reason))
-          {:error, reason}
-      end
+    - `access_token` - OAuth2 access token string
+    - `message_id` - The Gmail message ID
+    - `user_id` - Gmail user ID (default `"me"`)
+    - `opts` - Reserved for future use
+
+  ## Returns
+
+    - `{:ok, normalized_message_map}` on success
+    - `{:error, :not_found | term()}` on failure
+  """
+  @spec get_message(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def get_message(access_token, message_id, user_id \\ "me", _opts \\ []) do
+    conn = get_connection(access_token)
+
+    case Users.gmail_users_messages_get(conn, user_id, message_id, format: "full") do
+      {:ok, %Model.Message{} = msg} ->
+        {:ok, normalize_message(msg)}
+
+      {:error, %Tesla.Env{status: 404}} ->
+        {:error, :not_found}
+
+      {:error, reason} ->
+        Logger.warning("Gmail get_message failed", message_id: message_id, error: inspect(reason))
+        {:error, reason}
     end
   end
 
   @doc """
   Send an email. Builds RFC 2822, base64url-encodes, sends via Gmail API.
   Rejects newlines in header fields to prevent header injection.
-  Opts: `:from`, `:cc`.
+
+  ## Parameters
+
+    - `access_token` - OAuth2 access token string
+    - `to` - Recipient email address
+    - `subject` - Email subject
+    - `body` - Email body text
+    - `opts` - Optional keyword list:
+      - `:from` - Sender (default `"me"`)
+      - `:cc` - CC recipient
+
+  ## Returns
+
+    - `{:ok, %{id, thread_id}}` on success
+    - `{:error, term()}` on failure
   """
-  @spec send_message(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def send_message(to, subject, body, opts \\ []) do
+  @spec send_message(String.t(), String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def send_message(access_token, to, subject, body, opts \\ []) do
     cc = Keyword.get(opts, :cc)
 
-    with :ok <- validate_headers(to, subject, cc),
-         {:ok, conn} <- get_connection() do
+    with :ok <- validate_headers(to, subject, cc) do
+      conn = get_connection(access_token)
       raw = build_rfc2822(to, subject, body, opts) |> base64url_encode()
 
       case Users.gmail_users_messages_send(conn, "me", body: %Model.Message{raw: raw}) do
@@ -86,14 +132,28 @@ defmodule Assistant.Integrations.Google.Gmail do
   @doc """
   Create a draft email. Builds RFC 2822, base64url-encodes, saves as draft via Gmail API.
   Rejects newlines in header fields to prevent header injection.
-  Opts: `:from`, `:cc`.
+
+  ## Parameters
+
+    - `access_token` - OAuth2 access token string
+    - `to` - Recipient email address
+    - `subject` - Email subject
+    - `body` - Email body text
+    - `opts` - Optional keyword list:
+      - `:from` - Sender (default `"me"`)
+      - `:cc` - CC recipient
+
+  ## Returns
+
+    - `{:ok, %{id}}` on success
+    - `{:error, term()}` on failure
   """
-  @spec create_draft(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
-  def create_draft(to, subject, body, opts \\ []) do
+  @spec create_draft(String.t(), String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def create_draft(access_token, to, subject, body, opts \\ []) do
     cc = Keyword.get(opts, :cc)
 
-    with :ok <- validate_headers(to, subject, cc),
-         {:ok, conn} <- get_connection() do
+    with :ok <- validate_headers(to, subject, cc) do
+      conn = get_connection(access_token)
       raw = build_rfc2822(to, subject, body, opts) |> base64url_encode()
       draft_body = %Model.Draft{message: %Model.Message{raw: raw}}
 
@@ -109,15 +169,29 @@ defmodule Assistant.Integrations.Google.Gmail do
     end
   end
 
-  @doc "Search messages and return full content. Calls list then get for each. Opts: `:limit`."
-  @spec search_messages(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
-  def search_messages(query, opts \\ []) do
+  @doc """
+  Search messages and return full content. Calls list then get for each.
+
+  ## Parameters
+
+    - `access_token` - OAuth2 access token string
+    - `query` - Gmail search query string
+    - `opts` - Optional keyword list:
+      - `:limit` - Max results (default 10)
+
+  ## Returns
+
+    - `{:ok, [normalized_message_map]}` on success
+    - `{:error, term()}` on failure
+  """
+  @spec search_messages(String.t(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def search_messages(access_token, query, opts \\ []) do
     limit = Keyword.get(opts, :limit, @default_limit)
 
-    with {:ok, ids} <- list_messages("me", query, max_results: limit) do
+    with {:ok, ids} <- list_messages(access_token, "me", query, max_results: limit) do
       messages =
         Enum.reduce(ids, [], fn %{id: id}, acc ->
-          case get_message(id) do
+          case get_message(access_token, id) do
             {:ok, msg} -> [msg | acc]
             {:error, reason} ->
               Logger.warning("Gmail search: skipping message", message_id: id, error: inspect(reason))
@@ -132,11 +206,8 @@ defmodule Assistant.Integrations.Google.Gmail do
 
   # -- Private: connection & RFC 2822 --
 
-  defp get_connection do
-    case Assistant.Integrations.Google.Auth.token() do
-      {:ok, token} -> {:ok, Connection.new(token)}
-      {:error, _} = err -> err
-    end
+  defp get_connection(access_token) do
+    Connection.new(access_token)
   end
 
   defp build_rfc2822(to, subject, body, opts) do
