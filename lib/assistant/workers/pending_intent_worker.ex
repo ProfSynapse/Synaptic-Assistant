@@ -97,11 +97,6 @@ defmodule Assistant.Workers.PendingIntentWorker do
     end
   end
 
-  def perform(%Oban.Job{args: args}) do
-    Logger.error("PendingIntentWorker: unexpected args shape", args: inspect(args))
-    {:cancel, :invalid_args}
-  end
-
   # --- Private ---
 
   defp intent_stale?(nil), do: false

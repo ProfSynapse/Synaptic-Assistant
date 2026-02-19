@@ -41,12 +41,4 @@ defmodule Assistant.Schemas.OAuthToken do
     |> unique_constraint([:user_id, :provider])
   end
 
-  @doc """
-  Changeset for updating tokens after a refresh or re-authorization.
-  """
-  def refresh_changeset(oauth_token, attrs) do
-    oauth_token
-    |> cast(attrs, [:access_token, :token_expires_at, :refresh_token, :scopes])
-    |> validate_required([:access_token])
-  end
 end

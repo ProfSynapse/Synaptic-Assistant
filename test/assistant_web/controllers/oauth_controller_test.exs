@@ -8,7 +8,7 @@ defmodule AssistantWeb.OAuthControllerTest do
   use AssistantWeb.ConnCase, async: false
 
   alias Assistant.Auth.MagicLink
-  alias Assistant.Schemas.User
+  alias Assistant.Schemas.{AuthToken, OAuthToken, User}
   alias Assistant.Repo
 
   import Ecto.Query
@@ -42,25 +42,10 @@ defmodule AssistantWeb.OAuthControllerTest do
 
     Application.put_env(:assistant, AssistantWeb.Endpoint, merged)
 
-    # Ensure ETS table exists for PKCE storage.
-    # In production, Application.start/2 creates this table. In tests, we
-    # create it here if it doesn't already exist (test process may not share
-    # the application supervisor's ETS table).
-    if :ets.whereis(:oauth_pkce_verifiers) == :undefined do
-      :ets.new(:oauth_pkce_verifiers, [:set, :public, :named_table])
-    end
-
     on_exit(fn ->
       Application.delete_env(:assistant, :google_oauth_client_id)
       Application.delete_env(:assistant, :google_oauth_client_secret)
       Application.put_env(:assistant, AssistantWeb.Endpoint, original_config)
-
-      # Clean up ETS table entries (but don't delete the table itself)
-      try do
-        :ets.delete_all_objects(:oauth_pkce_verifiers)
-      catch
-        :error, :badarg -> :ok
-      end
     end)
 
     %{conn: conn, user: user}
@@ -169,6 +154,136 @@ defmodule AssistantWeb.OAuthControllerTest do
 
       assert conn.status == 400
       assert conn.resp_body =~ "Authorization failed"
+    end
+  end
+
+  # -------------------------------------------------------------------
+  # GET /auth/google/callback — happy path (Bypass)
+  # -------------------------------------------------------------------
+
+  describe "GET /auth/google/callback (happy path)" do
+    setup %{conn: conn, user: user} do
+      # Stand up Bypass to mock Google's token endpoint
+      bypass = Bypass.open()
+
+      # Point OAuth module's token URL to Bypass
+      Application.put_env(:assistant, :google_token_url, "http://localhost:#{bypass.port}/token")
+
+      on_exit(fn ->
+        Application.delete_env(:assistant, :google_token_url)
+      end)
+
+      %{conn: conn, user: user, bypass: bypass}
+    end
+
+    test "valid state + PKCE + code → stores tokens, consumes magic link, renders success",
+         %{conn: conn, user: user, bypass: bypass} do
+      # 1. Generate a magic link for the user
+      {:ok, %{token: raw_token}} = MagicLink.generate(user.id)
+
+      # 2. Call /start to redirect to Google (stores PKCE code_verifier in auth_token DB row)
+      start_conn = get(conn, "/auth/google/start?token=#{raw_token}")
+      assert start_conn.status == 302
+      location = get_resp_header(start_conn, "location") |> List.first()
+
+      # 3. Extract state from the redirect URL
+      state =
+        URI.parse(location)
+        |> Map.get(:query, "")
+        |> URI.decode_query()
+        |> Map.get("state", "")
+
+      assert state != ""
+
+      # 4. Set up Bypass to return a valid Google token response
+      id_token_payload =
+        %{"sub" => "google-uid-123", "email" => "test@example.com"}
+        |> Jason.encode!()
+        |> Base.url_encode64(padding: false)
+
+      id_token = "header.#{id_token_payload}.signature"
+
+      Bypass.expect_once(bypass, "POST", "/token", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{
+          "access_token" => "ya29.test-access-token",
+          "refresh_token" => "1//test-refresh-token",
+          "expires_in" => 3599,
+          "token_type" => "Bearer",
+          "id_token" => id_token,
+          "scope" => "openid email profile"
+        }))
+      end)
+
+      # 5. Call /callback with the code and state
+      callback_conn = get(conn, "/auth/google/callback?code=test_auth_code&state=#{state}")
+
+      # 6. Assert: 200 with success HTML
+      assert callback_conn.status == 200
+      assert callback_conn.resp_body =~ "Google Account Connected"
+      assert callback_conn.resp_body =~ "test@example.com"
+
+      # 7. Assert: magic link is consumed (used_at is set)
+      token_hash = :crypto.hash(:sha256, raw_token) |> Base.encode16(case: :lower)
+
+      auth_token =
+        Repo.one!(from(t in AuthToken, where: t.token_hash == ^token_hash))
+
+      assert auth_token.used_at != nil
+
+      # 8. Assert: OAuthToken row exists for the user
+      oauth_token =
+        Repo.one!(
+          from(t in OAuthToken,
+            where: t.user_id == ^user.id and t.provider == "google"
+          )
+        )
+
+      assert oauth_token.provider_uid == "google-uid-123"
+      assert oauth_token.provider_email == "test@example.com"
+      assert oauth_token.scopes == "openid email profile"
+      # Access token and refresh token are encrypted, but should not be nil
+      assert oauth_token.access_token != nil
+      assert oauth_token.refresh_token != nil
+    end
+
+    test "returns 400 when Google token exchange fails (non-200 response)",
+         %{conn: conn, user: user, bypass: bypass} do
+      {:ok, %{token: raw_token}} = MagicLink.generate(user.id)
+
+      start_conn = get(conn, "/auth/google/start?token=#{raw_token}")
+      assert start_conn.status == 302
+      location = get_resp_header(start_conn, "location") |> List.first()
+
+      state =
+        URI.parse(location)
+        |> Map.get(:query, "")
+        |> URI.decode_query()
+        |> Map.get("state", "")
+
+      # Bypass returns an error from Google
+      Bypass.expect_once(bypass, "POST", "/token", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(400, Jason.encode!(%{
+          "error" => "invalid_grant",
+          "error_description" => "Bad Request"
+        }))
+      end)
+
+      callback_conn = get(conn, "/auth/google/callback?code=bad_code&state=#{state}")
+
+      assert callback_conn.status == 400
+      assert callback_conn.resp_body =~ "Authorization failed"
+
+      # Magic link should NOT be consumed
+      token_hash = :crypto.hash(:sha256, raw_token) |> Base.encode16(case: :lower)
+
+      auth_token =
+        Repo.one!(from(t in AuthToken, where: t.token_hash == ^token_hash))
+
+      assert auth_token.used_at == nil
     end
   end
 

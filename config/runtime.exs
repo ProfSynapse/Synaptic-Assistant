@@ -114,8 +114,19 @@ if api_key = System.get_env("HUBSPOT_API_KEY") do
   config :assistant, :hubspot_api_key, api_key
 end
 
-# Cloak encryption key for Ecto field encryption
-if encryption_key = System.get_env("CLOAK_ENCRYPTION_KEY") do
+# Cloak encryption key for Ecto field encryption.
+# Required in production — OAuth tokens are encrypted at rest via Cloak AES-GCM.
+# In dev/test, omitting this env var means the Vault starts with no ciphers
+# (encrypted fields will error on read/write, which is acceptable for tests
+# that don't exercise token storage).
+if config_env() == :prod do
+  encryption_key =
+    System.get_env("CLOAK_ENCRYPTION_KEY") ||
+      raise """
+      environment variable CLOAK_ENCRYPTION_KEY is missing.
+      Generate a 256-bit key: :crypto.strong_rand_bytes(32) |> Base.encode64()
+      """
+
   config :assistant, Assistant.Vault,
     ciphers: [
       default: {
@@ -124,4 +135,15 @@ if encryption_key = System.get_env("CLOAK_ENCRYPTION_KEY") do
         key: Base.decode64!(encryption_key)
       }
     ]
+else
+  if encryption_key = System.get_env("CLOAK_ENCRYPTION_KEY") do
+    config :assistant, Assistant.Vault,
+      ciphers: [
+        default: {
+          Cloak.Ciphers.AES.GCM,
+          tag: "AES.GCM.V1",
+          key: Base.decode64!(encryption_key)
+        }
+      ]
+  end
 end

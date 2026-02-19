@@ -23,6 +23,7 @@ defmodule Assistant.Schemas.AuthToken do
     field :token_hash, :string
     field :purpose, :string
     field :oban_job_id, :integer
+    field :code_verifier, :string
     field :expires_at, :utc_datetime_usec
     field :used_at, :utc_datetime_usec
 
@@ -32,7 +33,7 @@ defmodule Assistant.Schemas.AuthToken do
   end
 
   @required_fields [:user_id, :token_hash, :purpose, :expires_at]
-  @optional_fields [:oban_job_id]
+  @optional_fields [:oban_job_id, :code_verifier]
 
   def changeset(auth_token, attrs) do
     auth_token

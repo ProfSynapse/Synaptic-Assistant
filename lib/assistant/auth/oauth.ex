@@ -34,7 +34,7 @@ defmodule Assistant.Auth.OAuth do
   require Logger
 
   @google_auth_url "https://accounts.google.com/o/oauth2/v2/auth"
-  @google_token_url "https://oauth2.googleapis.com/token"
+  @default_google_token_url "https://oauth2.googleapis.com/token"
 
   @doc """
   OAuth2 scopes requested for per-user authorization.
@@ -137,7 +137,7 @@ defmodule Assistant.Auth.OAuth do
         "code_verifier" => code_verifier
       }
 
-      case Req.post(@google_token_url, form: body) do
+      case Req.post(google_token_url(), form: body) do
         {:ok, %Req.Response{status: 200, body: token_data}} ->
           Logger.info("OAuth token exchange succeeded",
             scopes: token_data["scope"],
@@ -262,35 +262,42 @@ defmodule Assistant.Auth.OAuth do
 
   # --- Private Helpers ---
 
-  # State format: "user_id|channel|token_hash|timestamp|hmac"
-  # HMAC covers "user_id|channel|token_hash|timestamp"
+  # State is a JSON envelope: {"p": <payload_json>, "h": <hmac_of_payload>}
+  # Payload contains: user_id, channel, token_hash, timestamp.
+  # HMAC covers the canonical JSON payload string.
   # State TTL: 15 minutes (slightly longer than magic link TTL to avoid race)
   @state_ttl_seconds 15 * 60
 
   defp sign_state(user_id, channel, token_hash) do
-    timestamp = System.system_time(:second) |> Integer.to_string()
-    payload = "#{user_id}|#{channel}|#{token_hash}|#{timestamp}"
-    hmac = compute_hmac(payload)
-    signed = "#{payload}|#{hmac}"
-    Base.url_encode64(signed, padding: false)
+    timestamp = System.system_time(:second)
+
+    payload_map = %{
+      "uid" => user_id,
+      "ch" => channel,
+      "th" => token_hash,
+      "ts" => timestamp
+    }
+
+    payload_json = Jason.encode!(payload_map)
+    hmac = compute_hmac(payload_json)
+
+    Jason.encode!(%{"p" => payload_json, "h" => hmac})
+    |> Base.url_encode64(padding: false)
   end
 
   defp parse_and_verify_state(decoded) do
-    case String.split(decoded, "|") do
-      [user_id, channel, token_hash, timestamp_str, received_hmac] ->
-        payload = "#{user_id}|#{channel}|#{token_hash}|#{timestamp_str}"
-        expected_hmac = compute_hmac(payload)
-
-        with true <- Plug.Crypto.secure_compare(received_hmac, expected_hmac),
-             {timestamp, ""} <- Integer.parse(timestamp_str),
-             true <- System.system_time(:second) - timestamp < @state_ttl_seconds do
-          {:ok, %{user_id: user_id, channel: channel, token_hash: token_hash}}
-        else
-          _ -> {:error, :invalid_state}
-        end
-
-      _ ->
-        {:error, :invalid_state}
+    with {:ok, envelope} <- Jason.decode(decoded),
+         payload_json when is_binary(payload_json) <- envelope["p"],
+         received_hmac when is_binary(received_hmac) <- envelope["h"],
+         expected_hmac <- compute_hmac(payload_json),
+         true <- Plug.Crypto.secure_compare(received_hmac, expected_hmac),
+         {:ok, payload} <- Jason.decode(payload_json),
+         %{"uid" => user_id, "ch" => channel, "th" => token_hash, "ts" => timestamp} <- payload,
+         true <- is_integer(timestamp),
+         true <- System.system_time(:second) - timestamp < @state_ttl_seconds do
+      {:ok, %{user_id: user_id, channel: channel, token_hash: token_hash}}
+    else
+      _ -> {:error, :invalid_state}
     end
   end
 
@@ -337,6 +344,10 @@ defmodule Assistant.Auth.OAuth do
       nil -> {:error, :missing_phx_host}
       host -> {:ok, "https://#{host}/auth/google/callback"}
     end
+  end
+
+  defp google_token_url do
+    Application.get_env(:assistant, :google_token_url, @default_google_token_url)
   end
 
   defp fetch_secret_key_base! do

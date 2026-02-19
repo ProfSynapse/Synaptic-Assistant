@@ -65,10 +65,6 @@ defmodule Assistant.Application do
           AssistantWeb.Endpoint
         ]
 
-    # Create the PKCE ETS table owned by the application process (long-lived).
-    # This table stores PKCE code verifiers between OAuth /start and /callback.
-    :ets.new(:oauth_pkce_verifiers, [:set, :public, :named_table])
-
     opts = [strategy: :one_for_one, name: Assistant.Supervisor]
     Supervisor.start_link(children, opts)
   end

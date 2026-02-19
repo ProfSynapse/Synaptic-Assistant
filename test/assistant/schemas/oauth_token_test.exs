@@ -72,38 +72,4 @@ defmodule Assistant.Schemas.OAuthTokenTest do
       assert changeset.valid?
     end
   end
-
-  # -------------------------------------------------------------------
-  # refresh_changeset/2
-  # -------------------------------------------------------------------
-
-  describe "refresh_changeset/2" do
-    test "valid with access_token" do
-      existing = %OAuthToken{
-        user_id: Ecto.UUID.generate(),
-        provider: "google",
-        refresh_token: "orig"
-      }
-
-      changeset =
-        OAuthToken.refresh_changeset(existing, %{
-          access_token: "new-access",
-          token_expires_at: DateTime.utc_now()
-        })
-
-      assert changeset.valid?
-    end
-
-    test "invalid without access_token" do
-      existing = %OAuthToken{
-        user_id: Ecto.UUID.generate(),
-        provider: "google",
-        refresh_token: "orig"
-      }
-
-      changeset = OAuthToken.refresh_changeset(existing, %{})
-      refute changeset.valid?
-      assert Keyword.has_key?(changeset.errors, :access_token)
-    end
-  end
 end

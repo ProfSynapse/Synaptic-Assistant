@@ -660,6 +660,10 @@ defmodule Assistant.Orchestrator.SubAgent do
               {:needs_auth, magic_link_url} ->
                 channel = engine_state[:channel]
                 {tc, format_needs_auth_message(magic_link_url, channel)}
+
+              {:needs_auth_rate_limited} ->
+                {tc,
+                 "Authorization already in progress. Please check your messages for the link."}
             end
 
           {:error, :not_found} ->
@@ -693,6 +697,9 @@ defmodule Assistant.Orchestrator.SubAgent do
       case MagicLink.generate(skill_context.user_id, pending_intent: pending_intent) do
         {:ok, %{url: url}} ->
           {:needs_auth, url}
+
+        {:error, :rate_limited} ->
+          {:needs_auth_rate_limited}
 
         {:error, reason} ->
           Logger.error("Failed to generate magic link",

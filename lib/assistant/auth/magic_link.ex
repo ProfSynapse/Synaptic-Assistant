@@ -22,7 +22,7 @@ defmodule Assistant.Auth.MagicLink do
   - 10-minute TTL
   - Single-use: atomic `UPDATE ... WHERE used_at IS NULL RETURNING *`
   - Latest-wins: generating a new magic link invalidates pending ones for same user
-  - Rate limited: max 3 magic links per hour per user (enforced by caller)
+  - Rate limited: max 3 magic links per hour per user (enforced in generate/2)
   """
 
   require Logger
@@ -34,6 +34,7 @@ defmodule Assistant.Auth.MagicLink do
 
   @token_bytes 32
   @ttl_minutes 10
+  @max_tokens_per_hour 3
 
   @doc """
   Generate a new magic link token for a user.
@@ -67,6 +68,15 @@ defmodule Assistant.Auth.MagicLink do
     purpose = Keyword.get(opts, :purpose, "oauth_google")
     pending_intent = Keyword.get(opts, :pending_intent)
 
+    if rate_limited?(user_id, purpose) do
+      Logger.warning("Magic link rate limited", user_id: user_id, purpose: purpose)
+      {:error, :rate_limited}
+    else
+      do_generate(user_id, purpose, pending_intent)
+    end
+  end
+
+  defp do_generate(user_id, purpose, pending_intent) do
     raw_token = :crypto.strong_rand_bytes(@token_bytes) |> Base.url_encode64(padding: false)
     token_hash = hash_token(raw_token)
     expires_at = DateTime.add(DateTime.utc_now(), @ttl_minutes * 60, :second)
@@ -191,7 +201,59 @@ defmodule Assistant.Auth.MagicLink do
     end
   end
 
+  @doc """
+  Consume a magic link token by its SHA-256 hash (instead of the raw token).
+
+  Used by the OAuth callback which only has the token_hash (from the HMAC state
+  parameter), not the raw token.
+
+  Same atomic single-use semantics as `consume/1`.
+  """
+  @spec consume_by_hash(String.t()) ::
+          {:ok, AuthToken.t()} | {:error, :not_found | :expired | :already_used}
+  def consume_by_hash(token_hash) do
+    now = DateTime.utc_now()
+
+    query =
+      from(t in AuthToken,
+        where: t.token_hash == ^token_hash and is_nil(t.used_at) and t.expires_at > ^now,
+        select: t
+      )
+
+    case Repo.update_all(query, set: [used_at: now]) do
+      {1, [auth_token]} ->
+        Logger.info("Magic link consumed by hash",
+          user_id: auth_token.user_id,
+          purpose: auth_token.purpose
+        )
+
+        {:ok, auth_token}
+
+      {0, _} ->
+        determine_consume_error(token_hash)
+    end
+  end
+
   # --- Private Helpers ---
+
+  # Check if the user has exceeded the rate limit for magic link generation.
+  # Returns true if ≥3 unused tokens exist for this user+purpose in the last hour.
+  defp rate_limited?(user_id, purpose) do
+    one_hour_ago = DateTime.add(DateTime.utc_now(), -3600, :second)
+
+    count =
+      from(t in AuthToken,
+        where:
+          t.user_id == ^user_id and
+            t.purpose == ^purpose and
+            is_nil(t.used_at) and
+            t.inserted_at > ^one_hour_ago,
+        select: count()
+      )
+      |> Repo.one()
+
+    count >= @max_tokens_per_hour
+  end
 
   # Insert a parked PendingIntentWorker Oban job scheduled 24h in the future.
   # Returns the oban_job_id on success, or nil if no pending_intent was provided.
@@ -228,7 +290,14 @@ defmodule Assistant.Auth.MagicLink do
     end
   end
 
-  defp hash_token(raw_token) do
+  @doc """
+  Compute the SHA-256 hash of a raw token, returned as lowercase hex.
+
+  Used internally for storage lookups and also by `OAuthController` to
+  derive the token_hash from the raw magic link token.
+  """
+  @spec hash_token(String.t()) :: String.t()
+  def hash_token(raw_token) do
     :crypto.hash(:sha256, raw_token) |> Base.encode16(case: :lower)
   end
 

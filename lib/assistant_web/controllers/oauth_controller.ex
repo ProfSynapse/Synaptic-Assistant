@@ -4,9 +4,8 @@
 #   GET /auth/google/start?token=MAGIC_LINK_TOKEN  — validates magic link, redirects to Google
 #   GET /auth/google/callback?code=CODE&state=STATE — exchanges code, stores tokens, triggers replay
 #
-# PKCE code_verifiers are stored in ETS between the start and callback requests,
-# keyed by the HMAC-signed state parameter. ETS entries are cleaned up after use
-# or on a 15-minute TTL (matching the state parameter TTL).
+# PKCE code_verifiers are stored in the auth_tokens DB table (code_verifier column)
+# alongside the magic link token. This survives process restarts and multi-node deploys.
 #
 # Related files:
 #   - lib/assistant/auth/magic_link.ex (validate/consume magic link tokens)
@@ -23,10 +22,10 @@ defmodule AssistantWeb.OAuthController do
 
     * `GET /auth/google/start?token=<magic_link_token>` — Entry point. Validates
       the magic link token, builds a Google OAuth2 consent URL with PKCE, stores
-      the code verifier in ETS, and redirects the user to Google.
+      the code verifier in the auth_tokens DB row, and redirects the user to Google.
 
     * `GET /auth/google/callback?code=<code>&state=<state>` — Callback from Google.
-      Verifies the HMAC-signed state, retrieves the PKCE code verifier from ETS,
+      Verifies the HMAC-signed state, retrieves the PKCE code verifier from the DB,
       exchanges the authorization code for tokens, stores them encrypted in the
       database, consumes the magic link, reschedules the PendingIntentWorker, and
       renders a success page.
@@ -42,20 +41,20 @@ defmodule AssistantWeb.OAuthController do
 
   use AssistantWeb, :controller
 
+  import Ecto.Query
+
   alias Assistant.Auth.MagicLink
   alias Assistant.Auth.OAuth
   alias Assistant.Auth.TokenStore
+  alias Assistant.Schemas.AuthToken
 
   require Logger
-
-  @pkce_table :oauth_pkce_verifiers
-  @pkce_ttl_ms 15 * 60 * 1_000
 
   # --- Actions ---
 
   @doc """
   Start the OAuth flow. Validates the magic link token, builds Google OAuth URL,
-  stores the PKCE code_verifier in ETS keyed by state, and redirects to Google.
+  stores the PKCE code_verifier on the auth_token DB row, and redirects to Google.
   """
   def start(conn, %{"token" => raw_token}) do
     with {:ok, %{user_id: user_id}} <- MagicLink.validate(raw_token),
@@ -65,11 +64,8 @@ defmodule AssistantWeb.OAuthController do
            OAuth.build_authorization_url(user_id,
              channel: channel,
              token_hash: token_hash
-           ) do
-      # Extract state from the URL to use as ETS key
-      state = extract_state_from_url(url)
-      store_code_verifier(state, code_verifier, raw_token)
-
+           ),
+         :ok <- store_code_verifier(token_hash, code_verifier) do
       Logger.info("OAuth flow started, redirecting to Google",
         user_id: user_id
       )
@@ -91,13 +87,13 @@ defmodule AssistantWeb.OAuthController do
   stores them, consumes the magic link, and reschedules the PendingIntentWorker.
   """
   def callback(conn, %{"code" => code, "state" => state}) do
-    with {:ok, %{user_id: user_id}} <- OAuth.verify_state(state),
-         {:ok, code_verifier, raw_token} <- retrieve_code_verifier(state),
-         {:ok, token_data} <- OAuth.exchange_code(code, code_verifier),
+    with {:ok, %{user_id: user_id, token_hash: token_hash}} <- OAuth.verify_state(state),
+         {:ok, auth_token} <- fetch_auth_token_by_hash(token_hash),
+         {:ok, token_data} <- OAuth.exchange_code(code, auth_token.code_verifier),
          {:ok, claims} <- decode_id_token(token_data["id_token"]),
          {:ok, _oauth_token} <- store_tokens(user_id, token_data, claims),
-         {:ok, auth_token} <- MagicLink.consume(raw_token) do
-      maybe_reschedule_pending_intent(auth_token.oban_job_id)
+         {:ok, consumed_token} <- MagicLink.consume_by_hash(token_hash) do
+      maybe_reschedule_pending_intent(consumed_token.oban_job_id)
 
       provider_email = claims["email"] || "your account"
 
@@ -123,48 +119,26 @@ defmodule AssistantWeb.OAuthController do
     render_error(conn, "Authorization failed. Please try again by requesting a new link.")
   end
 
-  # --- PKCE ETS Storage ---
-  # The :oauth_pkce_verifiers ETS table is created in Application.start/2
-  # (owned by the application process for stable lifetime).
+  # --- PKCE DB Storage ---
+  # code_verifier is stored on the auth_tokens row (same row as the magic link).
+  # This replaces the previous ETS-based storage for durability.
 
-  defp store_code_verifier(state, code_verifier, raw_token) do
-    expires_at = System.monotonic_time(:millisecond) + @pkce_ttl_ms
-    :ets.insert(@pkce_table, {state, code_verifier, raw_token, expires_at})
-
-    # Opportunistic sweep: remove expired entries to prevent slow memory leak
-    # from abandoned OAuth flows. Runs on each /start request (cheap — ETS scan).
-    sweep_expired_pkce_entries()
-  end
-
-  defp retrieve_code_verifier(state) do
-    case :ets.lookup(@pkce_table, state) do
-      [{^state, code_verifier, raw_token, expires_at}] ->
-        :ets.delete(@pkce_table, state)
-
-        if System.monotonic_time(:millisecond) < expires_at do
-          {:ok, code_verifier, raw_token}
-        else
-          {:error, :pkce_expired}
-        end
-
-      [] ->
-        {:error, :pkce_not_found}
+  defp store_code_verifier(token_hash, code_verifier) do
+    case from(t in AuthToken, where: t.token_hash == ^token_hash and is_nil(t.used_at))
+         |> Assistant.Repo.update_all(set: [code_verifier: code_verifier]) do
+      {1, _} -> :ok
+      {0, _} -> {:error, :auth_token_not_found}
     end
   end
 
-  # Remove all ETS entries whose TTL has passed. Called opportunistically
-  # on each /start request. Uses :ets.select_delete/2 with a match spec
-  # for O(n) table scan — acceptable given the small table size.
-  defp sweep_expired_pkce_entries do
-    now = System.monotonic_time(:millisecond)
-
-    # Match spec: {_state, _verifier, _token, expires_at} where expires_at <= now
-    match_spec = [{{:_, :_, :_, :"$1"}, [{:"=<", :"$1", now}], [true]}]
-
-    count = :ets.select_delete(@pkce_table, match_spec)
-
-    if count > 0 do
-      Logger.info("Swept expired PKCE entries", count: count)
+  defp fetch_auth_token_by_hash(token_hash) do
+    case Assistant.Repo.one(
+           from(t in AuthToken,
+             where: t.token_hash == ^token_hash and is_nil(t.used_at) and not is_nil(t.code_verifier)
+           )
+         ) do
+      nil -> {:error, :pkce_not_found}
+      %AuthToken{} = auth_token -> {:ok, auth_token}
     end
   end
 
@@ -207,15 +181,24 @@ defmodule AssistantWeb.OAuthController do
         case Base.url_decode64(payload, padding: false) do
           {:ok, json} ->
             case Jason.decode(json) do
-              {:ok, claims} -> {:ok, claims}
-              {:error, _} -> {:ok, %{}}
+              {:ok, claims} ->
+                {:ok, claims}
+
+              {:error, reason} ->
+                Logger.warning("Failed to decode id_token JSON payload",
+                  reason: inspect(reason)
+                )
+
+                {:ok, %{}}
             end
 
           :error ->
+            Logger.warning("Failed to base64-decode id_token payload")
             {:ok, %{}}
         end
 
       _ ->
+        Logger.warning("Malformed id_token: expected 3 dot-separated segments")
         {:ok, %{}}
     end
   end
@@ -252,18 +235,7 @@ defmodule AssistantWeb.OAuthController do
 
   # --- Helpers ---
 
-  defp hash_token(raw_token) do
-    :crypto.hash(:sha256, raw_token) |> Base.encode16(case: :lower)
-  end
-
-  # Extract the state parameter value from a fully-built OAuth URL.
-  defp extract_state_from_url(url) do
-    url
-    |> URI.parse()
-    |> Map.get(:query, "")
-    |> URI.decode_query()
-    |> Map.get("state", "")
-  end
+  defp hash_token(raw_token), do: MagicLink.hash_token(raw_token)
 
   # --- HTML Rendering ---
 

@@ -38,6 +38,13 @@ config :assistant, Oban,
     calendar: 3,
     scheduled: 5,
     oauth_replay: 3
+  ],
+  plugins: [
+    {Oban.Plugins.Cron,
+     crontab: [
+       # Purge expired/consumed auth_tokens daily at 03:00 UTC
+       {"0 3 * * *", Assistant.Workers.AuthTokenCleanupWorker}
+     ]}
   ]
 
 # Quantum cron scheduler
