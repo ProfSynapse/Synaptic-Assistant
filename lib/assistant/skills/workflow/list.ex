@@ -87,5 +87,4 @@ defmodule Assistant.Skills.Workflow.List do
 
     header <> rows
   end
-
 end

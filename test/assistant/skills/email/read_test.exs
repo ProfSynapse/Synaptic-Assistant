@@ -111,14 +111,19 @@ defmodule Assistant.Skills.Email.ReadTest do
     end
 
     test "handles mixed success and failure" do
-      set_mock_response_for("msg_ok", {:ok, %{
-        id: "msg_ok",
-        subject: "Good Message",
-        from: "a@b.com",
-        to: "c@d.com",
-        date: "2026-02-18",
-        body: "Content"
-      }})
+      set_mock_response_for(
+        "msg_ok",
+        {:ok,
+         %{
+           id: "msg_ok",
+           subject: "Good Message",
+           from: "a@b.com",
+           to: "c@d.com",
+           date: "2026-02-18",
+           body: "Content"
+         }}
+      )
+
       set_mock_response_for("msg_fail", {:error, :not_found})
 
       {:ok, result} = Read.execute(%{"id" => "msg_ok, msg_fail"}, build_context())

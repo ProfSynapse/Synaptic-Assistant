@@ -116,9 +116,7 @@ defmodule Assistant.Memory.Agent do
   def start_link(opts) do
     user_id = Keyword.fetch!(opts, :user_id)
 
-    GenServer.start_link(__MODULE__, opts,
-      name: via_tuple(user_id)
-    )
+    GenServer.start_link(__MODULE__, opts, name: via_tuple(user_id))
   end
 
   @doc """
@@ -464,7 +462,15 @@ defmodule Assistant.Memory.Agent do
     end
   end
 
-  defp execute_tool_calls(tool_calls, _response, context, agent_state, executor_session, gen_state, parent) do
+  defp execute_tool_calls(
+         tool_calls,
+         _response,
+         context,
+         agent_state,
+         executor_session,
+         gen_state,
+         parent
+       ) do
     call_count = length(tool_calls)
 
     case Limits.check_agent(agent_state, call_count) do
@@ -477,7 +483,10 @@ defmodule Assistant.Memory.Agent do
 
         # Execute skill calls with search-first enforcement
         {results, final_agent_state, final_session} =
-          Enum.reduce(skill_calls, {[], new_agent_state, executor_session}, fn tc, {acc_results, acc_agent, acc_session} ->
+          Enum.reduce(skill_calls, {[], new_agent_state, executor_session}, fn tc,
+                                                                               {acc_results,
+                                                                                acc_agent,
+                                                                                acc_session} ->
             {result, updated_session} =
               execute_single_tool(tc, gen_state, acc_session)
 
@@ -523,7 +532,8 @@ defmodule Assistant.Memory.Agent do
               {:shutdown, reason} ->
                 %{
                   status: :failed,
-                  result: "Memory agent shut down while awaiting orchestrator: #{inspect(reason)}",
+                  result:
+                    "Memory agent shut down while awaiting orchestrator: #{inspect(reason)}",
                   tool_calls_used: final_agent_state.skill_calls
                 }
             after
@@ -577,7 +587,8 @@ defmodule Assistant.Memory.Agent do
         {{tc, "Request acknowledged. Waiting for orchestrator response."}, executor_session}
 
       other ->
-        {{tc, "Error: Unknown tool \"#{other}\". Only use_skill and request_help are available."}, executor_session}
+        {{tc, "Error: Unknown tool \"#{other}\". Only use_skill and request_help are available."},
+         executor_session}
     end
   end
 

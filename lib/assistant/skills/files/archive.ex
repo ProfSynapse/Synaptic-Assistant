@@ -45,12 +45,13 @@ defmodule Assistant.Skills.Files.Archive do
     with {:ok, archive_id} <- resolve_archive_folder(drive, folder_id),
          {:ok, file_meta} <- drive.get_file(file_id),
          {:ok, _moved} <- drive.move_file(file_id, archive_id) do
-      {:ok, %Result{
-        status: :ok,
-        content: "Archived '#{file_meta.name}' to Archive folder.",
-        side_effects: [:file_moved],
-        metadata: %{file_id: file_id, archive_folder_id: archive_id}
-      }}
+      {:ok,
+       %Result{
+         status: :ok,
+         content: "Archived '#{file_meta.name}' to Archive folder.",
+         side_effects: [:file_moved],
+         metadata: %{file_id: file_id, archive_folder_id: archive_id}
+       }}
     else
       {:error, :not_found} ->
         {:ok, %Result{status: :error, content: "File '#{file_id}' not found."}}

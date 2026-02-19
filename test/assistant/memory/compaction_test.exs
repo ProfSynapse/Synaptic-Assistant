@@ -67,7 +67,11 @@ defmodule Assistant.Memory.CompactionTest do
         |> Repo.insert()
 
       # Insert some messages
-      for {role, content} <- [{"user", "Hello"}, {"assistant", "Hi there"}, {"user", "How are you?"}] do
+      for {role, content} <- [
+            {"user", "Hello"},
+            {"assistant", "Hi there"},
+            {"user", "How are you?"}
+          ] do
         %Message{}
         |> Message.changeset(%{
           conversation_id: conversation.id,
@@ -169,7 +173,9 @@ defmodule Assistant.Memory.CompactionTest do
       :ok
     else
       tmp_dir = System.tmp_dir!()
-      config_path = Path.join(tmp_dir, "test_config_compaction_#{System.unique_integer([:positive])}.yaml")
+
+      config_path =
+        Path.join(tmp_dir, "test_config_compaction_#{System.unique_integer([:positive])}.yaml")
 
       yaml = """
       defaults:
@@ -216,7 +222,9 @@ defmodule Assistant.Memory.CompactionTest do
     if :ets.whereis(:assistant_prompts) != :undefined do
       :ok
     else
-      tmp_dir = Path.join(System.tmp_dir!(), "prompts_compaction_#{System.unique_integer([:positive])}")
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "prompts_compaction_#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp_dir)
 
       File.write!(Path.join(tmp_dir, "compaction.yaml"), """

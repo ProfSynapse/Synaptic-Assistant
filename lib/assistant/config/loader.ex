@@ -339,14 +339,18 @@ defmodule Assistant.Config.Loader do
   defp parse_limits(nil), do: {:error, :missing_limits_section}
 
   defp parse_limits(limits) when is_map(limits) do
-    with {:ok, context_utilization_target} <- require_float_in_range(limits, "context_utilization_target", 0.0, 1.0),
-         {:ok, compaction_trigger_threshold} <- require_float_in_range(limits, "compaction_trigger_threshold", 0.0, 1.0),
+    with {:ok, context_utilization_target} <-
+           require_float_in_range(limits, "context_utilization_target", 0.0, 1.0),
+         {:ok, compaction_trigger_threshold} <-
+           require_float_in_range(limits, "compaction_trigger_threshold", 0.0, 1.0),
          {:ok, response_reserve_tokens} <- require_pos_integer(limits, "response_reserve_tokens"),
          {:ok, orchestrator_turn_limit} <- require_pos_integer(limits, "orchestrator_turn_limit"),
          {:ok, sub_agent_turn_limit} <- require_pos_integer(limits, "sub_agent_turn_limit"),
          {:ok, cache_ttl_seconds} <- require_pos_integer(limits, "cache_ttl_seconds"),
-         {:ok, orchestrator_cache_breakpoints} <- require_pos_integer(limits, "orchestrator_cache_breakpoints"),
-         {:ok, sub_agent_cache_breakpoints} <- require_pos_integer(limits, "sub_agent_cache_breakpoints") do
+         {:ok, orchestrator_cache_breakpoints} <-
+           require_pos_integer(limits, "orchestrator_cache_breakpoints"),
+         {:ok, sub_agent_cache_breakpoints} <-
+           require_pos_integer(limits, "sub_agent_cache_breakpoints") do
       {:ok,
        %{
          context_utilization_target: context_utilization_target,

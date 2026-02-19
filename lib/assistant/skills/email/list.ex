@@ -57,7 +57,9 @@ defmodule Assistant.Skills.Email.List do
   defp resolve_messages(gmail, ids) do
     Enum.reduce(ids, [], fn %{id: id}, acc ->
       case gmail.get_message(id) do
-        {:ok, msg} -> [msg | acc]
+        {:ok, msg} ->
+          [msg | acc]
+
         {:error, reason} ->
           Logger.warning("Email list: skipping message", message_id: id, error: inspect(reason))
           acc
@@ -92,6 +94,7 @@ defmodule Assistant.Skills.Email.List do
       "To: #{msg[:to] || "unknown"}",
       "Date: #{msg[:date] || "unknown"}"
     ]
+
     body = msg[:body] || "(no body content)"
     Enum.join(headers, "\n") <> "\n\n" <> body
   end
@@ -110,5 +113,4 @@ defmodule Assistant.Skills.Email.List do
       _ -> true
     end
   end
-
 end

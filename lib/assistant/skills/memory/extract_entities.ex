@@ -91,8 +91,16 @@ defmodule Assistant.Skills.Memory.ExtractEntities do
               {:error, _changeset} ->
                 # Race condition: another process inserted between check and insert
                 case find_entity(user_id, name, entity_type) do
-                  nil -> %{name: name, entity_type: entity_type, error: "insert_failed"}
-                  entity -> %{name: entity.name, entity_type: entity.entity_type, id: entity.id, is_new: false}
+                  nil ->
+                    %{name: name, entity_type: entity_type, error: "insert_failed"}
+
+                  entity ->
+                    %{
+                      name: entity.name,
+                      entity_type: entity.entity_type,
+                      id: entity.id,
+                      is_new: false
+                    }
                 end
             end
 
@@ -137,16 +145,17 @@ defmodule Assistant.Skills.Memory.ExtractEntities do
           %{from_entity: source_name, to_entity: target_name, error: "self-relation not allowed"}
 
         true ->
-          attrs = %{
-            source_entity_id: source_id,
-            target_entity_id: target_id,
-            relation_type: relation_type,
-            metadata: rel_data["attributes"] || rel_data["metadata"] || %{},
-            confidence: parse_confidence(rel_data["confidence"]),
-            source_memory_entry_id: context.metadata[:source_memory_entry_id]
-          }
-          |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-          |> Map.new()
+          attrs =
+            %{
+              source_entity_id: source_id,
+              target_entity_id: target_id,
+              relation_type: relation_type,
+              metadata: rel_data["attributes"] || rel_data["metadata"] || %{},
+              confidence: parse_confidence(rel_data["confidence"]),
+              source_memory_entry_id: context.metadata[:source_memory_entry_id]
+            }
+            |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+            |> Map.new()
 
           case Repo.insert(MemoryEntityRelation.changeset(%MemoryEntityRelation{}, attrs)) do
             {:ok, rel} ->

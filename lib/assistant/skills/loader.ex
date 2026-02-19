@@ -225,7 +225,9 @@ defmodule Assistant.Skills.Loader do
         if Regex.match?(~r/^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$/, name) do
           :ok
         else
-          {:error, {:invalid_name, name, "expected format: domain.action (lowercase alphanumeric + underscore)"}}
+          {:error,
+           {:invalid_name, name,
+            "expected format: domain.action (lowercase alphanumeric + underscore)"}}
         end
 
       _ ->

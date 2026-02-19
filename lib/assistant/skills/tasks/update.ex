@@ -39,7 +39,8 @@ defmodule Assistant.Skills.Tasks.Update do
         {:ok,
          %Result{
            status: :error,
-           content: "No fields to update. Provide at least one flag (--status, --priority, --title, etc.)"
+           content:
+             "No fields to update. Provide at least one flag (--status, --priority, --title, etc.)"
          }}
       else
         case Queries.update_task(task_id, attrs, context.user_id) do

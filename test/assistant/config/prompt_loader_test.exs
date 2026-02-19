@@ -181,7 +181,9 @@ defmodule Assistant.Config.PromptLoaderTest do
     end
 
     test "handles empty prompts directory" do
-      empty_dir = Path.join(System.tmp_dir!(), "empty_prompts_#{System.unique_integer([:positive])}")
+      empty_dir =
+        Path.join(System.tmp_dir!(), "empty_prompts_#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(empty_dir)
 
       {:ok, pid} = PromptLoader.start_link(dir: empty_dir)

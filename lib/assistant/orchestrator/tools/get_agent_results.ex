@@ -120,7 +120,8 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
     * `{:ok, %Result{}}` with formatted agent results
     * `{:wait, mode, timeout_ms, agent_ids}` when blocking is needed
   """
-  @spec execute(map(), map()) :: {:ok, Assistant.Skills.Result.t()} | {:wait, atom(), pos_integer(), [String.t()]}
+  @spec execute(map(), map()) ::
+          {:ok, Assistant.Skills.Result.t()} | {:wait, atom(), pos_integer(), [String.t()]}
   def execute(params, dispatched_agents) do
     requested_ids = resolve_agent_ids(params, dispatched_agents)
     mode = parse_mode(params["mode"])
@@ -152,7 +153,12 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
   """
   @spec format_after_wait(map(), map(), boolean(), pos_integer()) ::
           {:ok, Assistant.Skills.Result.t()}
-  def format_after_wait(params, dispatched_agents, include_tail? \\ false, tail_lines \\ @default_tail_lines) do
+  def format_after_wait(
+        params,
+        dispatched_agents,
+        include_tail? \\ false,
+        tail_lines \\ @default_tail_lines
+      ) do
     requested_ids = resolve_agent_ids(params, dispatched_agents)
     result = format_results(requested_ids, dispatched_agents, include_tail?, tail_lines)
     {:ok, result}

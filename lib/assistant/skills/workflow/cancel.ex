@@ -97,7 +97,9 @@ defmodule Assistant.Skills.Workflow.Cancel do
 
   defp delete_file(path) do
     case File.rm(path) do
-      :ok -> true
+      :ok ->
+        true
+
       {:error, reason} ->
         Logger.warning("workflow.cancel: failed to delete file",
           path: path,

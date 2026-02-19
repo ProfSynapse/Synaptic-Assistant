@@ -217,7 +217,9 @@ defmodule Assistant.Memory.ContextMonitorTest do
       :ok
     else
       tmp_dir = System.tmp_dir!()
-      config_path = Path.join(tmp_dir, "test_config_cm_#{System.unique_integer([:positive])}.yaml")
+
+      config_path =
+        Path.join(tmp_dir, "test_config_cm_#{System.unique_integer([:positive])}.yaml")
 
       yaml = """
       defaults:

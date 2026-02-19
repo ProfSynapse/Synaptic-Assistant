@@ -30,8 +30,6 @@ defmodule Assistant.Repo.Migrations.AddParentConversationToConversations do
            )
 
     # Find all sub-agent conversations (useful for cleanup, auditing)
-    create index(:conversations, [:agent_type],
-             where: "agent_type = 'sub_agent'"
-           )
+    create index(:conversations, [:agent_type], where: "agent_type = 'sub_agent'")
   end
 end

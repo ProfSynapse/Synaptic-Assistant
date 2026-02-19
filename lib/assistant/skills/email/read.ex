@@ -36,7 +36,8 @@ defmodule Assistant.Skills.Email.Read do
         raw_id = Map.get(flags, "id")
 
         if is_nil(raw_id) || raw_id == "" do
-          {:ok, %Result{status: :error, content: "Missing required parameter: --id (message ID)."}}
+          {:ok,
+           %Result{status: :error, content: "Missing required parameter: --id (message ID)."}}
         else
           ids = parse_ids(raw_id)
           fetch_messages(gmail, ids)
@@ -61,7 +62,11 @@ defmodule Assistant.Skills.Email.Read do
   defp fetch_one(gmail, id) do
     case gmail.get_message(id) do
       {:ok, msg} ->
-        Logger.info("Email read", message_id: id, subject: Helpers.truncate_log(msg[:subject] || "(none)"))
+        Logger.info("Email read",
+          message_id: id,
+          subject: Helpers.truncate_log(msg[:subject] || "(none)")
+        )
+
         {id, format_message(msg)}
 
       {:error, :not_found} ->
@@ -83,5 +88,4 @@ defmodule Assistant.Skills.Email.Read do
     body = msg[:body] || "(no body content)"
     Enum.join(header_lines, "\n") <> "\n\n" <> body
   end
-
 end

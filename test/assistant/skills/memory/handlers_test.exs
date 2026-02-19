@@ -7,6 +7,7 @@ defmodule Assistant.Skills.Memory.HandlersTest do
   use Assistant.DataCase, async: true
 
   alias Assistant.Skills.Context
+
   alias Assistant.Skills.Memory.{
     Save,
     Search,
@@ -16,9 +17,18 @@ defmodule Assistant.Skills.Memory.HandlersTest do
     QueryEntityGraph,
     CompactConversation
   }
+
   alias Assistant.Skills.Result
 
-  @handlers [Save, Search, Get, ExtractEntities, CloseRelation, QueryEntityGraph, CompactConversation]
+  @handlers [
+    Save,
+    Search,
+    Get,
+    ExtractEntities,
+    CloseRelation,
+    QueryEntityGraph,
+    CompactConversation
+  ]
 
   defp build_context do
     %Context{

@@ -63,7 +63,10 @@ defmodule Assistant.Skills.Tasks.Get do
       if(task.tags != [], do: "**Tags:** #{Enum.join(task.tags, ", ")}", else: nil),
       if(task.started_at, do: "**Started:** #{task.started_at}", else: nil),
       if(task.completed_at, do: "**Completed:** #{task.completed_at}", else: nil),
-      if(task.archived_at, do: "**Archived:** #{task.archived_at} (#{task.archive_reason})", else: nil),
+      if(task.archived_at,
+        do: "**Archived:** #{task.archived_at} (#{task.archive_reason})",
+        else: nil
+      ),
       "",
       format_subtasks(task.subtasks),
       format_comments(task.comments),

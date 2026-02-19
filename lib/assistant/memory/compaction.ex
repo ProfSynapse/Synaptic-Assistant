@@ -280,6 +280,7 @@ defmodule Assistant.Memory.Compaction do
             Logger.error("Compaction LLM returned nil content",
               conversation_model: model.id
             )
+
             {:error, :empty_llm_response}
 
           content ->
@@ -289,6 +290,7 @@ defmodule Assistant.Memory.Compaction do
               prompt_tokens: response.usage.prompt_tokens,
               completion_tokens: response.usage.completion_tokens
             )
+
             {:ok, content}
         end
 
@@ -297,6 +299,7 @@ defmodule Assistant.Memory.Compaction do
           model: model.id,
           reason: inspect(reason)
         )
+
         {:error, {:llm_call_failed, reason}}
     end
   end
