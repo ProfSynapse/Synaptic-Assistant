@@ -49,7 +49,8 @@ defmodule Assistant.Skills.Context do
           optional(:drive) => module(),
           optional(:gmail) => module(),
           optional(:calendar) => module(),
-          optional(:hubspot) => module()
+          optional(:hubspot) => module(),
+          optional(:openrouter) => module()
         }
 
   @enforce_keys [:conversation_id, :execution_id, :user_id]

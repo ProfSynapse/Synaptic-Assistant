@@ -131,8 +131,7 @@ if config_env() == :prod do
     ciphers: [
       default: {
         Cloak.Ciphers.AES.GCM,
-        tag: "AES.GCM.V1",
-        key: Base.decode64!(encryption_key)
+        tag: "AES.GCM.V1", key: Base.decode64!(encryption_key)
       }
     ]
 else

@@ -15,6 +15,7 @@ defaults:
   sub_agent: balanced
   compaction: fast
   sentinel: fast
+  image_generation: balanced
   audio_transcription: fast     # STT — model that can process audio input
   audio_output: primary         # TTS via model (e.g. gpt-audio) — alternative/complement to ElevenLabs
 
@@ -28,6 +29,7 @@ defaults:
 #   description     Human-readable summary
 #   use_cases       List of roles this model is suitable for:
 #                     orchestrator, sub_agent, compaction, sentinel,
+#                     image_generation (can generate image output),
 #                     audio_transcription (can process audio/speech input — STT),
 #                     audio_output (can generate audio/speech output — TTS via model)
 #   supports_tools  Whether the model supports tool/function calling
@@ -45,26 +47,43 @@ models:
     max_context_tokens: 200000
     cost_tier: high
 
-  - id: "anthropic/claude-sonnet-4-20250514"
+  - id: "openai/gpt-5.2"
     tier: primary
-    description: "Claude Sonnet 4 — strong reasoning and tool calling, previous generation"
+    description: "GPT-5.2 — strong reasoning and tool calling, latest generation"
     use_cases:
       - orchestrator
       - sub_agent
     supports_tools: true
-    max_context_tokens: 200000
+    max_context_tokens: 400000
     cost_tier: high
 
-  - id: "google/gemini-2.5-flash-preview-05-20"
-    tier: balanced
-    description: "Gemini 2.5 Flash — fast, capable, large context, good tool use"
+  # Image generation models
+  - id: "openai/gpt-5-image"
+    tier: primary
+    description: "GPT-5 Image — highest quality OpenAI image generation"
     use_cases:
-      - orchestrator
-      - sub_agent
-      - compaction
-    supports_tools: true
-    max_context_tokens: 1048576
+      - image_generation
+    supports_tools: false
+    max_context_tokens: 400000
+    cost_tier: high
+
+  - id: "openai/gpt-5-image-mini"
+    tier: balanced
+    description: "GPT-5 Image Mini — faster, lower-cost image generation"
+    use_cases:
+      - image_generation
+    supports_tools: false
+    max_context_tokens: 400000
     cost_tier: medium
+
+  - id: "google/gemini-2.5-flash-image"
+    tier: fast
+    description: "Gemini 2.5 Flash Image — fast multimodal image generation"
+    use_cases:
+      - image_generation
+    supports_tools: false
+    max_context_tokens: 1048576
+    cost_tier: low
 
   - id: "anthropic/claude-haiku-4-5-20251001"
     tier: fast
@@ -77,27 +96,15 @@ models:
     max_context_tokens: 200000
     cost_tier: low
 
-  - id: "google/gemini-2.0-flash-001"
+  - id: "openai/gpt-5-mini"
     tier: fast
-    description: "Gemini 2.0 Flash — very fast, low cost, multimodal including audio input"
-    use_cases:
-      - sub_agent
-      - compaction
-      - sentinel
-      - audio_transcription
-    supports_tools: true
-    max_context_tokens: 1048576
-    cost_tier: low
-
-  - id: "openai/gpt-4.1-mini"
-    tier: cheap
-    description: "GPT-4.1 Mini — budget option with decent tool calling"
+    description: "GPT-5 Mini — very fast, low cost, multimodal including audio input"
     use_cases:
       - sub_agent
       - compaction
       - sentinel
     supports_tools: true
-    max_context_tokens: 1047576
+    max_context_tokens: 400000
     cost_tier: low
 
   # Audio-capable models — can transcribe speech input and/or generate speech output.

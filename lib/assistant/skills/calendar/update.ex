@@ -46,12 +46,13 @@ defmodule Assistant.Skills.Calendar.Update do
       {:ok, event} ->
         content = format_confirmation(event)
 
-        {:ok, %Result{
-          status: :ok,
-          content: content,
-          side_effects: [:calendar_event_updated],
-          metadata: %{event_id: event[:id]}
-        }}
+        {:ok,
+         %Result{
+           status: :ok,
+           content: content,
+           side_effects: [:calendar_event_updated],
+           metadata: %{event_id: event[:id]}
+         }}
 
       {:error, reason} ->
         {:ok, %Result{status: :error, content: "Failed to update event: #{inspect(reason)}"}}

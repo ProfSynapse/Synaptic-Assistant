@@ -314,8 +314,10 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResultsTest do
 
       assert result.metadata.total == 4
       assert result.metadata.completed == 1
-      assert result.metadata.failed == 2  # failed + timeout
-      assert result.metadata.done == false  # "c" is still running
+      # failed + timeout
+      assert result.metadata.failed == 2
+      # "c" is still running
+      assert result.metadata.done == false
     end
   end
 end

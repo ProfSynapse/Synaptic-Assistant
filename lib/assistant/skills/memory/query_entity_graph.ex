@@ -38,7 +38,11 @@ defmodule Assistant.Skills.Memory.QueryEntityGraph do
          content: "Missing required parameter: entity_name"
        }}
     else
-      case MemorySearch.search_entities(context.user_id, name: entity_name, entity_type: entity_type, limit: 1) do
+      case MemorySearch.search_entities(context.user_id,
+             name: entity_name,
+             entity_type: entity_type,
+             limit: 1
+           ) do
         {:ok, [entity | _]} ->
           relations = traverse_relations(entity.id, depth, relation_types)
 

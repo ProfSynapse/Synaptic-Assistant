@@ -93,6 +93,7 @@ defmodule Assistant.Skills.Email.List do
       "To: #{msg[:to] || "unknown"}",
       "Date: #{msg[:date] || "unknown"}"
     ]
+
     body = msg[:body] || "(no body content)"
     Enum.join(headers, "\n") <> "\n\n" <> body
   end
@@ -111,5 +112,4 @@ defmodule Assistant.Skills.Email.List do
       _ -> true
     end
   end
-
 end

@@ -78,7 +78,9 @@ defmodule Assistant.Skills.Workflow.Create do
 
   defp validate_cron(cron) do
     case Crontab.CronExpression.Parser.parse(cron) do
-      {:ok, _} -> :ok
+      {:ok, _} ->
+        :ok
+
       {:error, _} ->
         {:error, "Invalid cron expression: #{cron}. Expected format: \"0 8 * * *\""}
     end

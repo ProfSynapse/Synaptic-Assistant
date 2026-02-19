@@ -86,7 +86,9 @@ defmodule Assistant.Scheduler.QuantumLoader do
       {ref, remaining_refs} ->
         Assistant.Scheduler.delete_job(ref)
         Logger.info("QuantumLoader: canceled workflow job", workflow: workflow_name)
-        {:reply, :ok, %{state | job_refs: remaining_refs, scheduled_count: map_size(remaining_refs)}}
+
+        {:reply, :ok,
+         %{state | job_refs: remaining_refs, scheduled_count: map_size(remaining_refs)}}
     end
   end
 
@@ -173,5 +175,4 @@ defmodule Assistant.Scheduler.QuantumLoader do
       Assistant.Scheduler.delete_job(ref)
     end)
   end
-
 end

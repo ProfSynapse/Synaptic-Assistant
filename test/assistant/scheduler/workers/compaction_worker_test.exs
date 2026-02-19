@@ -49,19 +49,23 @@ defmodule Assistant.Scheduler.Workers.CompactionWorkerTest do
 
   describe "new/1 with optional params" do
     test "accepts token_budget in args" do
-      changeset = CompactionWorker.new(%{
-        conversation_id: "conv-123",
-        token_budget: 4096
-      })
+      changeset =
+        CompactionWorker.new(%{
+          conversation_id: "conv-123",
+          token_budget: 4096
+        })
+
       assert changeset.valid?
       assert changeset.changes[:args][:token_budget] == 4096
     end
 
     test "accepts message_limit in args" do
-      changeset = CompactionWorker.new(%{
-        conversation_id: "conv-123",
-        message_limit: 50
-      })
+      changeset =
+        CompactionWorker.new(%{
+          conversation_id: "conv-123",
+          message_limit: 50
+        })
+
       assert changeset.valid?
       assert changeset.changes[:args][:message_limit] == 50
     end

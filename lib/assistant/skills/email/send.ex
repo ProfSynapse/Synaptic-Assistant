@@ -80,12 +80,14 @@ defmodule Assistant.Skills.Email.Send do
           subject: Helpers.truncate_log(subject)
         )
 
-        {:ok, %Result{
-          status: :ok,
-          content: "Email sent successfully.\nTo: #{to}\nSubject: #{subject}\nMessage ID: #{sent[:id]}",
-          side_effects: [:email_sent],
-          metadata: %{message_id: sent[:id], to: to}
-        }}
+        {:ok,
+         %Result{
+           status: :ok,
+           content:
+             "Email sent successfully.\nTo: #{to}\nSubject: #{subject}\nMessage ID: #{sent[:id]}",
+           side_effects: [:email_sent],
+           metadata: %{message_id: sent[:id], to: to}
+         }}
 
       {:error, :header_injection} ->
         {:ok, %Result{status: :error, content: "Email rejected: header injection detected."}}
@@ -94,5 +96,4 @@ defmodule Assistant.Skills.Email.Send do
         {:ok, %Result{status: :error, content: "Failed to send email: #{inspect(reason)}"}}
     end
   end
-
 end

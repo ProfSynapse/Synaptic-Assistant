@@ -152,14 +152,20 @@ defmodule Assistant.Memory.SearchTest do
       user = create_test_user()
 
       %MemoryEntity{}
-      |> MemoryEntity.changeset(%{name: "Acme Corp", entity_type: "organization", user_id: user.id})
+      |> MemoryEntity.changeset(%{
+        name: "Acme Corp",
+        entity_type: "organization",
+        user_id: user.id
+      })
       |> Repo.insert!()
 
       %MemoryEntity{}
       |> MemoryEntity.changeset(%{name: "Acme Project", entity_type: "project", user_id: user.id})
       |> Repo.insert!()
 
-      assert {:ok, results} = Search.search_entities(user.id, name: "acme", entity_type: "organization")
+      assert {:ok, results} =
+               Search.search_entities(user.id, name: "acme", entity_type: "organization")
+
       assert length(results) == 1
       assert hd(results).entity_type == "organization"
     end

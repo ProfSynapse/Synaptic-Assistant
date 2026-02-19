@@ -80,11 +80,13 @@ defmodule Assistant.Skills.Email.Draft do
           subject: Helpers.truncate_log(subject)
         )
 
-        {:ok, %Result{
-          status: :ok,
-          content: "Draft created successfully.\nTo: #{to}\nSubject: #{subject}\nDraft ID: #{draft[:id]}",
-          metadata: %{draft_id: draft[:id], to: to}
-        }}
+        {:ok,
+         %Result{
+           status: :ok,
+           content:
+             "Draft created successfully.\nTo: #{to}\nSubject: #{subject}\nDraft ID: #{draft[:id]}",
+           metadata: %{draft_id: draft[:id], to: to}
+         }}
 
       {:error, :header_injection} ->
         {:ok, %Result{status: :error, content: "Draft rejected: header injection detected."}}
@@ -93,5 +95,4 @@ defmodule Assistant.Skills.Email.Draft do
         {:ok, %Result{status: :error, content: "Failed to create draft: #{inspect(reason)}"}}
     end
   end
-
 end

@@ -79,7 +79,12 @@ defmodule Assistant.Skills.Calendar.UpdateTest do
     end
 
     test "uses custom calendar ID" do
-      flags = %{"id" => "evt_123", "title" => "Title", "calendar" => "team@group.calendar.google.com"}
+      flags = %{
+        "id" => "evt_123",
+        "title" => "Title",
+        "calendar" => "team@group.calendar.google.com"
+      }
+
       Update.execute(flags, build_context())
 
       assert_received {:cal_update, "evt_123", _params, "team@group.calendar.google.com"}

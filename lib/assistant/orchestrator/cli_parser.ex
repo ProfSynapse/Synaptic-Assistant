@@ -234,7 +234,8 @@ defmodule Assistant.Orchestrator.CLIParser do
   # --- Command Name Extraction ---
 
   defp extract_command_name([]) do
-    {:error, {:empty_command, "No command name found. Expected format: domain.action --flag value"}}
+    {:error,
+     {:empty_command, "No command name found. Expected format: domain.action --flag value"}}
   end
 
   defp extract_command_name([name | rest]) do

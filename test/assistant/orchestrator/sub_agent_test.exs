@@ -139,7 +139,8 @@ defmodule Assistant.Orchestrator.SubAgentTest do
       # Agent is running (not awaiting), so resume should return error
       case SubAgent.resume(agent_id, %{message: "update"}) do
         {:error, :not_awaiting} -> :ok
-        {:error, :not_found} -> :ok  # Agent may have already completed
+        # Agent may have already completed
+        {:error, :not_found} -> :ok
       end
 
       Process.sleep(100)
@@ -268,6 +269,7 @@ defmodule Assistant.Orchestrator.SubAgentTest do
         |> Enum.find_value(fn
           %{role: "assistant", content: content} when is_binary(content) and content != "" ->
             content
+
           _ ->
             nil
         end)
@@ -287,6 +289,7 @@ defmodule Assistant.Orchestrator.SubAgentTest do
         |> Enum.find_value(fn
           %{role: "assistant", content: content} when is_binary(content) and content != "" ->
             content
+
           _ ->
             nil
         end)
@@ -332,7 +335,9 @@ defmodule Assistant.Orchestrator.SubAgentTest do
     if :ets.whereis(:assistant_skills) != :undefined do
       :ok
     else
-      tmp_dir = Path.join(System.tmp_dir!(), "empty_skills_sa_#{System.unique_integer([:positive])}")
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "empty_skills_sa_#{System.unique_integer([:positive])}")
+
       File.mkdir_p!(tmp_dir)
 
       case Assistant.Skills.Registry.start_link(skills_dir: tmp_dir) do
@@ -347,7 +352,9 @@ defmodule Assistant.Orchestrator.SubAgentTest do
       :ok
     else
       tmp_dir = System.tmp_dir!()
-      config_path = Path.join(tmp_dir, "test_config_sa_#{System.unique_integer([:positive])}.yaml")
+
+      config_path =
+        Path.join(tmp_dir, "test_config_sa_#{System.unique_integer([:positive])}.yaml")
 
       yaml = """
       defaults:

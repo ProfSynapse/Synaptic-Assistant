@@ -53,26 +53,29 @@ defmodule Assistant.Skills.Files.Search do
   defp search_files(drive, token, query, limit) do
     case drive.list_files(token, query, pageSize: limit) do
       {:ok, []} ->
-        {:ok, %Result{
-          status: :ok,
-          content: "No files found matching the given criteria.",
-          metadata: %{count: 0}
-        }}
+        {:ok,
+         %Result{
+           status: :ok,
+           content: "No files found matching the given criteria.",
+           metadata: %{count: 0}
+         }}
 
       {:ok, files} ->
         content = format_file_list(files)
 
-        {:ok, %Result{
-          status: :ok,
-          content: content,
-          metadata: %{count: length(files)}
-        }}
+        {:ok,
+         %Result{
+           status: :ok,
+           content: content,
+           metadata: %{count: length(files)}
+         }}
 
       {:error, reason} ->
-        {:ok, %Result{
-          status: :error,
-          content: "Drive search failed: #{inspect(reason)}"
-        }}
+        {:ok,
+         %Result{
+           status: :error,
+           content: "Drive search failed: #{inspect(reason)}"
+         }}
     end
   end
 
@@ -119,8 +122,12 @@ defmodule Assistant.Skills.Files.Search do
 
   defp resolve_type(type) do
     case Drive.type_to_mime(type) do
-      {:ok, mime} -> {:ok, mime}
-      :error -> {:error, "Unknown file type '#{type}'. Supported: doc, sheet, slides, pdf, folder, image, video."}
+      {:ok, mime} ->
+        {:ok, mime}
+
+      :error ->
+        {:error,
+         "Unknown file type '#{type}'. Supported: doc, sheet, slides, pdf, folder, image, video."}
     end
   end
 
@@ -137,7 +144,10 @@ defmodule Assistant.Skills.Files.Search do
 
   defp format_file_row(file) do
     type_label = friendly_type(file.mime_type)
-    modified = if file.modified_time, do: " | Modified: #{format_time(file.modified_time)}", else: ""
+
+    modified =
+      if file.modified_time, do: " | Modified: #{format_time(file.modified_time)}", else: ""
+
     size_str = if file.size, do: " | Size: #{format_size(file.size)}", else: ""
 
     "- [#{file.id}] #{file.name} (#{type_label})#{modified}#{size_str}"
@@ -173,7 +183,8 @@ defmodule Assistant.Skills.Files.Search do
     if Regex.match?(@valid_drive_id, id) do
       :ok
     else
-      {:error, "Invalid folder ID '#{String.slice(id, 0, 20)}'. Folder IDs contain only alphanumeric characters, hyphens, and underscores."}
+      {:error,
+       "Invalid folder ID '#{String.slice(id, 0, 20)}'. Folder IDs contain only alphanumeric characters, hyphens, and underscores."}
     end
   end
 

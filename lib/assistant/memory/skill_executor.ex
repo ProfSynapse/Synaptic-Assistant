@@ -45,16 +45,16 @@ defmodule Assistant.Memory.SkillExecutor do
   require Logger
 
   @read_skills MapSet.new([
-    "memory.search_memories",
-    "memory.query_entity_graph"
-  ])
+                 "memory.search_memories",
+                 "memory.query_entity_graph"
+               ])
 
   @write_skills MapSet.new([
-    "memory.save_memory",
-    "memory.extract_entities",
-    "memory.close_relation",
-    "memory.compact_conversation"
-  ])
+                  "memory.save_memory",
+                  "memory.extract_entities",
+                  "memory.close_relation",
+                  "memory.compact_conversation"
+                ])
 
   @type session_state :: %{has_searched: boolean()}
 

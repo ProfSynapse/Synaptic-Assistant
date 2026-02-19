@@ -43,12 +43,13 @@ defmodule Assistant.Skills.Calendar.Create do
       {:ok, event} ->
         content = format_confirmation(event)
 
-        {:ok, %Result{
-          status: :ok,
-          content: content,
-          side_effects: [:calendar_event_created],
-          metadata: %{event_id: event[:id]}
-        }}
+        {:ok,
+         %Result{
+           status: :ok,
+           content: content,
+           side_effects: [:calendar_event_created],
+           metadata: %{event_id: event[:id]}
+         }}
 
       {:error, reason} ->
         {:ok, %Result{status: :error, content: "Failed to create event: #{inspect(reason)}"}}
@@ -72,7 +73,11 @@ defmodule Assistant.Skills.Calendar.Create do
 
       true ->
         params =
-          %{summary: title, start: Helpers.normalize_datetime(start_dt), end: Helpers.normalize_datetime(end_dt)}
+          %{
+            summary: title,
+            start: Helpers.normalize_datetime(start_dt),
+            end: Helpers.normalize_datetime(end_dt)
+          }
           |> Helpers.maybe_put(:description, Map.get(flags, "description"))
           |> Helpers.maybe_put(:location, Map.get(flags, "location"))
           |> Helpers.maybe_put(:attendees, Helpers.parse_attendees(Map.get(flags, "attendees")))
