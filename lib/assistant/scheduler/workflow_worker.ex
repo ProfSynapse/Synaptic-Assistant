@@ -28,7 +28,7 @@ defmodule Assistant.Scheduler.WorkflowWorker do
 
   ## Args
 
-    * `"workflow_path"` - Absolute or relative path to the workflow .md file
+    * `"workflow_path"` - Relative path to the workflow .md file (within workflows dir)
 
   ## Enqueuing
 
@@ -45,6 +45,7 @@ defmodule Assistant.Scheduler.WorkflowWorker do
   require Logger
 
   alias Assistant.Skills.Loader
+  alias Assistant.Skills.Workflow.Helpers
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"workflow_path" => path}}) do
@@ -87,20 +88,31 @@ defmodule Assistant.Scheduler.WorkflowWorker do
   # --- Private ---
 
   defp read_workflow(path) do
-    abs_path = resolve_path(path)
+    case resolve_path(path) do
+      {:ok, abs_path} ->
+        case File.read(abs_path) do
+          {:ok, _content} = ok -> ok
+          {:error, :enoent} -> {:error, {:workflow_not_found, path}}
+          {:error, reason} -> {:error, {:read_error, reason}}
+        end
 
-    case File.read(abs_path) do
-      {:ok, _content} = ok -> ok
-      {:error, :enoent} -> {:error, {:workflow_not_found, path}}
-      {:error, reason} -> {:error, {:read_error, reason}}
+      {:error, _} = err ->
+        err
     end
   end
 
   defp resolve_path(path) do
-    if Path.type(path) == :absolute do
-      path
+    if Path.type(path) == :absolute or String.contains?(path, "..") do
+      {:error, :path_not_allowed}
     else
-      Path.join(Application.app_dir(:assistant), path)
+      workflows_dir = Helpers.resolve_workflows_dir()
+      resolved = Path.join(workflows_dir, path) |> Path.expand()
+
+      if String.starts_with?(resolved, Path.expand(workflows_dir)) do
+        {:ok, resolved}
+      else
+        {:error, :path_not_allowed}
+      end
     end
   end
 

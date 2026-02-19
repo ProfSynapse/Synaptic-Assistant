@@ -19,7 +19,6 @@ defmodule Assistant.Skills.Calendar.List do
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.Result
-  alias Assistant.Integrations.Google.Calendar
 
   @default_limit 10
   @max_limit 50
@@ -28,17 +27,22 @@ defmodule Assistant.Skills.Calendar.List do
 
   @impl true
   def execute(flags, context) do
-    calendar = Map.get(context.integrations, :calendar, Calendar)
-    calendar_id = Map.get(flags, "calendar", "primary")
-    limit = parse_limit(Map.get(flags, "limit"))
+    case Map.get(context.integrations, :calendar) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Google Calendar integration not configured."}}
 
-    case build_opts(flags) do
-      {:ok, opts} ->
-        opts = Keyword.put(opts, :max_results, limit)
-        list_events(calendar, calendar_id, opts)
+      calendar ->
+        calendar_id = Map.get(flags, "calendar", "primary")
+        limit = parse_limit(Map.get(flags, "limit"))
 
-      {:error, reason} ->
-        {:ok, %Result{status: :error, content: reason}}
+        case build_opts(flags) do
+          {:ok, opts} ->
+            opts = Keyword.put(opts, :max_results, limit)
+            list_events(calendar, calendar_id, opts)
+
+          {:error, reason} ->
+            {:ok, %Result{status: :error, content: reason}}
+        end
     end
   end
 

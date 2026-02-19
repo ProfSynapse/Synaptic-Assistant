@@ -20,12 +20,7 @@ defmodule Assistant.Skills.Workflow.Cancel do
   require Logger
 
   alias Assistant.Skills.Result
-
-  @workflows_dir Application.compile_env(
-                   :assistant,
-                   :workflows_dir,
-                   "priv/workflows"
-                 )
+  alias Assistant.Skills.Workflow.Helpers
 
   @impl true
   def execute(flags, _context) do
@@ -105,14 +100,7 @@ defmodule Assistant.Skills.Workflow.Cancel do
   end
 
   defp workflow_path(name) do
-    dir = resolve_workflows_dir()
+    dir = Helpers.resolve_workflows_dir()
     Path.join(dir, "#{name}.md")
-  end
-
-  defp resolve_workflows_dir do
-    case Application.get_env(:assistant, :workflows_dir) do
-      nil -> Path.join(Application.app_dir(:assistant), @workflows_dir)
-      dir -> dir
-    end
   end
 end

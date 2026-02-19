@@ -32,8 +32,7 @@ defmodule Assistant.Scheduler.QuantumLoader do
   require Logger
 
   alias Assistant.Skills.Loader
-
-  @workflows_dir "priv/workflows"
+  alias Assistant.Skills.Workflow.Helpers
 
   # --- Client API ---
 
@@ -94,7 +93,7 @@ defmodule Assistant.Scheduler.QuantumLoader do
   # --- Private ---
 
   defp load_workflows do
-    workflows_path = resolve_workflows_dir()
+    workflows_path = Helpers.resolve_workflows_dir()
 
     case File.ls(workflows_path) do
       {:ok, files} ->
@@ -175,10 +174,4 @@ defmodule Assistant.Scheduler.QuantumLoader do
     end)
   end
 
-  defp resolve_workflows_dir do
-    case Application.get_env(:assistant, :workflows_dir) do
-      nil -> Path.join(Application.app_dir(:assistant), @workflows_dir)
-      dir -> dir
-    end
-  end
 end

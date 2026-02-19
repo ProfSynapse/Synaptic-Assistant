@@ -23,17 +23,14 @@ defmodule Assistant.Skills.Workflow.Create do
   require Logger
 
   alias Assistant.Skills.Result
-
-  @workflows_dir Application.compile_env(
-                   :assistant,
-                   :workflows_dir,
-                   "priv/workflows"
-                 )
+  alias Assistant.Skills.Workflow.Helpers
 
   @impl true
   def execute(flags, _context) do
     with :ok <- validate_required(flags),
          :ok <- validate_name(flags["name"]),
+         :ok <- validate_no_newlines("description", flags["description"]),
+         :ok <- validate_no_newlines("channel", flags["channel"]),
          :ok <- validate_cron(flags["cron"]),
          :ok <- validate_no_conflict(flags["name"]) do
       path = write_workflow(flags)
@@ -167,15 +164,18 @@ defmodule Assistant.Skills.Workflow.Create do
     end
   end
 
-  defp workflow_path(name) do
-    dir = resolve_workflows_dir()
-    Path.join(dir, "#{name}.md")
+  defp validate_no_newlines(_field, nil), do: :ok
+
+  defp validate_no_newlines(field, value) do
+    if String.contains?(value, ["\n", "\r"]) do
+      {:error, "The #{field} field must not contain newlines."}
+    else
+      :ok
+    end
   end
 
-  defp resolve_workflows_dir do
-    case Application.get_env(:assistant, :workflows_dir) do
-      nil -> Path.join(Application.app_dir(:assistant), @workflows_dir)
-      dir -> dir
-    end
+  defp workflow_path(name) do
+    dir = Helpers.resolve_workflows_dir()
+    Path.join(dir, "#{name}.md")
   end
 end

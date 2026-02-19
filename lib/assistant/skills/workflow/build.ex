@@ -1,9 +1,8 @@
-# lib/assistant/skills/workflow/build.ex — workflow.build meta-skill stub.
+# lib/assistant/skills/workflow/build.ex — Handler for workflow.build meta-skill.
 #
 # Creates new workflow files by composing existing skills into
-# repeatable markdown definitions. This is a stub implementation
-# for Phase 1 — full workflow creation logic will be added later
-# when the CLI router and flag validator are implemented.
+# repeatable markdown definitions. Validates inputs and generates
+# the workflow file in the skills directory.
 
 defmodule Assistant.Skills.Workflow.Build do
   @moduledoc """
@@ -13,9 +12,8 @@ defmodule Assistant.Skills.Workflow.Build do
   Workflows are compositions of existing skills for repeatable
   tasks (daily digest, weekly report, etc.).
 
-  This is a Phase 1 stub — the handler validates inputs and
-  generates the workflow file. Full integration with the CLI
-  router and flag validation will follow in later phases.
+  Validates inputs (name uniqueness, format) and generates the
+  workflow file with YAML frontmatter and markdown body.
   """
 
   @behaviour Assistant.Skills.Handler

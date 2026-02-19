@@ -19,10 +19,10 @@ defmodule Assistant.Skills.Email.Search do
 
   @behaviour Assistant.Skills.Handler
 
-  alias Assistant.Skills.Result
+  require Logger
 
-  @default_limit 10
-  @max_limit 50
+  alias Assistant.Skills.Email.Helpers
+  alias Assistant.Skills.Result
   @divider "\n\n---\n\n"
 
   @impl true
@@ -32,9 +32,9 @@ defmodule Assistant.Skills.Email.Search do
         {:ok, %Result{status: :error, content: "Gmail integration not configured."}}
 
       gmail ->
-        limit = parse_limit(Map.get(flags, "limit"))
+        limit = Helpers.parse_limit(Map.get(flags, "limit"))
         query = build_query(flags)
-        full? = full_mode?(flags)
+        full? = Helpers.full_mode?(flags)
         search_messages(gmail, query, limit, full?)
     end
   end
@@ -66,10 +66,10 @@ defmodule Assistant.Skills.Email.Search do
   end
 
   defp format_summary_row(msg) do
-    subject = truncate(msg[:subject] || "(no subject)", 80)
+    subject = Helpers.truncate(msg[:subject] || "(no subject)", 80)
     from = msg[:from] || "unknown"
     date = msg[:date] || ""
-    snippet = truncate(msg[:snippet] || "", 100)
+    snippet = Helpers.truncate(msg[:snippet] || "", 100)
     "- [#{msg[:id]}] #{subject}\n  From: #{from} | Date: #{date}\n  #{snippet}"
   end
 
@@ -106,24 +106,4 @@ defmodule Assistant.Skills.Email.Search do
   defp maybe_add_unread(parts, "false"), do: parts
   defp maybe_add_unread(parts, _), do: parts ++ ["is:unread"]
 
-  defp full_mode?(flags) do
-    case Map.get(flags, "full") do
-      nil -> false
-      "false" -> false
-      _ -> true
-    end
-  end
-
-  defp truncate(str, max) when byte_size(str) <= max, do: str
-  defp truncate(str, max), do: String.slice(str, 0, max - 3) <> "..."
-
-  defp parse_limit(nil), do: @default_limit
-  defp parse_limit(limit) when is_binary(limit) do
-    case Integer.parse(limit) do
-      {n, _} -> min(max(n, 1), @max_limit)
-      :error -> @default_limit
-    end
-  end
-  defp parse_limit(limit) when is_integer(limit), do: min(max(limit, 1), @max_limit)
-  defp parse_limit(_), do: @default_limit
 end

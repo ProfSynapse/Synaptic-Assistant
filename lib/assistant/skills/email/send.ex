@@ -21,6 +21,7 @@ defmodule Assistant.Skills.Email.Send do
 
   require Logger
 
+  alias Assistant.Skills.Email.Helpers
   alias Assistant.Skills.Result
 
   @impl true
@@ -53,13 +54,13 @@ defmodule Assistant.Skills.Email.Send do
       is_nil(body) || body == "" ->
         {:error, "Missing required parameter: --body (email body)."}
 
-      has_newlines?(to) ->
+      Helpers.has_newlines?(to) ->
         {:error, "Invalid --to: must not contain newlines."}
 
-      has_newlines?(subject) ->
+      Helpers.has_newlines?(subject) ->
         {:error, "Invalid --subject: must not contain newlines."}
 
-      cc != nil && has_newlines?(cc) ->
+      cc != nil && Helpers.has_newlines?(cc) ->
         {:error, "Invalid --cc: must not contain newlines."}
 
       true ->
@@ -74,7 +75,7 @@ defmodule Assistant.Skills.Email.Send do
       {:ok, sent} ->
         Logger.info("Email sent",
           message_id: sent[:id],
-          subject: truncate_log(subject)
+          subject: Helpers.truncate_log(subject)
         )
 
         {:ok, %Result{
@@ -92,8 +93,4 @@ defmodule Assistant.Skills.Email.Send do
     end
   end
 
-  defp has_newlines?(str), do: String.contains?(str, ["\r", "\n"])
-
-  defp truncate_log(s) when byte_size(s) <= 50, do: s
-  defp truncate_log(s), do: String.slice(s, 0, 47) <> "..."
 end

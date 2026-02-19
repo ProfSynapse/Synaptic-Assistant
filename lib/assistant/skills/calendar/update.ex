@@ -19,21 +19,25 @@ defmodule Assistant.Skills.Calendar.Update do
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.Result
-  alias Assistant.Integrations.Google.Calendar
 
   @datetime_short_regex ~r/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
 
   @impl true
   def execute(flags, context) do
-    calendar = Map.get(context.integrations, :calendar, Calendar)
-    calendar_id = Map.get(flags, "calendar", "primary")
-    event_id = Map.get(flags, "id")
+    case Map.get(context.integrations, :calendar) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Google Calendar integration not configured."}}
 
-    if is_nil(event_id) or event_id == "" do
-      {:ok, %Result{status: :error, content: "Missing required flag: --id"}}
-    else
-      params = build_params(flags)
-      update_event(calendar, event_id, params, calendar_id)
+      calendar ->
+        calendar_id = Map.get(flags, "calendar", "primary")
+        event_id = Map.get(flags, "id")
+
+        if is_nil(event_id) or event_id == "" do
+          {:ok, %Result{status: :error, content: "Missing required flag: --id"}}
+        else
+          params = build_params(flags)
+          update_event(calendar, event_id, params, calendar_id)
+        end
     end
   end
 
@@ -78,7 +82,8 @@ defmodule Assistant.Skills.Calendar.Update do
   defp parse_attendees(""), do: nil
 
   defp parse_attendees(str) do
-    str |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    result = str |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    if result == [], do: nil, else: result
   end
 
   defp maybe_put(map, _key, nil), do: map

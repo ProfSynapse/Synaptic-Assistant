@@ -20,16 +20,11 @@ defmodule Assistant.Skills.Workflow.List do
   require Logger
 
   alias Assistant.Skills.{Loader, Result}
-
-  @workflows_dir Application.compile_env(
-                   :assistant,
-                   :workflows_dir,
-                   "priv/workflows"
-                 )
+  alias Assistant.Skills.Workflow.Helpers
 
   @impl true
   def execute(_flags, _context) do
-    dir = resolve_workflows_dir()
+    dir = Helpers.resolve_workflows_dir()
 
     case File.ls(dir) do
       {:ok, files} ->
@@ -93,10 +88,4 @@ defmodule Assistant.Skills.Workflow.List do
     header <> rows
   end
 
-  defp resolve_workflows_dir do
-    case Application.get_env(:assistant, :workflows_dir) do
-      nil -> Path.join(Application.app_dir(:assistant), @workflows_dir)
-      dir -> dir
-    end
-  end
 end
