@@ -10,15 +10,16 @@ config :assistant,
   ecto_repos: [Assistant.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
-# Phoenix endpoint configuration (webhooks-only, no HTML)
+# Phoenix endpoint configuration
 config :assistant, AssistantWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [json: AssistantWeb.ErrorJSON],
+    formats: [html: AssistantWeb.ErrorHTML, json: AssistantWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: Assistant.PubSub
+  pubsub_server: Assistant.PubSub,
+  live_view: [signing_salt: "MN4yWf8K"]
 
 # JSON library for Phoenix
 config :phoenix, :json_library, Jason

@@ -21,6 +21,7 @@ defmodule Assistant.Skills.Executor do
       Executor.execute(handler_module, flags, context, timeout: 60_000)
   """
 
+  alias Assistant.Analytics
   alias Assistant.Skills.{Context, Result}
 
   require Logger
@@ -67,6 +68,8 @@ defmodule Assistant.Skills.Executor do
 
     case result do
       {:ok, {:ok, %Result{} = skill_result}} ->
+        record_tool_analytics(handler, context, duration_ms, :ok)
+
         Logger.info("Skill executed successfully",
           handler: inspect(handler),
           duration_ms: duration_ms,
@@ -76,6 +79,8 @@ defmodule Assistant.Skills.Executor do
         {:ok, skill_result}
 
       {:ok, {:error, reason}} ->
+        record_tool_analytics(handler, context, duration_ms, :error, reason)
+
         Logger.warning("Skill returned error",
           handler: inspect(handler),
           reason: inspect(reason),
@@ -86,6 +91,8 @@ defmodule Assistant.Skills.Executor do
         {:error, reason}
 
       {:exit, reason} ->
+        record_tool_analytics(handler, context, duration_ms, :crash, reason)
+
         Logger.error("Skill crashed",
           handler: inspect(handler),
           reason: inspect(reason),
@@ -96,6 +103,8 @@ defmodule Assistant.Skills.Executor do
         {:error, {:skill_crash, reason}}
 
       nil ->
+        record_tool_analytics(handler, context, duration_ms, :timeout)
+
         Logger.warning("Skill timed out",
           handler: inspect(handler),
           timeout_ms: timeout,
@@ -104,5 +113,23 @@ defmodule Assistant.Skills.Executor do
 
         {:error, :timeout}
     end
+  end
+
+  defp record_tool_analytics(handler, context, duration_ms, status, reason \\ nil) do
+    metadata =
+      case reason do
+        nil -> %{}
+        _ -> %{reason: inspect(reason)}
+      end
+
+    Analytics.record_tool_call(%{
+      status: status,
+      scope: "skill_executor",
+      tool_name: inspect(handler),
+      conversation_id: context.conversation_id,
+      user_id: context.user_id,
+      duration_ms: duration_ms,
+      metadata: metadata
+    })
   end
 end

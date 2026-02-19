@@ -80,9 +80,11 @@ defmodule Assistant.Memory.Agent do
 
   use GenServer
 
+  alias Assistant.Analytics
   alias Assistant.Config.PromptLoader
   alias Assistant.Memory.SkillExecutor
   alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
+  alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Registry, Result}
 
   require Logger
@@ -414,12 +416,17 @@ defmodule Assistant.Memory.Agent do
 
   defp run_loop(context, agent_state, executor_session, gen_state, parent) do
     model_opts = build_model_opts(context)
+    model = Keyword.get(model_opts, :model)
 
     case @llm_client.chat_completion(context.messages, model_opts) do
       {:ok, response} ->
+        record_llm_analytics(gen_state, response, model, :ok)
+
         handle_response(response, context, agent_state, executor_session, gen_state, parent)
 
       {:error, reason} ->
+        record_llm_analytics(gen_state, nil, model, :error, reason)
+
         Logger.error("MemoryAgent LLM call failed",
           user_id: gen_state.user_id,
           reason: inspect(reason)
@@ -596,33 +603,37 @@ defmodule Assistant.Memory.Agent do
     skill_name = args["skill"]
     skill_args = args["arguments"] || %{}
 
-    if skill_name in gen_state.memory_skills do
-      # Sentinel security gate
-      proposed_action = %{
-        skill_name: skill_name,
-        arguments: skill_args,
-        agent_id: "memory_agent:#{gen_state.user_id}"
-      }
-
-      original_request = get_in(gen_state, [:current_mission, :original_request])
-
-      case Sentinel.check(original_request, "memory management", proposed_action) do
-        {:ok, :approved} ->
-          execute_with_search_first(tc, skill_name, skill_args, gen_state, executor_session)
-
-        {:ok, {:rejected, reason}} ->
-          Logger.warning("Sentinel rejected memory agent action",
-            agent_id: "memory_agent:#{gen_state.user_id}",
-            skill: skill_name,
-            reason: reason
-          )
-
-          {{tc, "Action rejected by security gate: #{reason}"}, executor_session}
-      end
+    if not SkillPermissions.enabled?(skill_name) do
+      {{tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}, executor_session}
     else
-      {{tc,
-        "Error: Skill \"#{skill_name}\" is not available. " <>
-          "Available skills: #{Enum.join(gen_state.memory_skills, ", ")}"}, executor_session}
+      if skill_name in gen_state.memory_skills do
+        # Sentinel security gate
+        proposed_action = %{
+          skill_name: skill_name,
+          arguments: skill_args,
+          agent_id: "memory_agent:#{gen_state.user_id}"
+        }
+
+        original_request = get_in(gen_state, [:current_mission, :original_request])
+
+        case Sentinel.check(original_request, "memory management", proposed_action) do
+          {:ok, :approved} ->
+            execute_with_search_first(tc, skill_name, skill_args, gen_state, executor_session)
+
+          {:ok, {:rejected, reason}} ->
+            Logger.warning("Sentinel rejected memory agent action",
+              agent_id: "memory_agent:#{gen_state.user_id}",
+              skill: skill_name,
+              reason: reason
+            )
+
+            {{tc, "Action rejected by security gate: #{reason}"}, executor_session}
+        end
+      else
+        {{tc,
+          "Error: Skill \"#{skill_name}\" is not available. " <>
+            "Available skills: #{Enum.join(gen_state.memory_skills, ", ")}"}, executor_session}
+      end
     end
   end
 
@@ -722,8 +733,13 @@ defmodule Assistant.Memory.Agent do
   end
 
   defp build_scoped_tools(skill_names) do
-    skill_defs =
+    allowed_skill_names =
       skill_names
+      |> Enum.filter(&SkillPermissions.enabled?/1)
+      |> Enum.uniq()
+
+    skill_defs =
+      allowed_skill_names
       |> Enum.sort()
       |> Enum.map(fn name ->
         case Registry.lookup(name) do
@@ -793,6 +809,30 @@ defmodule Assistant.Memory.Agent do
     }
 
     [use_skill_tool, request_help_tool]
+  end
+
+  defp record_llm_analytics(gen_state, response, model, status, reason \\ nil) do
+    usage = if is_map(response), do: response[:usage] || %{}, else: %{}
+
+    metadata =
+      %{
+        reason: if(reason, do: inspect(reason), else: nil)
+      }
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
+
+    Analytics.record_llm_call(%{
+      status: status,
+      scope: "memory_agent",
+      model: if(is_map(response), do: response[:model] || model, else: model),
+      conversation_id: get_in(gen_state, [:current_mission, :conversation_id]),
+      user_id: gen_state.user_id,
+      prompt_tokens: usage[:prompt_tokens] || 0,
+      completion_tokens: usage[:completion_tokens] || 0,
+      total_tokens: usage[:total_tokens] || 0,
+      cost: usage[:cost] || 0.0,
+      metadata: metadata
+    })
   end
 
   # --- Skill Loading ---

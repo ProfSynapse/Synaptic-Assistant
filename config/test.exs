@@ -4,6 +4,10 @@
 
 import Config
 
+# Required for config/config.yaml interpolation when app boots in test.
+System.put_env("ENV_VAR", "test")
+System.put_env("ELEVENLABS_VOICE_ID", "test-voice-id")
+
 # Test database — use SQL sandbox for async tests
 config :assistant, Assistant.Repo,
   username: "postgres",
@@ -21,6 +25,9 @@ config :assistant, AssistantWeb.Endpoint,
 
 # Oban: inline mode for deterministic test execution
 config :assistant, Oban, testing: :inline
+
+# Avoid runtime crashes in tests that exercise OpenRouter paths without mocks.
+config :assistant, :openrouter_api_key, "test-openrouter-key"
 
 # Reduce log noise in tests
 config :logger, level: :warning

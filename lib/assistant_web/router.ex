@@ -1,10 +1,14 @@
-# lib/assistant_web/router.ex — Phoenix router for webhook endpoints.
-#
-# All routes are JSON API endpoints. No browser pipeline.
-# Webhook routes will be added as channel adapters are implemented.
-
 defmodule AssistantWeb.Router do
   use AssistantWeb, :router
+
+  pipeline :browser do
+    plug :accepts, ["html"]
+    plug :fetch_session
+    plug :fetch_live_flash
+    plug :put_root_layout, html: {AssistantWeb.Layouts, :root}
+    plug :protect_from_forgery
+    plug :put_secure_browser_headers
+  end
 
   pipeline :api do
     plug :accepts, ["json"]
@@ -12,6 +16,18 @@ defmodule AssistantWeb.Router do
 
   pipeline :google_chat_auth do
     plug AssistantWeb.Plugs.GoogleChatAuth
+  end
+
+  # Settings UI (LiveView)
+  scope "/", AssistantWeb do
+    pipe_through :browser
+
+    live_session :settings do
+      live "/", SettingsLive, :general
+      live "/settings", SettingsLive, :general
+      live "/settings/workflows/:name/edit", WorkflowEditorLive, :edit
+      live "/settings/:section", SettingsLive, :section
+    end
   end
 
   # Health check — used by Railway and monitoring
@@ -34,7 +50,4 @@ defmodule AssistantWeb.Router do
 
     post "/telegram", WebhookController, :telegram
   end
-
-  # Dev routes can be added here when needed (e.g., debug endpoints)
-  # This is a webhooks-only application — no browser/HTML routes.
 end

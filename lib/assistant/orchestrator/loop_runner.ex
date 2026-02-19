@@ -36,6 +36,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
   decides whether to loop again or respond to the user.
   """
 
+  alias Assistant.Analytics
   alias Assistant.Orchestrator.{Context, LLMHelpers}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
   alias Assistant.Skills.Result, as: SkillResult
@@ -81,9 +82,12 @@ defmodule Assistant.Orchestrator.LoopRunner do
 
     case @llm_client.chat_completion(messages, llm_opts) do
       {:ok, response} ->
+        record_llm_analytics(loop_state, response, model, :ok)
         process_response(response, loop_state)
 
       {:error, reason} ->
+        record_llm_analytics(loop_state, nil, model, :error, reason)
+
         Logger.error("LLM call failed in loop runner",
           reason: inspect(reason),
           conversation_id: loop_state[:conversation_id]
@@ -243,5 +247,29 @@ defmodule Assistant.Orchestrator.LoopRunner do
       channel: loop_state[:channel],
       integrations: Assistant.Integrations.Registry.default_integrations()
     }
+  end
+
+  defp record_llm_analytics(loop_state, response, model, status, reason \\ nil) do
+    usage = if is_map(response), do: response[:usage] || %{}, else: %{}
+
+    metadata =
+      %{
+        reason: if(reason, do: inspect(reason), else: nil)
+      }
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
+
+    Analytics.record_llm_call(%{
+      status: status,
+      scope: "orchestrator",
+      model: if(is_map(response), do: response[:model] || model, else: model),
+      conversation_id: loop_state[:conversation_id],
+      user_id: loop_state[:user_id],
+      prompt_tokens: usage[:prompt_tokens] || 0,
+      completion_tokens: usage[:completion_tokens] || 0,
+      total_tokens: usage[:total_tokens] || 0,
+      cost: usage[:cost] || 0.0,
+      metadata: metadata
+    })
   end
 end

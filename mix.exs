@@ -26,6 +26,7 @@ defmodule Assistant.MixProject do
   def cli do
     [
       preferred_envs: [
+        precommit: :test,
         coveralls: :test,
         "coveralls.detail": :test,
         "coveralls.post": :test,
@@ -48,6 +49,8 @@ defmodule Assistant.MixProject do
     [
       # Phoenix core (webhooks-only, no HTML)
       {:phoenix, "~> 1.8"},
+      {:phoenix_html, "~> 4.2"},
+      {:phoenix_live_view, "~> 1.0"},
       {:bandit, "~> 1.0"},
       {:jason, "~> 1.4"},
       {:dns_cluster, "~> 0.1"},
@@ -83,12 +86,14 @@ defmodule Assistant.MixProject do
       # Dev & test tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:phoenix_live_reload, "~> 1.5", only: :dev},
 
       # Test only
       {:mox, "~> 1.1", only: :test},
       {:stream_data, "~> 1.1", only: :test},
       {:bypass, "~> 2.1", only: :test},
-      {:excoveralls, "~> 0.18", only: :test}
+      {:excoveralls, "~> 0.18", only: :test},
+      {:floki, ">= 0.30.0", only: :test}
     ]
   end
 
@@ -97,7 +102,8 @@ defmodule Assistant.MixProject do
       setup: ["deps.get", "ecto.setup"],
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
-      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"]
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      precommit: ["format", "test"]
     ]
   end
 end

@@ -52,7 +52,11 @@ defmodule Assistant.Integrations.Google.Gmail do
           {:error, :not_found}
 
         {:error, reason} ->
-          Logger.warning("Gmail get_message failed", message_id: message_id, error: inspect(reason))
+          Logger.warning("Gmail get_message failed",
+            message_id: message_id,
+            error: inspect(reason)
+          )
+
           {:error, reason}
       end
     end
@@ -63,7 +67,8 @@ defmodule Assistant.Integrations.Google.Gmail do
   Rejects newlines in header fields to prevent header injection.
   Opts: `:from`, `:cc`.
   """
-  @spec send_message(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec send_message(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
   def send_message(to, subject, body, opts \\ []) do
     cc = Keyword.get(opts, :cc)
 
@@ -88,7 +93,8 @@ defmodule Assistant.Integrations.Google.Gmail do
   Rejects newlines in header fields to prevent header injection.
   Opts: `:from`, `:cc`.
   """
-  @spec create_draft(String.t(), String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec create_draft(String.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
   def create_draft(to, subject, body, opts \\ []) do
     cc = Keyword.get(opts, :cc)
 
@@ -118,9 +124,15 @@ defmodule Assistant.Integrations.Google.Gmail do
       messages =
         Enum.reduce(ids, [], fn %{id: id}, acc ->
           case get_message(id) do
-            {:ok, msg} -> [msg | acc]
+            {:ok, msg} ->
+              [msg | acc]
+
             {:error, reason} ->
-              Logger.warning("Gmail search: skipping message", message_id: id, error: inspect(reason))
+              Logger.warning("Gmail search: skipping message",
+                message_id: id,
+                error: inspect(reason)
+              )
+
               acc
           end
         end)
@@ -144,8 +156,13 @@ defmodule Assistant.Integrations.Google.Gmail do
     cc = Keyword.get(opts, :cc)
 
     headers =
-      ["From: #{from}", "To: #{to}", "Subject: #{subject}",
-       "MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8"]
+      [
+        "From: #{from}",
+        "To: #{to}",
+        "Subject: #{subject}",
+        "MIME-Version: 1.0",
+        "Content-Type: text/plain; charset=UTF-8"
+      ]
 
     headers = if cc, do: headers ++ ["Cc: #{cc}"], else: headers
     Enum.join(headers, "\r\n") <> "\r\n\r\n" <> body
@@ -184,6 +201,7 @@ defmodule Assistant.Integrations.Google.Gmail do
   end
 
   defp extract_headers(%Model.Message{payload: nil}), do: %{}
+
   defp extract_headers(%Model.Message{payload: p}) do
     (p.headers || [])
     |> Enum.filter(&(&1.name in ~w(Subject From To Date)))
@@ -191,12 +209,17 @@ defmodule Assistant.Integrations.Google.Gmail do
   end
 
   defp extract_body(%Model.Message{payload: nil}), do: nil
-  defp extract_body(%Model.Message{payload: %{mimeType: "text/plain", body: %{data: d}}}) when is_binary(d),
-    do: base64url_decode(d)
+
+  defp extract_body(%Model.Message{payload: %{mimeType: "text/plain", body: %{data: d}}})
+       when is_binary(d),
+       do: base64url_decode(d)
+
   defp extract_body(%Model.Message{payload: %{parts: parts}}) when is_list(parts),
     do: find_text_part(parts)
+
   defp extract_body(%Model.Message{payload: %{body: %{data: d}}}) when is_binary(d),
     do: base64url_decode(d)
+
   defp extract_body(_), do: nil
 
   defp find_text_part(parts) do
@@ -209,6 +232,7 @@ defmodule Assistant.Integrations.Google.Gmail do
 
   defp base64url_decode(data) do
     padded = data |> String.replace("-", "+") |> String.replace("_", "/") |> pad_base64()
+
     case Base.decode64(padded) do
       {:ok, decoded} -> decoded
       :error -> data

@@ -208,11 +208,12 @@ defmodule Assistant.Integrations.Google.Drive do
              fields: "id,name,webViewLink"
            ) do
         {:ok, %Model.File{} = file} ->
-          {:ok, %{
-            id: file.id,
-            name: file.name,
-            web_view_link: file.webViewLink
-          }}
+          {:ok,
+           %{
+             id: file.id,
+             name: file.name,
+             web_view_link: file.webViewLink
+           }}
 
         {:error, reason} ->
           Logger.warning("Drive create_file failed for #{name}: #{inspect(reason)}")
@@ -255,11 +256,12 @@ defmodule Assistant.Integrations.Google.Drive do
              fields: "id,name,webViewLink"
            ) do
         {:ok, %Model.File{} = file} ->
-          {:ok, %{
-            id: file.id,
-            name: file.name,
-            web_view_link: file.webViewLink
-          }}
+          {:ok,
+           %{
+             id: file.id,
+             name: file.name,
+             web_view_link: file.webViewLink
+           }}
 
         {:error, %Tesla.Env{status: 404}} ->
           {:error, :not_found}
