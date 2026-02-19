@@ -38,7 +38,8 @@ defaults:
   sub_agent: balanced           # Default sub-agent model
   compaction: fast              # Continuous summary compaction
   sentinel: fast                # Prompt injection / safety classifier
-  audio_transcription: fast     # STT-capable model
+  audio_transcription: fast     # STT-capable model (processes audio input)
+  audio_output: primary         # TTS via model (generates audio output — e.g. gpt-audio, gemini-3-pro)
 ```
 
 **Type**: `map(atom, atom)` where values are tier atoms.
@@ -67,7 +68,7 @@ models:
 | `id` | string | Yes | OpenRouter model identifier (`provider/model-name`) |
 | `tier` | enum | Yes | `primary`, `balanced`, `fast`, `cheap` |
 | `description` | string | Yes | Human-readable summary |
-| `use_cases` | list(atom) | Yes | Eligible roles: `orchestrator`, `sub_agent`, `compaction`, `sentinel`, `audio_transcription` |
+| `use_cases` | list(atom) | Yes | Eligible roles: `orchestrator`, `sub_agent`, `compaction`, `sentinel`, `audio_transcription` (STT — processes audio input), `audio_output` (TTS via model — generates audio output, alternative/complement to ElevenLabs) |
 | `supports_tools` | boolean | Yes | Whether the model supports OpenRouter tool/function calling |
 | `max_context_tokens` | integer | Yes | Maximum context window size |
 | `cost_tier` | enum | Yes | `low`, `medium`, `high` — relative cost classification |
