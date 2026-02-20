@@ -3,7 +3,7 @@
 # Used by `mix format`. Configures formatting rules for the project.
 
 [
-  import_deps: [:ecto, :ecto_sql, :phoenix],
+  import_deps: [:ecto, :ecto_sql, :phoenix, :phoenix_live_view],
   subdirectories: ["priv/*/migrations"],
   plugins: [],
   inputs: ["*.{ex,exs}", "{config,lib,test}/**/*.{ex,exs}", "priv/*/seeds.exs"]

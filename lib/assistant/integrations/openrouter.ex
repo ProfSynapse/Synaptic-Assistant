@@ -85,6 +85,8 @@ defmodule Assistant.Integrations.OpenRouter do
     - `:temperature` — Sampling temperature (default: provider default)
     - `:max_tokens` — Maximum completion tokens
     - `:parallel_tool_calls` — Allow parallel tool calls (default: provider default)
+    - `:response_format` — Response format constraint (`%{type: "json_object"}` or
+      `%{type: "json_schema", json_schema: %{...}}` for structured outputs)
 
   ## Examples
 
@@ -305,6 +307,7 @@ defmodule Assistant.Integrations.OpenRouter do
           |> maybe_add_temperature(opts)
           |> maybe_add_max_tokens(opts)
           |> maybe_add_parallel_tool_calls(opts)
+          |> maybe_add_response_format(opts)
 
         {:ok, body}
 
@@ -353,6 +356,13 @@ defmodule Assistant.Integrations.OpenRouter do
     case Keyword.get(opts, :parallel_tool_calls) do
       nil -> body
       value -> Map.put(body, :parallel_tool_calls, value)
+    end
+  end
+
+  defp maybe_add_response_format(body, opts) do
+    case Keyword.get(opts, :response_format) do
+      nil -> body
+      format -> Map.put(body, :response_format, format)
     end
   end
 

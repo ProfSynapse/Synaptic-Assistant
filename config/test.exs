@@ -4,6 +4,13 @@
 
 import Config
 
+# Only in tests, remove the complexity from the password hashing algorithm
+config :bcrypt_elixir, :log_rounds, 1
+
+# Required for config/config.yaml interpolation when app boots in test.
+System.put_env("ENV_VAR", "test")
+System.put_env("ELEVENLABS_VOICE_ID", "test-voice-id")
+
 # Test database — use SQL sandbox for async tests
 config :assistant, Assistant.Repo,
   username: "postgres",
@@ -33,8 +40,17 @@ config :assistant, Assistant.Vault,
     }
   ]
 
+# Avoid runtime crashes in tests that exercise OpenRouter paths without mocks.
+config :assistant, :openrouter_api_key, "test-openrouter-key"
+
+# Use Mox mock for LLM client in test builds (compile_env resolution).
+config :assistant, :llm_client, MockLLMClient
+
 # Reduce log noise in tests
 config :logger, level: :warning
+
+# Use test mail adapter for auth/notification tests.
+config :assistant, Assistant.Mailer, adapter: Swoosh.Adapters.Test
 
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime

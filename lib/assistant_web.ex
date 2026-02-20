@@ -1,8 +1,3 @@
-# lib/assistant_web.ex — Web module for the AssistantWeb namespace.
-#
-# Provides macros for controllers, routers, and other web components.
-# This is a webhooks-only Phoenix application — no HTML views or LiveView.
-
 defmodule AssistantWeb do
   @moduledoc """
   The entrypoint for defining your web interface, such
@@ -12,9 +7,11 @@ defmodule AssistantWeb do
 
       use AssistantWeb, :controller
       use AssistantWeb, :router
+      use AssistantWeb, :html
+      use AssistantWeb, :live_view
   """
 
-  def static_paths, do: ~w(robots.txt)
+  def static_paths, do: ~w(assets fonts images favicon.ico robots.txt)
 
   def router do
     quote do
@@ -22,17 +19,46 @@ defmodule AssistantWeb do
 
       import Plug.Conn
       import Phoenix.Controller
+      import Phoenix.LiveView.Router
     end
   end
 
   def controller do
     quote do
       use Phoenix.Controller,
-        formats: [:json]
+        formats: [:html, :json],
+        layouts: [html: AssistantWeb.Layouts]
 
       import Plug.Conn
 
       unquote(verified_routes())
+    end
+  end
+
+  def live_view do
+    quote do
+      use Phoenix.LiveView
+
+      unquote(html_helpers())
+    end
+  end
+
+  def live_component do
+    quote do
+      use Phoenix.LiveComponent
+
+      unquote(html_helpers())
+    end
+  end
+
+  def html do
+    quote do
+      use Phoenix.Component
+
+      import Phoenix.Controller,
+        only: [get_csrf_token: 0, view_module: 1, view_template: 1]
+
+      unquote(html_helpers())
     end
   end
 
@@ -42,6 +68,20 @@ defmodule AssistantWeb do
         endpoint: AssistantWeb.Endpoint,
         router: AssistantWeb.Router,
         statics: AssistantWeb.static_paths()
+    end
+  end
+
+  defp html_helpers do
+    quote do
+      import Phoenix.HTML
+
+      use PetalComponents
+      # Nullify Petal's Icon import — CoreComponents.icon/1 is the single provider
+      import PetalComponents.Icon, only: []
+      import AssistantWeb.CoreComponents
+      alias AssistantWeb.Layouts
+
+      unquote(verified_routes())
     end
   end
 

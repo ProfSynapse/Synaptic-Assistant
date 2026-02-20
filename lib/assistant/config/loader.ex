@@ -38,6 +38,8 @@ defmodule Assistant.Config.Loader do
 
   use GenServer
 
+  alias Assistant.ModelDefaults
+
   require Logger
 
   @ets_table :assistant_config
@@ -84,6 +86,17 @@ defmodule Assistant.Config.Loader do
   end
 
   @doc """
+  Returns the configured default tiers by role.
+  """
+  @spec defaults() :: map()
+  def defaults do
+    case :ets.lookup(@ets_table, :defaults) do
+      [{:defaults, defaults}] -> defaults
+      [] -> raise "Config not loaded — Assistant.Config.Loader not started"
+    end
+  end
+
+  @doc """
   Returns the model ID for a given use-case role.
 
   Resolves via defaults: role -> tier -> first matching model.
@@ -102,16 +115,21 @@ defmodule Assistant.Config.Loader do
 
     case Keyword.get(opts, :id) do
       nil ->
+        override_id = ModelDefaults.default_model_id(use_case)
         tier = Keyword.get(opts, :prefer) || Map.get(defaults, use_case)
 
-        Enum.find(models, fn model ->
-          model.tier == tier and use_case in model.use_cases
-        end)
+        case find_model_by_id_for_use_case(models, override_id, use_case) do
+          nil ->
+            Enum.find(models, fn model ->
+              model.tier == tier and use_case in model.use_cases
+            end)
+
+          model ->
+            model
+        end
 
       id ->
-        Enum.find(models, fn model ->
-          model.id == id and use_case in model.use_cases
-        end)
+        find_model_by_id_for_use_case(models, id, use_case)
     end
   end
 
@@ -254,6 +272,14 @@ defmodule Assistant.Config.Loader do
       {:ok, parsed} -> {:ok, parsed}
       {:error, reason} -> {:error, {:yaml_parse_error, reason}}
     end
+  end
+
+  defp find_model_by_id_for_use_case(_models, nil, _use_case), do: nil
+
+  defp find_model_by_id_for_use_case(models, id, use_case) do
+    Enum.find(models, fn model ->
+      model.id == id and use_case in model.use_cases
+    end)
   end
 
   defp validate_and_transform(parsed) do

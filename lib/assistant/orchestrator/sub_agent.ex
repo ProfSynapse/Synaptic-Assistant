@@ -61,10 +61,12 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   use GenServer
 
+  alias Assistant.Analytics
   alias Assistant.Auth.MagicLink
   alias Assistant.Config.{Loader, PromptLoader}
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
+  alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Executor, Registry, Result}
 
   require Logger
@@ -188,7 +190,13 @@ defmodule Assistant.Orchestrator.SubAgent do
       engine_state: engine_state
     ]
 
-    case start_link(opts) do
+    # Use GenServer.start (NOT start_link) to avoid linking the GenServer
+    # to the calling Task. With start_link, when the GenServer exits via
+    # {:stop, {:shutdown, result_map}, state}, the EXIT signal propagates
+    # to the linked Task and kills it before wait_for_completion can read
+    # the :DOWN message from the monitor. The monitor alone is sufficient
+    # for detecting GenServer termination.
+    case GenServer.start(__MODULE__, opts, name: via_tuple(agent_id)) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
         wait_for_completion(agent_id, ref)
@@ -425,9 +433,12 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp run_loop(context, agent_state, dispatch_params, engine_state, genserver_pid) do
     model_opts = build_model_opts(dispatch_params, context)
+    model = Keyword.get(model_opts, :model)
 
     case @llm_client.chat_completion(context.messages, model_opts) do
       {:ok, response} ->
+        record_llm_analytics(engine_state, response, model, :ok)
+
         handle_response(
           response,
           context,
@@ -438,6 +449,8 @@ defmodule Assistant.Orchestrator.SubAgent do
         )
 
       {:error, reason} ->
+        record_llm_analytics(engine_state, nil, model, :error, reason)
+
         Logger.error("Sub-agent LLM call failed",
           agent_id: dispatch_params.agent_id,
           reason: inspect(reason),
@@ -637,40 +650,47 @@ defmodule Assistant.Orchestrator.SubAgent do
     skill_name = args["skill"]
     skill_args = args["arguments"] || %{}
 
-    # Scope enforcement: only allowed skills
-    if skill_name in dispatch_params.skills do
-      # Sentinel security gate
-      proposed_action = %{
-        skill_name: skill_name,
-        arguments: skill_args,
-        agent_id: dispatch_params.agent_id
-      }
+    cond do
+      is_nil(skill_name) ->
+        {tc, "Error: Missing required \"skill\" parameter in use_skill call."}
 
-      original_request = engine_state[:original_request]
+      not SkillPermissions.enabled?(skill_name) ->
+        {tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}
 
-      case Sentinel.check(original_request, dispatch_params.mission, proposed_action) do
-        {:ok, :approved} ->
-          execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state)
+      skill_name not in dispatch_params.skills ->
+        Logger.warning("Sub-agent attempted out-of-scope skill",
+          agent_id: dispatch_params.agent_id,
+          skill: skill_name,
+          allowed: dispatch_params.skills
+        )
 
-        {:ok, {:rejected, reason}} ->
-          Logger.warning("Sentinel rejected sub-agent action",
-            agent_id: dispatch_params.agent_id,
-            skill: skill_name,
-            reason: reason
-          )
+        {tc,
+         "Error: Skill \"#{skill_name}\" is not available to this agent. " <>
+           "Available skills: #{Enum.join(dispatch_params.skills, ", ")}"}
 
-          {tc, "Action rejected by security gate: #{reason}"}
-      end
-    else
-      Logger.warning("Sub-agent attempted out-of-scope skill",
-        agent_id: dispatch_params.agent_id,
-        skill: skill_name,
-        allowed: dispatch_params.skills
-      )
+      true ->
+        # Sentinel security gate
+        proposed_action = %{
+          skill_name: skill_name,
+          arguments: skill_args,
+          agent_id: dispatch_params.agent_id
+        }
 
-      {tc,
-       "Error: Skill \"#{skill_name}\" is not available to this agent. " <>
-         "Available skills: #{Enum.join(dispatch_params.skills, ", ")}"}
+        original_request = engine_state[:original_request]
+
+        case Sentinel.check(original_request, dispatch_params.mission, proposed_action) do
+          {:ok, :approved} ->
+            execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state)
+
+          {:ok, {:rejected, reason}} ->
+            Logger.warning("Sentinel rejected sub-agent action",
+              agent_id: dispatch_params.agent_id,
+              skill: skill_name,
+              reason: reason
+            )
+
+            {tc, "Action rejected by security gate: #{reason}"}
+        end
     end
   end
 
@@ -1046,9 +1066,14 @@ defmodule Assistant.Orchestrator.SubAgent do
   # --- Tool Definitions ---
 
   defp build_scoped_tools(skill_names) do
+    allowed_skill_names =
+      skill_names
+      |> Enum.filter(&SkillPermissions.enabled?/1)
+      |> Enum.uniq()
+
     # Look up each skill definition to build the scoped use_skill tool
     skill_defs =
-      skill_names
+      allowed_skill_names
       |> Enum.sort()
       |> Enum.map(fn name ->
         case Registry.lookup(name) do
@@ -1124,6 +1149,30 @@ defmodule Assistant.Orchestrator.SubAgent do
     }
 
     [use_skill_tool, request_help_tool]
+  end
+
+  defp record_llm_analytics(engine_state, response, model, status, reason \\ nil) do
+    usage = if is_map(response), do: response[:usage] || %{}, else: %{}
+
+    metadata =
+      %{
+        reason: if(reason, do: inspect(reason), else: nil)
+      }
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
+
+    Analytics.record_llm_call(%{
+      status: status,
+      scope: "sub_agent",
+      model: if(is_map(response), do: response[:model] || model, else: model),
+      conversation_id: engine_state[:conversation_id],
+      user_id: engine_state[:user_id],
+      prompt_tokens: usage[:prompt_tokens] || 0,
+      completion_tokens: usage[:completion_tokens] || 0,
+      total_tokens: usage[:total_tokens] || 0,
+      cost: usage[:cost] || 0.0,
+      metadata: metadata
+    })
   end
 
   # --- Resume Helpers ---
@@ -1285,7 +1334,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     google_token = resolve_google_token(user_id, dispatch_params.skills)
 
     %Context{
-      conversation_id: engine_state[:conversation_id] || "unknown",
+      conversation_id: root_conversation_id,
       execution_id: Ecto.UUID.generate(),
       user_id: user_id,
       channel: engine_state[:channel],

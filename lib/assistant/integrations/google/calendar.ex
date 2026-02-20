@@ -187,9 +187,7 @@ defmodule Assistant.Integrations.Google.Calendar do
           {:ok, normalize_event(event)}
 
         {:error, reason} ->
-          Logger.warning(
-            "Calendar update_event failed for #{event_id}: #{inspect(reason)}"
-          )
+          Logger.warning("Calendar update_event failed for #{event_id}: #{inspect(reason)}")
 
           {:error, reason}
       end

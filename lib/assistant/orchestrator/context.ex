@@ -41,6 +41,7 @@ defmodule Assistant.Orchestrator.Context do
   alias Assistant.Config.PromptLoader
   alias Assistant.Integrations.OpenRouter
   alias Assistant.Memory.ContextBuilder
+  alias Assistant.OrchestratorSystemPrompt
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
   alias Assistant.Skills.Registry
 
@@ -133,23 +134,42 @@ defmodule Assistant.Orchestrator.Context do
       current_date: Date.utc_today() |> Date.to_iso8601()
     }
 
-    case PromptLoader.render(:orchestrator, assigns) do
-      {:ok, rendered} ->
-        rendered
+    base_prompt =
+      case PromptLoader.render(:orchestrator, assigns) do
+        {:ok, rendered} ->
+          rendered
 
-      {:error, _reason} ->
-        # Fallback: hardcoded prompt if YAML not loaded
-        Logger.warning("PromptLoader fallback for :orchestrator — using hardcoded prompt")
+        {:error, _reason} ->
+          # Fallback: hardcoded prompt if YAML not loaded
+          Logger.warning("PromptLoader fallback for :orchestrator — using hardcoded prompt")
 
-        """
-        You are an AI assistant orchestrator. You coordinate sub-agents to fulfill user requests.
+          """
+          You are an AI assistant orchestrator. You coordinate sub-agents to fulfill user requests.
 
-        Available skill domains: #{assigns.skill_domains}
+          Available skill domains: #{assigns.skill_domains}
 
-        User: #{assigns.user_id}
-        Channel: #{assigns.channel}
-        Date: #{assigns.current_date}
-        """
+          User: #{assigns.user_id}
+          Channel: #{assigns.channel}
+          Date: #{assigns.current_date}
+          """
+      end
+
+    append_custom_prompt(base_prompt)
+  end
+
+  defp append_custom_prompt(base_prompt) do
+    custom_prompt = OrchestratorSystemPrompt.get_prompt()
+
+    if custom_prompt == "" do
+      base_prompt
+    else
+      """
+      #{base_prompt}
+
+      User-configured orchestrator preferences:
+      #{custom_prompt}
+      """
+      |> String.trim()
     end
   end
 
