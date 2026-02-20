@@ -1,55 +1,80 @@
-# lib/assistant/integrations/google/auth.ex — Dual-mode Google authentication.
+# lib/assistant/integrations/google/auth.ex — Dual-mode Google auth wrapper.
 #
-# Provides two authentication paths:
-#   1. service_token/0 — Service account token via Goth (for Chat bot operations)
-#   2. user_token/1    — Per-user OAuth2 token (for Gmail, Drive, Calendar)
+# Provides two token paths:
+#   1. service_token/0 — Goth service account for Google Chat bot operations
+#   2. user_token/1 — Per-user OAuth2 token from oauth_tokens table, with
+#      automatic refresh when expired via Auth.OAuth.refresh_access_token/1
 #
-# The service account (via Goth) handles only the chat.bot scope. All user-facing
-# Google API calls (Gmail, Drive, Calendar) use per-user OAuth2 tokens stored in
-# the oauth_tokens table and refreshed statelessly via Goth.Token.fetch/1.
+# Concurrent refresh safety:
+#   When multiple requests hit an expired token simultaneously, :global.trans/3
+#   serializes refresh calls per-user. The first process acquires the lock and
+#   performs the Google refresh; subsequent processes wait, then re-check the
+#   DB for the freshly cached token (double-checked locking pattern).
 #
 # Related files:
-#   - lib/assistant/auth/oauth.ex (token exchange and refresh logic)
+#   - lib/assistant/application.ex (starts Goth in the supervision tree)
+#   - lib/assistant/auth/oauth.ex (stateless token exchange + refresh)
 #   - lib/assistant/auth/token_store.ex (encrypted CRUD for oauth_tokens)
-#   - lib/assistant/auth/magic_link.ex (magic link generation for auth flow)
-#   - lib/assistant/application.ex (starts Goth for service account)
 #   - config/runtime.exs (Google credentials configuration)
+#   - lib/assistant/integrations/google/drive.ex (consumer — Drive API)
+#   - lib/assistant/integrations/google/chat.ex (consumer — Chat API)
+#   - lib/assistant/integrations/google/gmail.ex (consumer — Gmail API)
+#   - lib/assistant/integrations/google/calendar.ex (consumer — Calendar API)
 
 defmodule Assistant.Integrations.Google.Auth do
   @moduledoc """
-  Dual-mode Google authentication: service account for Chat bot, per-user OAuth2
-  for Gmail/Drive/Calendar.
+  Dual-mode Google OAuth2 token management.
 
-  ## Service Account (Chat Bot)
+  Two authentication paths:
 
+  - `service_token/0` — Goth service account token for Google Chat bot
+    operations. Tokens are auto-refreshed by the supervised Goth process.
+
+  - `user_token/1` — Per-user OAuth2 token from the `oauth_tokens` table.
+    Checks whether the cached access token is still valid; if expired,
+    transparently refreshes via `Auth.OAuth.refresh_access_token/1` and
+    caches the new token in the database.
+
+  ## Concurrent Refresh Safety
+
+  When multiple requests for the same user arrive simultaneously with an
+  expired token, `:global.trans/3` serializes refresh calls per-user:
+
+  1. The first process acquires a per-user lock and performs the refresh.
+  2. Concurrent processes block on the lock, then re-check the DB for
+     the freshly cached token (double-checked locking).
+  3. No additional supervision tree entries or GenServers required.
+
+  ## Usage
+
+      # Service account (Chat bot)
       case Auth.service_token() do
         {:ok, access_token} -> # use for Chat API calls
-        {:error, reason} -> # Goth not configured or refresh failed
+        {:error, reason} -> # handle missing credentials
       end
 
-  ## Per-User OAuth2
-
+      # Per-user token (Drive, Gmail, Calendar)
       case Auth.user_token(user_id) do
-        {:ok, access_token} -> # use for Gmail/Drive/Calendar API calls
-        {:error, :not_connected} -> # user needs to authorize via magic link
-        {:error, :refresh_failed} -> # refresh token revoked; token deleted, re-auth needed
+        {:ok, access_token} -> # use for user-scoped API calls
+        {:error, :not_connected} -> # user needs to connect Google account
+        {:error, :refresh_failed} -> # refresh token revoked or invalid
       end
   """
 
   require Logger
 
-  alias Assistant.Auth.OAuth
-  alias Assistant.Auth.TokenStore
-  alias Assistant.Repo
+  alias Assistant.Auth.{OAuth, TokenStore}
 
   @goth_name Assistant.Goth
 
-  # --- Service Account (Chat Bot) ---
+  # --- Service Account (Chat bot) ---
 
   @doc """
-  Fetch a service account access token from the Goth instance.
+  Fetch a service account access token from the supervised Goth instance.
 
-  Used exclusively for Google Chat bot operations (chat.bot scope).
+  Used exclusively for Google Chat bot operations. All other Google API
+  calls (Drive, Gmail, Calendar) use `user_token/1` with per-user OAuth.
+
   Returns `{:ok, token_string}` on success or `{:error, reason}` on failure.
   """
   @spec service_token() :: {:ok, String.t()} | {:error, term()}
@@ -64,68 +89,43 @@ defmodule Assistant.Integrations.Google.Auth do
     end
   end
 
-  # --- Per-User OAuth2 ---
+  # --- Per-User Token ---
 
   @doc """
-  Fetch a per-user OAuth2 access token.
+  Fetch a per-user access token for Google API calls.
 
-  Checks the token store for the user's Google OAuth token:
-  1. If found and valid (not expired) — returns the access token
-  2. If found but expired — attempts stateless refresh via Goth.Token.fetch/1
-  3. If not found — returns `{:error, :not_connected}`
-  4. If refresh fails with `invalid_grant` — deletes the token and returns
-     `{:error, :not_connected}` (forces re-authorization via magic link)
-
-  ## Parameters
-
-    * `user_id` - The user's UUID
+  Looks up the user's stored OAuth token, checks validity, and refreshes
+  if expired. The refreshed token is cached in the database to avoid
+  redundant refresh calls within the token's lifetime (~1 hour).
 
   ## Returns
 
-    * `{:ok, access_token}` — valid token ready for API calls
-    * `{:error, :not_connected}` — user has no token; trigger magic link flow
-    * `{:error, :refresh_failed}` — refresh attempt failed for non-revocation reason
+    - `{:ok, access_token}` — valid access token ready for API calls
+    - `{:error, :not_connected}` — no OAuth token stored for this user
+    - `{:error, :refresh_failed}` — refresh token is invalid or revoked;
+      user needs to re-authorize via magic link
   """
-  @spec user_token(binary()) ::
-          {:ok, String.t()} | {:error, :not_connected | :refresh_failed}
+  @spec user_token(String.t()) :: {:ok, String.t()} | {:error, :not_connected | :refresh_failed}
   def user_token(user_id) do
-    case TokenStore.get_token(user_id) do
-      {:error, :not_found} ->
-        {:error, :not_connected}
+    case TokenStore.get_google_token(user_id) do
+      {:error, :not_connected} = error ->
+        error
 
       {:ok, oauth_token} ->
-        if TokenStore.token_valid?(oauth_token) do
+        if TokenStore.access_token_valid?(oauth_token) do
           {:ok, oauth_token.access_token}
         else
-          # Serialize refresh attempts per-user via PostgreSQL advisory lock.
-          # This prevents a TOCTOU race where two concurrent requests both see
-          # an expired token, both refresh, and the second refresh causes
-          # Google to revoke the first — deleting the just-saved token.
-          with_user_advisory_lock(user_id, fn ->
-            # Re-check inside the lock — another request may have refreshed already
-            case TokenStore.get_token(user_id) do
-              {:error, :not_found} ->
-                {:error, :not_connected}
-
-              {:ok, fresh_token} ->
-                if TokenStore.token_valid?(fresh_token) do
-                  {:ok, fresh_token.access_token}
-                else
-                  refresh_user_token(user_id, fresh_token)
-                end
-            end
-          end)
+          serialized_refresh(user_id, oauth_token.refresh_token)
         end
     end
   end
 
-  # --- Configuration ---
+  # --- Legacy Compatibility ---
 
   @doc """
   Check whether Google service account credentials are configured.
 
   Returns `true` if the `:google_credentials` application env is set.
-  Useful for feature-gating Chat bot functionality.
   """
   @spec configured?() :: boolean()
   def configured? do
@@ -145,9 +145,9 @@ defmodule Assistant.Integrations.Google.Auth do
   end
 
   @doc """
-  The required Google API scopes for the service account (Chat bot only).
+  The Google Chat bot scope (service account only).
 
-  Per-user scopes are defined in `Assistant.Auth.OAuth.user_scopes/0`.
+  Per-user scopes are defined in `Auth.OAuth.user_scopes/0`.
   """
   @spec scopes() :: [String.t()]
   def scopes do
@@ -156,64 +156,73 @@ defmodule Assistant.Integrations.Google.Auth do
 
   # --- Private ---
 
-  # Serialize an operation per user via a PostgreSQL advisory transaction lock.
-  # Uses a deterministic lock key derived from the user_id. The lock is released
-  # automatically when the transaction commits/rolls back.
-  defp with_user_advisory_lock(user_id, fun) do
-    lock_key = user_id_to_lock_key(user_id)
+  # Serialize concurrent refreshes for the same user via :global.trans/3.
+  # Uses double-checked locking: after acquiring the lock, re-reads the DB
+  # to see if another process already refreshed the token while we waited.
+  defp serialized_refresh(user_id, refresh_token) do
+    lock_id = {:token_refresh, user_id}
 
-    Repo.transaction(fn ->
-      case Ecto.Adapters.SQL.query(Repo, "SELECT pg_advisory_xact_lock($1)", [lock_key]) do
-        {:ok, _} ->
-          fun.()
+    # :global.trans/3 acquires a cluster-wide lock on {lock_id, self()}.
+    # All processes for the same user_id serialize here. The lock is
+    # released when the function returns.
+    result =
+      :global.trans({lock_id, self()}, fn ->
+        # Double-check: re-read from DB — another process may have refreshed
+        # while we were waiting for the lock.
+        case TokenStore.get_google_token(user_id) do
+          {:ok, fresh_token} ->
+            if TokenStore.access_token_valid?(fresh_token) do
+              {:ok, fresh_token.access_token}
+            else
+              refresh_and_cache(user_id, refresh_token)
+            end
 
-        {:error, reason} ->
-          Logger.error("Failed to acquire advisory lock for token refresh",
-            user_id: user_id,
-            reason: inspect(reason)
-          )
+          {:error, :not_connected} ->
+            {:error, :not_connected}
+        end
+      end)
 
-          {:error, :refresh_failed}
-      end
-    end)
-    |> case do
-      {:ok, result} -> result
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  # Convert a UUID string to a deterministic 64-bit integer for pg_advisory_xact_lock.
-  # Uses the first 8 bytes of the binary UUID as a signed 64-bit integer.
-  defp user_id_to_lock_key(user_id) do
-    <<key::signed-integer-64, _rest::binary>> = :crypto.hash(:sha256, user_id)
-    key
-  end
-
-  defp refresh_user_token(user_id, oauth_token) do
-    case OAuth.refresh_token(oauth_token.refresh_token) do
-      {:ok, %{access_token: new_access_token, expires_at: expires_at}} ->
-        # Update stored token with new access token and expiry
-        TokenStore.upsert_token(%{
-          user_id: user_id,
-          provider: "google",
-          access_token: new_access_token,
-          token_expires_at: expires_at
-        })
-
-        {:ok, new_access_token}
-
-      {:error, :invalid_grant} ->
-        # Refresh token revoked — delete the stored token so next call
-        # returns :not_connected, triggering a new magic link flow
-        Logger.warning("OAuth refresh token revoked, deleting stored token",
+    # :global.trans returns :aborted if it cannot acquire the lock
+    # (e.g., nodes disagree). Fall back to a direct refresh attempt.
+    case result do
+      :aborted ->
+        Logger.warning("Global lock acquisition failed, falling back to direct refresh",
           user_id: user_id
         )
 
-        TokenStore.delete_token(user_id)
-        {:error, :not_connected}
+        refresh_and_cache(user_id, refresh_token)
+
+      other ->
+        other
+    end
+  end
+
+  defp refresh_and_cache(user_id, refresh_token) do
+    case OAuth.refresh_access_token(refresh_token) do
+      {:ok, access_token} ->
+        # Cache the refreshed token with a ~1 hour expiry
+        expires_at = DateTime.add(DateTime.utc_now(), 3500, :second)
+
+        case TokenStore.update_access_token(user_id, access_token, expires_at) do
+          {:ok, _} -> :ok
+          {:error, reason} ->
+            Logger.warning("Failed to cache refreshed token",
+              user_id: user_id,
+              reason: inspect(reason)
+            )
+        end
+
+        {:ok, access_token}
+
+      {:error, :refresh_failed} ->
+        Logger.warning("Token refresh failed for user — may need re-authorization",
+          user_id: user_id
+        )
+
+        {:error, :refresh_failed}
 
       {:error, reason} ->
-        Logger.error("OAuth token refresh failed",
+        Logger.warning("Token refresh error",
           user_id: user_id,
           reason: inspect(reason)
         )

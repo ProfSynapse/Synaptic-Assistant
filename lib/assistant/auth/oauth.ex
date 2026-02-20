@@ -1,190 +1,191 @@
-# lib/assistant/auth/oauth.ex — Google OAuth2 URL builder, code exchange, and stateless token refresh.
+# lib/assistant/auth/oauth.ex — Stateless Google OAuth2 helpers.
 #
-# Handles the OAuth2 authorization code flow with PKCE (S256) and HMAC-signed
-# state parameters. Token exchange uses Req (existing dep). Token refresh uses
-# Goth.Token.fetch/1 stateless API (no per-user GenServer process).
+# Provides three capabilities:
+#   1. Authorization URL builder (with PKCE S256 + HMAC-signed state)
+#   2. Authorization code exchange via Req HTTP POST
+#   3. Stateless per-user token refresh via Goth.Token.fetch/1
+#
+# This module is pure-functional — no processes, no state. Token storage
+# is handled by Auth.TokenStore (separate module). The existing Goth
+# supervised process (Assistant.Goth) is used only for the service account;
+# per-user refresh uses Goth.Token.fetch/1 in stateless mode.
 #
 # Related files:
-#   - lib/assistant/auth/token_store.ex (persists tokens after exchange)
-#   - lib/assistant/auth/magic_link.ex (generates magic links that start the flow)
+#   - lib/assistant/integrations/google/auth.ex (service account token — unchanged)
+#   - lib/assistant/auth/token_store.ex (encrypted CRUD for oauth_tokens table)
+#   - lib/assistant/auth/magic_link.ex (magic link lifecycle)
 #   - lib/assistant_web/controllers/oauth_controller.ex (callback handler)
 #   - config/runtime.exs (GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET)
 
 defmodule Assistant.Auth.OAuth do
   @moduledoc """
-  Google OAuth2 authorization code flow with PKCE and stateless token refresh.
+  Stateless Google OAuth2 operations: URL building, code exchange, and
+  per-user token refresh.
 
   ## Authorization URL
 
-  Builds Google OAuth2 consent URLs with:
-  - PKCE S256 challenge (RFC 7636)
-  - HMAC-SHA256 signed state parameter binding user_id + channel + token_hash + timestamp
+      {:ok, url, pkce} = OAuth.authorize_url(user_id, channel, token_hash)
+      # pkce.code_verifier must be stored for the callback
 
-  ## Token Exchange
+  ## Code Exchange
 
-  Exchanges authorization codes for access + refresh tokens via Google's token
-  endpoint using Req.
+      {:ok, token_data} = OAuth.exchange_code(code, redirect_uri, code_verifier)
+      # token_data contains access_token, refresh_token, id_token, etc.
 
   ## Token Refresh
 
-  Refreshes expired access tokens statelessly via `Goth.Token.fetch/1` with the
-  `{:refresh_token, credentials}` source. No per-user process needed.
+      {:ok, access_token} = OAuth.refresh_access_token(refresh_token)
+      # Uses Goth.Token.fetch/1 stateless mode — no running process needed
   """
 
   require Logger
 
-  @google_auth_url "https://accounts.google.com/o/oauth2/v2/auth"
-  @default_google_token_url "https://oauth2.googleapis.com/token"
+  @google_authorize_url "https://accounts.google.com/o/oauth2/v2/auth"
+  @google_token_url "https://oauth2.googleapis.com/token"
+
+  # Scopes for per-user OAuth (excludes chat.bot — that stays on service account)
+  @user_scopes [
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/calendar"
+  ]
+
+  @state_hmac_ttl_seconds 600
+  @code_verifier_length 64
+
+  # --- Types ---
+
+  @type pkce :: %{code_verifier: String.t(), code_challenge: String.t()}
+
+  @type token_data :: %{
+          optional(:access_token) => String.t(),
+          optional(:refresh_token) => String.t(),
+          optional(:id_token) => String.t(),
+          optional(:expires_in) => integer(),
+          optional(:token_type) => String.t(),
+          optional(:scope) => String.t()
+        }
+
+  # --- Public API ---
 
   @doc """
-  OAuth2 scopes requested for per-user authorization.
-
-  Excludes `chat.bot` (that stays on the service account).
-  Includes `openid`, `email`, `profile` for ID token claims.
-  """
-  @spec user_scopes() :: [String.t()]
-  def user_scopes do
-    [
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/drive.readonly",
-      "https://www.googleapis.com/auth/drive.file",
-      "https://www.googleapis.com/auth/gmail.modify",
-      "https://www.googleapis.com/auth/calendar"
-    ]
-  end
-
-  # --- Authorization URL ---
-
-  @doc """
-  Build a Google OAuth2 authorization URL with PKCE S256 and HMAC-signed state.
+  Build a Google OAuth2 authorization URL with PKCE (S256) and HMAC-signed state.
 
   ## Parameters
 
-    * `user_id` - The internal user UUID initiating the flow
-    * `opts` - Keyword list:
-      * `:channel` - The channel the user is chatting from (e.g., "google_chat")
-      * `:token_hash` - SHA-256 hash of the magic link token (binds state to magic link)
-      * `:code_verifier` - PKCE code verifier (generated if not provided)
+    - `user_id` — the user initiating the flow (bound into the state parameter)
+    - `channel` — the channel through which the user is interacting (e.g., "google_chat")
+    - `token_hash` — SHA-256 hash of the magic link token (bound into state for verification)
 
   ## Returns
 
-    `{:ok, %{url: String.t(), code_verifier: String.t()}}` or `{:error, reason}`
+    `{:ok, url, pkce}` where:
+    - `url` is the full Google authorization URL to redirect the user to
+    - `pkce` is `%{code_verifier: ..., code_challenge: ...}` — the verifier must be
+      persisted (in the auth_tokens row) for use in the callback's code exchange
+
+    `{:error, reason}` if client credentials are not configured.
   """
-  @spec build_authorization_url(binary(), keyword()) ::
-          {:ok, %{url: String.t(), code_verifier: String.t()}} | {:error, term()}
-  def build_authorization_url(user_id, opts \\ []) do
-    with {:ok, client_id} <- fetch_client_id(),
-         {:ok, redirect_uri} <- build_redirect_uri() do
-      channel = Keyword.get(opts, :channel, "unknown")
-      token_hash = Keyword.get(opts, :token_hash, "")
-      code_verifier = Keyword.get(opts, :code_verifier, generate_code_verifier())
-      code_challenge = generate_code_challenge(code_verifier)
+  @spec authorize_url(String.t(), String.t(), String.t()) ::
+          {:ok, String.t(), pkce()} | {:error, term()}
+  def authorize_url(user_id, channel, token_hash) do
+    with {:ok, client_id} <- fetch_client_id() do
+      pkce = generate_pkce()
       state = sign_state(user_id, channel, token_hash)
 
       params =
         URI.encode_query(%{
           "client_id" => client_id,
-          "redirect_uri" => redirect_uri,
+          "redirect_uri" => callback_url(),
           "response_type" => "code",
-          "scope" => Enum.join(user_scopes(), " "),
+          "scope" => Enum.join(@user_scopes, " "),
+          "state" => state,
           "access_type" => "offline",
           "prompt" => "consent",
-          "state" => state,
-          "code_challenge" => code_challenge,
+          "code_challenge" => pkce.code_challenge,
           "code_challenge_method" => "S256"
         })
 
-      url = "#{@google_auth_url}?#{params}"
-      {:ok, %{url: url, code_verifier: code_verifier}}
+      url = "#{@google_authorize_url}?#{params}"
+      {:ok, url, pkce}
     end
   end
 
-  # --- Token Exchange ---
-
   @doc """
-  Exchange an authorization code for tokens via Google's token endpoint.
+  Exchange an authorization code for tokens.
 
   ## Parameters
 
-    * `code` - The authorization code from Google's callback
-    * `code_verifier` - The PKCE code verifier used when building the auth URL
+    - `code` — the authorization code from the Google callback
+    - `code_verifier` — the PKCE code_verifier generated during `authorize_url/3`
 
   ## Returns
 
-    `{:ok, token_data}` where `token_data` is a map with keys:
-    - `"access_token"` - The access token string
-    - `"refresh_token"` - The refresh token string (only on first authorization)
-    - `"expires_in"` - Seconds until access token expires
-    - `"id_token"` - JWT with user info claims (email, sub, etc.)
-    - `"scope"` - Space-delimited granted scopes
-    - `"token_type"` - Always "Bearer"
+    `{:ok, token_data}` where token_data is a map with string keys containing
+    at minimum `"access_token"` and `"refresh_token"`.
 
     `{:error, reason}` on failure.
   """
-  @spec exchange_code(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  @spec exchange_code(String.t(), String.t()) :: {:ok, token_data()} | {:error, term()}
   def exchange_code(code, code_verifier) do
     with {:ok, client_id} <- fetch_client_id(),
-         {:ok, client_secret} <- fetch_client_secret(),
-         {:ok, redirect_uri} <- build_redirect_uri() do
-      body = %{
+         {:ok, client_secret} <- fetch_client_secret() do
+      form = %{
         "code" => code,
         "client_id" => client_id,
         "client_secret" => client_secret,
-        "redirect_uri" => redirect_uri,
+        "redirect_uri" => callback_url(),
         "grant_type" => "authorization_code",
         "code_verifier" => code_verifier
       }
 
-      case Req.post(google_token_url(), form: body) do
-        {:ok, %Req.Response{status: 200, body: token_data}} ->
-          Logger.info("OAuth token exchange succeeded",
-            scopes: token_data["scope"],
-            has_refresh_token: is_binary(token_data["refresh_token"])
+      case Req.post(@google_token_url, form: form) do
+        {:ok, %Req.Response{status: 200, body: %{} = body}} ->
+          Logger.info("OAuth code exchange succeeded",
+            has_refresh_token: is_binary(body["refresh_token"])
           )
 
-          {:ok, token_data}
+          {:ok, body}
 
         {:ok, %Req.Response{status: status, body: body}} ->
-          Logger.error("OAuth token exchange failed",
+          Logger.warning("OAuth code exchange failed",
             status: status,
-            error: body["error"],
-            description: body["error_description"]
+            error: inspect(body["error"]),
+            description: inspect(body["error_description"])
           )
 
-          {:error, {:token_exchange_failed, status, body["error"]}}
+          {:error, {:token_exchange_failed, status, body}}
 
-        {:error, exception} ->
-          Logger.error("OAuth token exchange HTTP error",
-            error: inspect(exception)
-          )
-
-          {:error, {:http_error, exception}}
+        {:error, reason} ->
+          Logger.error("OAuth code exchange HTTP error", reason: inspect(reason))
+          {:error, {:token_exchange_http_error, reason}}
       end
     end
   end
 
-  # --- Token Refresh ---
-
   @doc """
-  Refresh an expired access token using a stored refresh token.
+  Refresh an access token using a stored refresh_token via Goth stateless mode.
 
-  Uses Goth.Token.fetch/1 statelessly — no per-user GenServer process needed.
+  Uses `Goth.Token.fetch/1` with a `{:refresh_token, ...}` source, which
+  performs a single HTTP call to Google's token endpoint and returns a fresh
+  access token. No running Goth process is needed.
 
   ## Parameters
 
-    * `refresh_token` - The decrypted refresh token string
+    - `refresh_token` — the user's stored refresh token (decrypted)
 
   ## Returns
 
-    `{:ok, %{access_token: String.t(), expires_at: DateTime.t()}}` on success.
-    `{:error, :invalid_grant}` if the refresh token has been revoked.
-    `{:error, term()}` on other failures.
+    `{:ok, access_token}` with a fresh access token string.
+    `{:error, :refresh_failed}` if the refresh token is invalid or revoked.
+    `{:error, term()}` for other failures.
   """
-  @spec refresh_token(String.t()) ::
-          {:ok, %{access_token: String.t(), expires_at: DateTime.t()}} | {:error, term()}
-  def refresh_token(refresh_token) do
+  @spec refresh_access_token(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def refresh_access_token(refresh_token) do
     with {:ok, client_id} <- fetch_client_id(),
          {:ok, client_secret} <- fetch_client_secret() do
       credentials = %{
@@ -194,164 +195,202 @@ defmodule Assistant.Auth.OAuth do
       }
 
       case Goth.Token.fetch(source: {:refresh_token, credentials}) do
-        {:ok, %{token: access_token, expires: expires_unix}} ->
-          expires_at = DateTime.from_unix!(expires_unix)
-
-          Logger.info("OAuth token refresh succeeded",
-            expires_at: DateTime.to_iso8601(expires_at)
-          )
-
-          {:ok, %{access_token: access_token, expires_at: expires_at}}
-
-        {:error, %{body: body}} when is_map(body) ->
-          handle_refresh_error(body)
+        {:ok, %{token: access_token}} ->
+          {:ok, access_token}
 
         {:error, reason} ->
-          Logger.error("OAuth token refresh failed", error: inspect(reason))
-          {:error, {:refresh_failed, reason}}
+          Logger.warning("OAuth token refresh failed",
+            reason: inspect(reason)
+          )
+
+          {:error, :refresh_failed}
       end
     end
   end
 
-  # --- State Parameter (HMAC-signed CSRF protection) ---
+  @doc """
+  Revoke an OAuth token at Google's revocation endpoint.
+
+  Should be called before deleting the token from the database so that the
+  grant is invalidated server-side and cannot be reused. Revocation failure
+  is non-fatal — the caller should log a warning and continue with local
+  deletion.
+
+  ## Parameters
+
+    - `access_token` — the access token (or refresh token) to revoke
+
+  ## Returns
+
+    `:ok` on successful revocation.
+    `{:error, reason}` if the HTTP call fails or Google returns an error.
+  """
+  @spec revoke_token(String.t()) :: :ok | {:error, term()}
+  def revoke_token(access_token) when is_binary(access_token) and access_token != "" do
+    url = "https://oauth2.googleapis.com/revoke"
+
+    case Req.post(url, form: %{"token" => access_token}) do
+      {:ok, %Req.Response{status: 200}} ->
+        Logger.info("Google OAuth token revoked successfully")
+        :ok
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.warning("Google OAuth token revocation returned non-200",
+          status: status,
+          body: inspect(body)
+        )
+
+        {:error, {:revocation_failed, status}}
+
+      {:error, reason} ->
+        Logger.warning("Google OAuth token revocation HTTP error",
+          reason: inspect(reason)
+        )
+
+        {:error, {:revocation_http_error, reason}}
+    end
+  end
+
+  def revoke_token(_), do: {:error, :no_token}
 
   @doc """
   Verify and decode an HMAC-signed state parameter from the OAuth callback.
 
   ## Parameters
 
-    * `state` - The state parameter from Google's callback
+    - `state` — the state parameter received in the callback
 
   ## Returns
 
-    `{:ok, %{user_id: String.t(), channel: String.t(), token_hash: String.t()}}` or
-    `{:error, :invalid_state}` if the HMAC check fails or the state has expired.
+    `{:ok, %{user_id: ..., channel: ..., token_hash: ...}}` if valid and not expired.
+    `{:error, :invalid_state}` if the HMAC doesn't match or the state is expired.
   """
-  @spec verify_state(String.t()) ::
-          {:ok, %{user_id: String.t(), channel: String.t(), token_hash: String.t()}}
-          | {:error, :invalid_state}
+  @spec verify_state(String.t()) :: {:ok, map()} | {:error, :invalid_state}
   def verify_state(state) do
     case Base.url_decode64(state, padding: false) do
       {:ok, decoded} ->
-        parse_and_verify_state(decoded)
+        case String.split(decoded, "|") do
+          [user_id, channel, token_hash, timestamp_str, signature] ->
+            payload = "#{user_id}|#{channel}|#{token_hash}|#{timestamp_str}"
+            expected_sig = compute_hmac(payload)
+
+            with true <- Plug.Crypto.secure_compare(signature, expected_sig),
+                 {timestamp, ""} <- Integer.parse(timestamp_str),
+                 true <- System.system_time(:second) - timestamp <= @state_hmac_ttl_seconds do
+              {:ok, %{user_id: user_id, channel: channel, token_hash: token_hash}}
+            else
+              _ -> {:error, :invalid_state}
+            end
+
+          _ ->
+            {:error, :invalid_state}
+        end
 
       :error ->
         {:error, :invalid_state}
     end
   end
 
-  # --- PKCE Helpers ---
-
   @doc """
-  Generate a cryptographically random PKCE code verifier (32 bytes, base64url).
+  Decode the ID token from a Google OAuth response to extract user claims.
+
+  Performs base64 decoding of the JWT payload only (no signature verification,
+  as we trust the token since it came directly from Google's token endpoint
+  over HTTPS in the same request).
+
+  ## Returns
+
+    `{:ok, claims_map}` with at minimum `"email"` and `"sub"` keys.
+    `{:error, :invalid_id_token}` if the token cannot be decoded.
   """
-  @spec generate_code_verifier() :: String.t()
-  def generate_code_verifier do
-    :crypto.strong_rand_bytes(32)
-    |> Base.url_encode64(padding: false)
-  end
+  @spec decode_id_token(String.t()) :: {:ok, map()} | {:error, :invalid_id_token}
+  def decode_id_token(id_token) do
+    case String.split(id_token, ".") do
+      [_header, payload, _signature] ->
+        with {:ok, json} <- Base.url_decode64(payload, padding: false),
+             {:ok, claims} <- Jason.decode(json) do
+          {:ok, claims}
+        else
+          _ -> {:error, :invalid_id_token}
+        end
 
-  @doc """
-  Compute the PKCE S256 code challenge from a code verifier.
-  """
-  @spec generate_code_challenge(String.t()) :: String.t()
-  def generate_code_challenge(verifier) do
-    :crypto.hash(:sha256, verifier)
-    |> Base.url_encode64(padding: false)
-  end
-
-  # --- Private Helpers ---
-
-  # State is a JSON envelope: {"p": <payload_json>, "h": <hmac_of_payload>}
-  # Payload contains: user_id, channel, token_hash, timestamp.
-  # HMAC covers the canonical JSON payload string.
-  # State TTL: 15 minutes (slightly longer than magic link TTL to avoid race)
-  @state_ttl_seconds 15 * 60
-
-  defp sign_state(user_id, channel, token_hash) do
-    timestamp = System.system_time(:second)
-
-    payload_map = %{
-      "uid" => user_id,
-      "ch" => channel,
-      "th" => token_hash,
-      "ts" => timestamp
-    }
-
-    payload_json = Jason.encode!(payload_map)
-    hmac = compute_hmac(payload_json)
-
-    Jason.encode!(%{"p" => payload_json, "h" => hmac})
-    |> Base.url_encode64(padding: false)
-  end
-
-  defp parse_and_verify_state(decoded) do
-    with {:ok, envelope} <- Jason.decode(decoded),
-         payload_json when is_binary(payload_json) <- envelope["p"],
-         received_hmac when is_binary(received_hmac) <- envelope["h"],
-         expected_hmac <- compute_hmac(payload_json),
-         true <- Plug.Crypto.secure_compare(received_hmac, expected_hmac),
-         {:ok, payload} <- Jason.decode(payload_json),
-         %{"uid" => user_id, "ch" => channel, "th" => token_hash, "ts" => timestamp} <- payload,
-         true <- is_integer(timestamp),
-         true <- System.system_time(:second) - timestamp < @state_ttl_seconds do
-      {:ok, %{user_id: user_id, channel: channel, token_hash: token_hash}}
-    else
-      _ -> {:error, :invalid_state}
+      _ ->
+        {:error, :invalid_id_token}
     end
   end
 
-  defp compute_hmac(payload) do
-    secret = fetch_secret_key_base!()
+  @doc """
+  Returns the per-user OAuth scopes requested during authorization.
+  """
+  @spec user_scopes() :: [String.t()]
+  def user_scopes, do: @user_scopes
 
-    :crypto.mac(:hmac, :sha256, secret, payload)
+  @doc """
+  Returns the OAuth callback URL for this application.
+  """
+  @spec callback_url() :: String.t()
+  def callback_url do
+    AssistantWeb.Endpoint.url() <> "/auth/google/callback"
+  end
+
+  # --- PKCE ---
+
+  @doc false
+  @spec generate_pkce() :: pkce()
+  def generate_pkce do
+    verifier =
+      :crypto.strong_rand_bytes(@code_verifier_length)
+      |> Base.url_encode64(padding: false)
+
+    challenge =
+      :crypto.hash(:sha256, verifier)
+      |> Base.url_encode64(padding: false)
+
+    %{code_verifier: verifier, code_challenge: challenge}
+  end
+
+  # --- State HMAC ---
+
+  defp sign_state(user_id, channel, token_hash) do
+    timestamp = System.system_time(:second) |> Integer.to_string()
+    payload = "#{user_id}|#{channel}|#{token_hash}|#{timestamp}"
+    signature = compute_hmac(payload)
+    raw = "#{payload}|#{signature}"
+    Base.url_encode64(raw, padding: false)
+  end
+
+  defp compute_hmac(payload) do
+    key = state_signing_key()
+
+    :crypto.mac(:hmac, :sha256, key, payload)
     |> Base.url_encode64(padding: false)
   end
 
-  defp handle_refresh_error(%{"error" => "invalid_grant"} = body) do
-    Logger.warning("OAuth refresh token revoked or expired",
-      description: body["error_description"]
-    )
-
-    {:error, :invalid_grant}
+  defp state_signing_key do
+    # Use the Phoenix secret_key_base as the HMAC key.
+    # This is always available and is already a strong secret.
+    AssistantWeb.Endpoint.config(:secret_key_base)
   end
 
-  defp handle_refresh_error(body) do
-    Logger.error("OAuth token refresh failed",
-      error: body["error"],
-      description: body["error_description"]
-    )
-
-    {:error, {:refresh_failed, body["error"]}}
-  end
+  # --- Client Credentials ---
 
   defp fetch_client_id do
     case Application.get_env(:assistant, :google_oauth_client_id) do
-      nil -> {:error, :missing_google_oauth_client_id}
-      id -> {:ok, id}
+      client_id when is_binary(client_id) and client_id != "" ->
+        {:ok, client_id}
+
+      _ ->
+        {:error, :missing_google_oauth_client_id}
     end
   end
 
   defp fetch_client_secret do
     case Application.get_env(:assistant, :google_oauth_client_secret) do
-      nil -> {:error, :missing_google_oauth_client_secret}
-      secret -> {:ok, secret}
+      client_secret when is_binary(client_secret) and client_secret != "" ->
+        {:ok, client_secret}
+
+      _ ->
+        {:error, :missing_google_oauth_client_secret}
     end
-  end
-
-  defp build_redirect_uri do
-    case Application.get_env(:assistant, AssistantWeb.Endpoint)[:url][:host] do
-      nil -> {:error, :missing_phx_host}
-      host -> {:ok, "https://#{host}/auth/google/callback"}
-    end
-  end
-
-  defp google_token_url do
-    Application.get_env(:assistant, :google_token_url, @default_google_token_url)
-  end
-
-  defp fetch_secret_key_base! do
-    Application.get_env(:assistant, AssistantWeb.Endpoint)[:secret_key_base] ||
-      raise "SECRET_KEY_BASE not configured"
   end
 end

@@ -79,9 +79,10 @@ defmodule Assistant.Application do
   end
 
   # Returns Goth child spec if Google service account credentials are configured.
+  # This allows the app to start in dev environments without Google credentials.
+  #
   # Goth is now used ONLY for the Chat bot (chat.bot scope).
-  # Per-user OAuth2 tokens are refreshed statelessly via Goth.Token.fetch/1
-  # and do NOT require a supervised Goth process.
+  # Per-user OAuth2 tokens are managed by Auth.TokenStore and refreshed via Auth.OAuth.
   defp maybe_goth do
     case Application.get_env(:assistant, :google_credentials) do
       nil ->

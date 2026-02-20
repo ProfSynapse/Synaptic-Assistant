@@ -1,16 +1,12 @@
 # lib/assistant/integrations/google/calendar.ex — Google Calendar API wrapper.
 #
 # Thin wrapper around GoogleApi.Calendar.V3 that normalizes response structs
-# into plain maps. All public API functions accept an `access_token` as their
-# first parameter — the caller (orchestrator/context builder) is responsible
-# for resolving the token. Used by calendar domain skills (calendar.list,
-# calendar.get, calendar.create, calendar.update) and any component needing
-# Calendar access.
+# into plain maps. All public functions accept an `access_token` as first
+# parameter (per-user OAuth or service-account) to create a Tesla connection.
 #
 # Related files:
 #   - lib/assistant/integrations/google/auth.ex (token provider)
 #   - lib/assistant/skills/calendar/list.ex (consumer — calendar.list skill)
-#   - lib/assistant/skills/calendar/get.ex (consumer — calendar.get skill)
 #   - lib/assistant/skills/calendar/create.ex (consumer — calendar.create skill)
 #   - lib/assistant/skills/calendar/update.ex (consumer — calendar.update skill)
 
@@ -19,9 +15,8 @@ defmodule Assistant.Integrations.Google.Calendar do
   Google Calendar API client wrapping `GoogleApi.Calendar.V3`.
 
   Provides high-level functions for listing, getting, creating, and updating
-  events in Google Calendar. All API-calling public functions accept an
-  `access_token` as their first parameter — the caller is responsible for
-  resolving the token (via `Auth.user_token/1` or `Auth.service_token/0`).
+  events in Google Calendar. All public functions that make API calls accept
+  an `access_token` string as the first parameter.
 
   All public functions return normalized plain maps rather than GoogleApi
   structs, making them easier to work with in skill handlers and tests.
@@ -29,20 +24,20 @@ defmodule Assistant.Integrations.Google.Calendar do
   ## Usage
 
       # List upcoming events
-      {:ok, events} = Calendar.list_events(access_token, "primary", time_min: "2026-02-18T00:00:00Z")
+      {:ok, events} = Calendar.list_events(token, "primary", time_min: "2026-02-18T00:00:00Z")
 
       # Get a single event
-      {:ok, event} = Calendar.get_event(access_token, "event_id_123")
+      {:ok, event} = Calendar.get_event(token, "event_id_123")
 
       # Create an event
-      {:ok, event} = Calendar.create_event(access_token, %{
+      {:ok, event} = Calendar.create_event(token, %{
         summary: "Team standup",
         start: "2026-02-19T09:00:00Z",
         end: "2026-02-19T09:30:00Z"
       })
 
       # Update an event
-      {:ok, event} = Calendar.update_event(access_token, "event_id_123", %{summary: "Updated title"})
+      {:ok, event} = Calendar.update_event(token, "event_id_123", %{summary: "Updated title"})
   """
 
   require Logger
@@ -72,7 +67,7 @@ defmodule Assistant.Integrations.Google.Calendar do
   """
   @spec list_events(String.t(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def list_events(access_token, calendar_id \\ "primary", opts \\ []) do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
 
     api_opts =
       [
@@ -110,7 +105,7 @@ defmodule Assistant.Integrations.Google.Calendar do
   """
   @spec get_event(String.t(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def get_event(access_token, event_id, calendar_id \\ "primary") do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
 
     case Events.calendar_events_get(conn, calendar_id, event_id) do
       {:ok, %Model.Event{} = event} ->
@@ -144,7 +139,7 @@ defmodule Assistant.Integrations.Google.Calendar do
   """
   @spec create_event(String.t(), map(), String.t()) :: {:ok, map()} | {:error, term()}
   def create_event(access_token, event_params, calendar_id \\ "primary") do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
     event_body = build_event_struct(event_params)
 
     case Events.calendar_events_insert(conn, calendar_id, body: event_body) do
@@ -177,7 +172,7 @@ defmodule Assistant.Integrations.Google.Calendar do
   """
   @spec update_event(String.t(), String.t(), map(), String.t()) :: {:ok, map()} | {:error, term()}
   def update_event(access_token, event_id, event_params, calendar_id \\ "primary") do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
 
     with {:ok, existing} <- fetch_raw_event(conn, calendar_id, event_id) do
       updated = merge_event_updates(existing, event_params)
@@ -195,10 +190,6 @@ defmodule Assistant.Integrations.Google.Calendar do
   end
 
   # -- Private --
-
-  defp get_connection(access_token) do
-    Connection.new(access_token)
-  end
 
   defp fetch_raw_event(conn, calendar_id, event_id) do
     case Events.calendar_events_get(conn, calendar_id, event_id) do

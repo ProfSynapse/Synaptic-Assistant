@@ -28,14 +28,10 @@ defmodule Assistant.SkillPermissions do
     |> Enum.sort_by(&{&1.domain_label, &1.skill_label})
   end
 
-  @spec enabled?(term()) :: boolean()
-  def enabled?(nil), do: false
-
+  @spec enabled?(String.t()) :: boolean()
   def enabled?(skill_name) when is_binary(skill_name) do
     Map.get(read_overrides(), skill_name, true)
   end
-
-  def enabled?(_other), do: false
 
   @spec set_enabled(String.t(), boolean()) :: :ok | {:error, term()}
   def set_enabled(skill_name, enabled) when is_binary(skill_name) and is_boolean(enabled) do

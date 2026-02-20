@@ -17,7 +17,7 @@ defmodule Assistant.Skills.Calendar.UpdateTest do
   defmodule MockCalendar do
     @moduledoc false
 
-    def update_event(event_id, params, calendar_id) do
+    def update_event(_token, event_id, params, calendar_id) do
       send(self(), {:cal_update, event_id, params, calendar_id})
 
       case Process.get(:mock_cal_update_response) do
@@ -43,7 +43,8 @@ defmodule Assistant.Skills.Calendar.UpdateTest do
       conversation_id: "conv-1",
       execution_id: "exec-1",
       user_id: "user-1",
-      integrations: %{calendar: MockCalendar}
+      integrations: %{calendar: MockCalendar},
+      metadata: %{google_token: "test-access-token"}
     }
 
     Map.merge(base, overrides)

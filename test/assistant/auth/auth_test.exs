@@ -47,9 +47,7 @@ defmodule Assistant.Integrations.Google.AuthTest do
 
     test "returns {:ok, access_token} when token is valid (not expired)", %{user: user} do
       {:ok, _} =
-        TokenStore.upsert_token(%{
-          user_id: user.id,
-          provider: "google",
+        TokenStore.upsert_google_token(user.id, %{
           refresh_token: "refresh-tok",
           access_token: "valid-access-tok",
           token_expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)
@@ -64,9 +62,7 @@ defmodule Assistant.Integrations.Google.AuthTest do
       # Insert a token with nil access_token (triggers refresh path)
       # but refresh will fail because Goth isn't configured for real calls
       {:ok, _} =
-        TokenStore.upsert_token(%{
-          user_id: user.id,
-          provider: "google",
+        TokenStore.upsert_google_token(user.id, %{
           refresh_token: "invalid-refresh-tok",
           access_token: nil,
           token_expires_at: nil

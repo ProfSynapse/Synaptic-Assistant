@@ -1,210 +1,195 @@
-# test/assistant/auth/oauth_test.exs — OAuth module pure function tests.
+# test/assistant/auth/oauth_test.exs
 #
-# Risk Tier: CRITICAL — PKCE and HMAC state verification are core security controls.
-# Tests pure functions only: PKCE generation, state signing/verification, scopes.
-# Token exchange and refresh are HTTP-bound and tested via controller integration.
+# Smoke tests for the Auth.OAuth module. Tests PKCE generation, state
+# signing/verification, and authorize_url building. Does NOT test actual
+# HTTP calls (exchange_code, refresh_access_token) — those need Bypass
+# and belong in the full TEST phase.
+#
+# Related files:
+#   - lib/assistant/auth/oauth.ex (module under test)
 
 defmodule Assistant.Auth.OAuthTest do
   use ExUnit.Case, async: true
 
   alias Assistant.Auth.OAuth
 
-  setup do
-    # Set required config for OAuth module
-    Application.put_env(:assistant, :google_oauth_client_id, "test-client-id")
-    Application.put_env(:assistant, :google_oauth_client_secret, "test-client-secret")
+  # ---------------------------------------------------------------
+  # PKCE generation
+  # ---------------------------------------------------------------
 
-    current = Application.get_env(:assistant, AssistantWeb.Endpoint, [])
+  describe "generate_pkce/0" do
+    test "returns code_verifier and code_challenge" do
+      pkce = OAuth.generate_pkce()
 
-    merged =
-      current
-      |> Keyword.put(:url, host: "test.example.com")
-      |> Keyword.put(
-        :secret_key_base,
-        "27fsLlwxFAdrfzZvsTKefyNOFNT2ucWuIv/xYSS2myafQ6FEGytY1Gew0fD2BWU2"
-      )
-
-    Application.put_env(:assistant, AssistantWeb.Endpoint, merged)
-
-    on_exit(fn ->
-      Application.put_env(:assistant, AssistantWeb.Endpoint, current)
-      Application.delete_env(:assistant, :google_oauth_client_id)
-      Application.delete_env(:assistant, :google_oauth_client_secret)
-    end)
-
-    :ok
-  end
-
-  # -------------------------------------------------------------------
-  # PKCE helpers
-  # -------------------------------------------------------------------
-
-  describe "generate_code_verifier/0" do
-    test "returns a base64url-encoded string" do
-      verifier = OAuth.generate_code_verifier()
-      assert is_binary(verifier)
-      assert byte_size(verifier) > 0
-      # Base64url should decode without error
-      assert {:ok, _} = Base.url_decode64(verifier, padding: false)
+      assert is_binary(pkce.code_verifier)
+      assert is_binary(pkce.code_challenge)
+      assert byte_size(pkce.code_verifier) > 40
+      assert byte_size(pkce.code_challenge) > 20
     end
 
-    test "generates unique values each call" do
-      v1 = OAuth.generate_code_verifier()
-      v2 = OAuth.generate_code_verifier()
-      refute v1 == v2
+    test "code_challenge is SHA-256 of code_verifier (S256)" do
+      pkce = OAuth.generate_pkce()
+
+      expected_challenge =
+        :crypto.hash(:sha256, pkce.code_verifier)
+        |> Base.url_encode64(padding: false)
+
+      assert pkce.code_challenge == expected_challenge
+    end
+
+    test "generates unique values on each call" do
+      pkce1 = OAuth.generate_pkce()
+      pkce2 = OAuth.generate_pkce()
+
+      assert pkce1.code_verifier != pkce2.code_verifier
+      assert pkce1.code_challenge != pkce2.code_challenge
     end
   end
 
-  describe "generate_code_challenge/1" do
-    test "produces SHA-256 hash of verifier, base64url-encoded" do
-      verifier = "test-verifier-value"
-      challenge = OAuth.generate_code_challenge(verifier)
+  # ---------------------------------------------------------------
+  # State signing and verification
+  # ---------------------------------------------------------------
 
-      expected =
-        :crypto.hash(:sha256, verifier) |> Base.url_encode64(padding: false)
+  describe "authorize_url/3 and verify_state/1 roundtrip" do
+    setup do
+      # These tests need client_id configured to build the URL
+      Application.put_env(:assistant, :google_oauth_client_id, "test-client-id")
+      Application.put_env(:assistant, :google_oauth_client_secret, "test-client-secret")
 
-      assert challenge == expected
+      on_exit(fn ->
+        Application.delete_env(:assistant, :google_oauth_client_id)
+        Application.delete_env(:assistant, :google_oauth_client_secret)
+      end)
     end
 
-    test "different verifiers produce different challenges" do
-      c1 = OAuth.generate_code_challenge("verifier-1")
-      c2 = OAuth.generate_code_challenge("verifier-2")
-      refute c1 == c2
-    end
-  end
-
-  # -------------------------------------------------------------------
-  # build_authorization_url/2
-  # -------------------------------------------------------------------
-
-  describe "build_authorization_url/2" do
-    test "returns a valid Google OAuth URL with required params" do
-      user_id = "user-uuid-123"
-
-      assert {:ok, %{url: url, code_verifier: verifier}} =
-               OAuth.build_authorization_url(user_id,
-                 channel: "google_chat",
-                 token_hash: "abc123"
-               )
+    test "authorize_url returns a URL with expected parameters" do
+      {:ok, url, pkce} = OAuth.authorize_url("user-123", "google_chat", "token-hash-abc")
 
       assert is_binary(url)
-      assert is_binary(verifier)
-      assert url =~ "https://accounts.google.com/o/oauth2/v2/auth?"
+      assert url =~ "accounts.google.com"
       assert url =~ "client_id=test-client-id"
-      assert url =~ "redirect_uri="
       assert url =~ "response_type=code"
       assert url =~ "access_type=offline"
       assert url =~ "prompt=consent"
       assert url =~ "code_challenge_method=S256"
-      assert url =~ "code_challenge="
+      assert url =~ URI.encode_www_form(pkce.code_challenge)
       assert url =~ "state="
+      # Scopes should include drive, gmail, calendar but NOT chat.bot
+      assert url =~ "drive"
+      assert url =~ "gmail"
+      assert url =~ "calendar"
+      refute url =~ "chat.bot"
     end
 
-    test "code_challenge matches SHA-256 of code_verifier" do
-      {:ok, %{url: url, code_verifier: verifier}} =
-        OAuth.build_authorization_url("user-1", channel: "test")
+    test "authorize_url returns PKCE data" do
+      {:ok, _url, pkce} = OAuth.authorize_url("user-123", "google_chat", "token-hash-abc")
 
-      %{"code_challenge" => challenge} =
-        url |> URI.parse() |> Map.get(:query) |> URI.decode_query()
-
-      expected = OAuth.generate_code_challenge(verifier)
-      assert challenge == expected
+      assert is_binary(pkce.code_verifier)
+      assert is_binary(pkce.code_challenge)
     end
 
-    test "accepts a provided code_verifier" do
-      my_verifier = "my-custom-verifier"
+    test "state parameter roundtrips through verify_state" do
+      {:ok, url, _pkce} = OAuth.authorize_url("user-123", "google_chat", "token-hash-abc")
 
-      {:ok, %{code_verifier: returned_verifier}} =
-        OAuth.build_authorization_url("user-1", code_verifier: my_verifier)
+      # Extract state from URL
+      uri = URI.parse(url)
+      query = URI.decode_query(uri.query)
+      state = query["state"]
 
-      assert returned_verifier == my_verifier
-    end
-
-    test "returns error when client_id not configured" do
-      Application.delete_env(:assistant, :google_oauth_client_id)
-
-      assert {:error, :missing_google_oauth_client_id} =
-               OAuth.build_authorization_url("user-1")
-    end
-
-    test "includes all user scopes" do
-      {:ok, %{url: url}} = OAuth.build_authorization_url("user-1")
-
-      for scope <- OAuth.user_scopes() do
-        assert url =~ URI.encode_www_form(scope) || url =~ scope
-      end
+      assert {:ok, decoded} = OAuth.verify_state(state)
+      assert decoded.user_id == "user-123"
+      assert decoded.channel == "google_chat"
+      assert decoded.token_hash == "token-hash-abc"
     end
   end
 
-  # -------------------------------------------------------------------
-  # verify_state/1
-  # -------------------------------------------------------------------
-
-  describe "verify_state/1" do
-    test "verifies a freshly signed state" do
-      {:ok, %{url: url}} =
-        OAuth.build_authorization_url("user-abc",
-          channel: "google_chat",
-          token_hash: "hash123"
-        )
-
-      %{"state" => state} =
-        url |> URI.parse() |> Map.get(:query) |> URI.decode_query()
-
-      assert {:ok, %{user_id: "user-abc", channel: "google_chat", token_hash: "hash123"}} =
-               OAuth.verify_state(state)
-    end
-
+  describe "verify_state/1 rejection cases" do
     test "rejects tampered state" do
-      {:ok, %{url: url}} = OAuth.build_authorization_url("user-1")
-
-      %{"state" => state} =
-        url |> URI.parse() |> Map.get(:query) |> URI.decode_query()
-
-      # Tamper with the state by flipping a character
-      tampered =
-        case Base.url_decode64(state, padding: false) do
-          {:ok, decoded} ->
-            # Swap first char
-            <<_first, rest::binary>> = decoded
-            Base.url_encode64(<<"X", rest::binary>>, padding: false)
-
-          :error ->
-            "completely-invalid"
-        end
-
-      assert {:error, :invalid_state} = OAuth.verify_state(tampered)
+      assert {:error, :invalid_state} = OAuth.verify_state("dGFtcGVyZWQ")
     end
 
-    test "rejects non-base64 garbage" do
-      assert {:error, :invalid_state} = OAuth.verify_state("!!!not-base64!!!")
-    end
-
-    test "rejects empty state" do
+    test "rejects empty string" do
       assert {:error, :invalid_state} = OAuth.verify_state("")
     end
 
-    test "rejects state with wrong number of pipe-delimited fields" do
-      # Valid base64 but wrong internal format
-      bad = Base.url_encode64("only|two", padding: false)
-      assert {:error, :invalid_state} = OAuth.verify_state(bad)
+    test "rejects non-base64 garbage" do
+      assert {:error, :invalid_state} = OAuth.verify_state("not-valid-state!!!")
+    end
+
+    test "rejects expired state (beyond TTL)" do
+      # Build a validly-signed state with a timestamp 601 seconds in the past
+      # (TTL is 600s), so the HMAC is correct but the time check fails.
+      expired_timestamp =
+        (System.system_time(:second) - 601) |> Integer.to_string()
+
+      payload = "user-exp|google_chat|hash-exp|#{expired_timestamp}"
+
+      key = AssistantWeb.Endpoint.config(:secret_key_base)
+
+      signature =
+        :crypto.mac(:hmac, :sha256, key, payload)
+        |> Base.url_encode64(padding: false)
+
+      raw = "#{payload}|#{signature}"
+      state = Base.url_encode64(raw, padding: false)
+
+      assert {:error, :invalid_state} = OAuth.verify_state(state)
     end
   end
 
-  # -------------------------------------------------------------------
-  # user_scopes/0
-  # -------------------------------------------------------------------
+  # ---------------------------------------------------------------
+  # Missing credentials
+  # ---------------------------------------------------------------
+
+  describe "authorize_url/3 without credentials" do
+    test "returns error when client_id is not configured" do
+      Application.delete_env(:assistant, :google_oauth_client_id)
+
+      assert {:error, :missing_google_oauth_client_id} =
+               OAuth.authorize_url("user-123", "google_chat", "hash")
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # User scopes
+  # ---------------------------------------------------------------
 
   describe "user_scopes/0" do
-    test "includes required scopes and excludes chat.bot" do
+    test "includes per-user scopes but not chat.bot" do
       scopes = OAuth.user_scopes()
 
       assert "openid" in scopes
       assert "email" in scopes
+      assert "https://www.googleapis.com/auth/drive.readonly" in scopes
       assert "https://www.googleapis.com/auth/gmail.modify" in scopes
       assert "https://www.googleapis.com/auth/calendar" in scopes
-      assert "https://www.googleapis.com/auth/drive.readonly" in scopes
       refute "https://www.googleapis.com/auth/chat.bot" in scopes
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # decode_id_token
+  # ---------------------------------------------------------------
+
+  describe "decode_id_token/1" do
+    test "decodes a valid JWT payload" do
+      claims = %{"sub" => "12345", "email" => "user@example.com"}
+      payload = Base.url_encode64(Jason.encode!(claims), padding: false)
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256"}), padding: false)
+      token = "#{header}.#{payload}.fake-signature"
+
+      assert {:ok, decoded} = OAuth.decode_id_token(token)
+      assert decoded["sub"] == "12345"
+      assert decoded["email"] == "user@example.com"
+    end
+
+    test "rejects malformed token" do
+      assert {:error, :invalid_id_token} = OAuth.decode_id_token("not.a.valid.jwt")
+      assert {:error, :invalid_id_token} = OAuth.decode_id_token("single-segment")
+    end
+
+    test "rejects token with invalid base64 payload" do
+      assert {:error, :invalid_id_token} = OAuth.decode_id_token("aGVhZGVy.!!!invalid!!!.c2ln")
     end
   end
 end

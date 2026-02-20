@@ -22,32 +22,36 @@ defmodule Assistant.Integrations.Google.GmailTest do
   # injection rejection without mocking Goth/Auth at all — the
   # validation happens first in the `with` chain.
 
-  describe "send_message/4 header injection prevention" do
+  # A dummy token used for header-injection tests. The validation runs before
+  # Connection.new is ever called, so no real token is needed.
+  @dummy_token "test-access-token"
+
+  describe "send_message/5 header injection prevention" do
     test "rejects \\r\\n in to field" do
       result =
-        Gmail.send_message("evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
+        Gmail.send_message(@dummy_token, "evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
 
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\n in to field" do
-      result = Gmail.send_message("evil@example.com\nBcc: victim@example.com", "Subject", "Body")
+      result = Gmail.send_message(@dummy_token, "evil@example.com\nBcc: victim@example.com", "Subject", "Body")
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\r\\n in subject field" do
-      result = Gmail.send_message("to@example.com", "Hello\r\nBcc: victim@example.com", "Body")
+      result = Gmail.send_message(@dummy_token, "to@example.com", "Hello\r\nBcc: victim@example.com", "Body")
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\n in subject field" do
-      result = Gmail.send_message("to@example.com", "Hello\nBcc: victim@example.com", "Body")
+      result = Gmail.send_message(@dummy_token, "to@example.com", "Hello\nBcc: victim@example.com", "Body")
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\r\\n in cc option" do
       result =
-        Gmail.send_message("to@example.com", "Subject", "Body",
+        Gmail.send_message(@dummy_token, "to@example.com", "Subject", "Body",
           cc: "cc@example.com\r\nBcc: victim"
         )
 
@@ -55,27 +59,27 @@ defmodule Assistant.Integrations.Google.GmailTest do
     end
 
     test "rejects bare \\r in to field" do
-      result = Gmail.send_message("evil@example.com\rBcc: victim@example.com", "Subject", "Body")
+      result = Gmail.send_message(@dummy_token, "evil@example.com\rBcc: victim@example.com", "Subject", "Body")
       assert {:error, :header_injection} = result
     end
   end
 
-  describe "create_draft/4 header injection prevention" do
+  describe "create_draft/5 header injection prevention" do
     test "rejects \\r\\n in to field" do
       result =
-        Gmail.create_draft("evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
+        Gmail.create_draft(@dummy_token, "evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
 
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\r\\n in subject field" do
-      result = Gmail.create_draft("to@example.com", "Hello\r\nBcc: victim@example.com", "Body")
+      result = Gmail.create_draft(@dummy_token, "to@example.com", "Hello\r\nBcc: victim@example.com", "Body")
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\r\\n in cc option" do
       result =
-        Gmail.create_draft("to@example.com", "Subject", "Body",
+        Gmail.create_draft(@dummy_token, "to@example.com", "Subject", "Body",
           cc: "cc@example.com\r\nBcc: victim"
         )
 

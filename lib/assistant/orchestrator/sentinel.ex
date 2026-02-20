@@ -68,8 +68,6 @@ defmodule Assistant.Orchestrator.Sentinel do
   - REQUEST ALIGNMENT: Does this action serve what the user asked for?
   - MISSION SCOPE: Is this action within what the agent was assigned to do?
 
-  Use the "reasoning" field to think step-by-step before committing to a decision. Analyze request alignment and mission scope, then decide.
-
   Key reasoning principles:
   - Read-only actions (search, list, get, read) are low risk — approve if even loosely related
   - Prerequisite steps are valid: searching for info before the main action is normal workflow
@@ -77,6 +75,8 @@ defmodule Assistant.Orchestrator.Sentinel do
   - Irreversible actions (email.send, files.archive) require strong alignment
   - An agent should not perform actions outside its mission domain, even if the user might want it — the orchestrator handles cross-domain coordination
   - If the original request is missing (null), evaluate against mission scope only
+
+  Use the reasoning field to think step-by-step through alignment before committing to a decision.
   """
 
   @sentinel_response_format %{
@@ -90,12 +90,11 @@ defmodule Assistant.Orchestrator.Sentinel do
           reasoning: %{
             type: "string",
             description:
-              "Step-by-step analysis: does this action align with the request and mission?"
+              "Step-by-step analysis: does this action align with the original request and the agent's declared mission?"
           },
           decision: %{
             type: "string",
-            enum: ["approve", "reject"],
-            description: "Whether to approve or reject the proposed action"
+            enum: ["approve", "reject"]
           },
           reason: %{
             type: "string",
@@ -262,14 +261,16 @@ defmodule Assistant.Orchestrator.Sentinel do
       |> String.trim()
 
     case Jason.decode(cleaned) do
-      {:ok, %{"reasoning" => _reasoning, "decision" => "approve", "reason" => reason}} ->
+      {:ok, %{"reasoning" => reasoning, "decision" => "approve", "reason" => reason}} ->
+        Logger.debug("Sentinel reasoning", reasoning: reasoning)
         {:ok, :approved, reason}
 
-      {:ok, %{"reasoning" => _reasoning, "decision" => "reject", "reason" => reason}} ->
+      {:ok, %{"reasoning" => reasoning, "decision" => "reject", "reason" => reason}} ->
+        Logger.debug("Sentinel reasoning", reasoning: reasoning)
         {:ok, :rejected, reason}
 
-      # Backward compat: accept responses without reasoning field
       {:ok, %{"decision" => "approve", "reason" => reason}} ->
+        # Fallback: reasoning field missing (fail-open model compatibility)
         {:ok, :approved, reason}
 
       {:ok, %{"decision" => "reject", "reason" => reason}} ->

@@ -37,7 +37,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
   """
 
   alias Assistant.Analytics
-  alias Assistant.Orchestrator.{Context, LLMHelpers}
+  alias Assistant.Orchestrator.{Context, GoogleContext, LLMHelpers}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
   alias Assistant.Skills.Result, as: SkillResult
 
@@ -240,12 +240,18 @@ defmodule Assistant.Orchestrator.LoopRunner do
   # --- Private Helpers ---
 
   defp build_skill_context(loop_state) do
+    user_id = loop_state[:user_id] || "unknown"
+
     %Assistant.Skills.Context{
       conversation_id: loop_state[:conversation_id] || "unknown",
       execution_id: Ecto.UUID.generate(),
-      user_id: loop_state[:user_id] || "unknown",
+      user_id: user_id,
       channel: loop_state[:channel],
-      integrations: Assistant.Integrations.Registry.default_integrations()
+      integrations: Assistant.Integrations.Registry.default_integrations(),
+      metadata: %{
+        google_token: GoogleContext.resolve_google_token(user_id),
+        enabled_drives: GoogleContext.load_enabled_drives(user_id)
+      }
     }
   end
 

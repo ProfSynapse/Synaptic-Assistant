@@ -46,6 +46,9 @@ config :assistant, :openrouter_api_key, "test-openrouter-key"
 # Use Mox mock for LLM client in test builds (compile_env resolution).
 config :assistant, :llm_client, MockLLMClient
 
+# Avoid runtime crashes in tests that exercise OpenRouter paths without mocks.
+config :assistant, :openrouter_api_key, "test-openrouter-key"
+
 # Reduce log noise in tests
 config :logger, level: :warning
 

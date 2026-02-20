@@ -55,7 +55,7 @@ config :assistant, Oban,
     email: 5,
     calendar: 3,
     scheduled: 5,
-    oauth_replay: 3
+    oauth_replay: 5
   ],
   plugins: [
     {Oban.Plugins.Cron,

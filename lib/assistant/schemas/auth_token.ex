@@ -1,15 +1,12 @@
 defmodule Assistant.Schemas.AuthToken do
   @moduledoc """
-  Auth token schema for magic link tokens.
+  Single-use magic link token for OAuth authorization flows.
 
-  Magic links are single-use, time-limited tokens that initiate OAuth2 flows.
-  The raw token (32 random bytes, base64url-encoded) is sent to the user;
-  only the SHA-256 hash is stored in the database.
-
-  The oban_job_id links to a parked PendingIntentWorker Oban job that
-  replays the user's original command after OAuth completes.
-
-  Lifecycle: generate -> user clicks link -> validate -> consume (set used_at)
+  The raw token is never stored — only its SHA-256 hash (`token_hash`).
+  Tokens are consumed atomically via `UPDATE ... WHERE used_at IS NULL`.
+  The `pending_intent` field is encrypted at rest and stores the original
+  user command to be replayed after successful OAuth.
+  The `code_verifier` is encrypted at rest via Cloak AES-GCM (same as OAuth tokens).
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -17,13 +14,14 @@ defmodule Assistant.Schemas.AuthToken do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @valid_purposes ~w(oauth_google)
+  @purposes ~w(oauth_google)
 
   schema "auth_tokens" do
     field :token_hash, :string
     field :purpose, :string
+    field :code_verifier, Assistant.Encrypted.Binary
     field :oban_job_id, :integer
-    field :code_verifier, :string
+    field :pending_intent, Assistant.Encrypted.Map
     field :expires_at, :utc_datetime_usec
     field :used_at, :utc_datetime_usec
 
@@ -33,26 +31,13 @@ defmodule Assistant.Schemas.AuthToken do
   end
 
   @required_fields [:user_id, :token_hash, :purpose, :expires_at]
-  @optional_fields [:oban_job_id, :code_verifier]
+  @optional_fields [:code_verifier, :oban_job_id, :pending_intent, :used_at]
 
-  def changeset(auth_token, attrs) do
-    auth_token
+  def changeset(token, attrs) do
+    token
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
-    |> validate_inclusion(:purpose, @valid_purposes)
-    |> foreign_key_constraint(:user_id)
+    |> validate_inclusion(:purpose, @purposes)
     |> unique_constraint(:token_hash)
   end
-
-  @doc """
-  Returns true if the token has expired.
-  """
-  def expired?(%__MODULE__{expires_at: expires_at}) do
-    DateTime.compare(DateTime.utc_now(), expires_at) == :gt
-  end
-
-  @doc """
-  Returns true if the token has already been consumed.
-  """
-  def used?(%__MODULE__{used_at: used_at}), do: not is_nil(used_at)
 end

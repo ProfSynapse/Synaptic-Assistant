@@ -28,15 +28,25 @@ defmodule Assistant.Skills.Calendar.Update do
         {:ok, %Result{status: :error, content: "Google Calendar integration not configured."}}
 
       calendar ->
-        token = context.google_token
-        calendar_id = Map.get(flags, "calendar", "primary")
-        event_id = Map.get(flags, "id")
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
 
-        if is_nil(event_id) or event_id == "" do
-          {:ok, %Result{status: :error, content: "Missing required flag: --id"}}
-        else
-          params = build_params(flags)
-          update_event(calendar, token, event_id, params, calendar_id)
+          token ->
+            calendar_id = Map.get(flags, "calendar", "primary")
+            event_id = Map.get(flags, "id")
+
+            if is_nil(event_id) or event_id == "" do
+              {:ok, %Result{status: :error, content: "Missing required flag: --id"}}
+            else
+              params = build_params(flags)
+              update_event(calendar, token, event_id, params, calendar_id)
+            end
         end
     end
   end

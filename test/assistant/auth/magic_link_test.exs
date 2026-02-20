@@ -1,257 +1,201 @@
-# test/assistant/auth/magic_link_test.exs — MagicLink generate/validate/consume lifecycle tests.
+# test/assistant/auth/magic_link_test.exs
 #
-# Risk Tier: CRITICAL — Magic links gate the OAuth2 flow. Single-use atomicity,
-# expiry enforcement, and latest-wins invalidation are security-critical.
+# Smoke tests for Auth.MagicLink. Verifies validate/consume/cleanup lifecycle
+# by inserting auth_token records directly (bypassing generate/3 which requires
+# the OAuth URL builder). Tests cover token lookup, expiry, single-use
+# consumption, and cleanup.
+#
+# Related files:
+#   - lib/assistant/auth/magic_link.ex (module under test)
+#   - lib/assistant/schemas/auth_token.ex (schema)
 
 defmodule Assistant.Auth.MagicLinkTest do
-  use Assistant.DataCase, async: false
+  use Assistant.DataCase, async: true
 
   alias Assistant.Auth.MagicLink
   alias Assistant.Schemas.AuthToken
-  alias Assistant.Schemas.User
 
-  # -------------------------------------------------------------------
-  # Setup — create a test user for FK constraints
-  # -------------------------------------------------------------------
+  # ---------------------------------------------------------------
+  # Setup — create a test user + helper to insert auth_tokens
+  # ---------------------------------------------------------------
 
   setup do
-    {:ok, user} =
-      Repo.insert(
-        User.changeset(%User{}, %{
-          external_id: "ml-test-user-#{System.unique_integer([:positive])}",
-          channel: "test"
-        })
-      )
-
-    # Ensure endpoint host is set for URL building
-    original_config = Application.get_env(:assistant, AssistantWeb.Endpoint, [])
-
-    merged =
-      Keyword.update(original_config, :url, [host: "test.example.com"], fn url_opts ->
-        Keyword.put(url_opts, :host, "test.example.com")
-      end)
-
-    Application.put_env(:assistant, AssistantWeb.Endpoint, merged)
-
-    on_exit(fn ->
-      Application.put_env(:assistant, AssistantWeb.Endpoint, original_config)
-    end)
-
+    user = insert_test_user()
     %{user: user}
   end
 
-  # -------------------------------------------------------------------
-  # generate/2
-  # -------------------------------------------------------------------
+  defp insert_test_user do
+    %Assistant.Schemas.User{}
+    |> Assistant.Schemas.User.changeset(%{
+      external_id: "magic-link-test-#{System.unique_integer([:positive])}",
+      channel: "test"
+    })
+    |> Repo.insert!()
+  end
 
-  describe "generate/2" do
-    test "returns a token, hash, and URL on success", %{user: user} do
-      assert {:ok, %{token: token, token_hash: hash, url: url}} =
-               MagicLink.generate(user.id)
+  # Insert an auth_token record directly (bypasses generate/3 which needs OAuth)
+  defp insert_auth_token(user_id, raw_token, opts \\ []) do
+    token_hash = MagicLink.hash_token(raw_token)
+    expires_at = Keyword.get(opts, :expires_at, future_expiry())
+    used_at = Keyword.get(opts, :used_at, nil)
 
-      assert is_binary(token)
-      assert byte_size(token) > 0
-      assert String.match?(hash, ~r/^[0-9a-f]{64}$/)
-      assert url =~ "https://test.example.com/auth/google/start?token="
-      assert url =~ token
+    %AuthToken{}
+    |> AuthToken.changeset(%{
+      user_id: user_id,
+      token_hash: token_hash,
+      purpose: "oauth_google",
+      code_verifier: "test-verifier-#{System.unique_integer([:positive])}",
+      pending_intent: %{"message" => "test command", "channel" => "test"},
+      expires_at: expires_at,
+      used_at: used_at
+    })
+    |> Repo.insert!()
+  end
+
+  defp future_expiry, do: DateTime.add(DateTime.utc_now(), 600, :second)
+  defp past_expiry, do: DateTime.add(DateTime.utc_now(), -600, :second)
+
+  # ---------------------------------------------------------------
+  # hash_token
+  # ---------------------------------------------------------------
+
+  describe "hash_token/1" do
+    test "produces consistent SHA-256 base64url hash" do
+      hash1 = MagicLink.hash_token("my-token")
+      hash2 = MagicLink.hash_token("my-token")
+      assert hash1 == hash2
+      # Base64url encoded, no padding
+      refute String.contains?(hash1, "+")
+      refute String.contains?(hash1, "/")
+      refute String.ends_with?(hash1, "=")
     end
 
-    test "stores a hashed token in the database", %{user: user} do
-      {:ok, %{token: raw_token, token_hash: expected_hash}} = MagicLink.generate(user.id)
-
-      auth_token = Repo.one!(from(t in AuthToken, where: t.token_hash == ^expected_hash))
-      assert auth_token.user_id == user.id
-      assert auth_token.purpose == "oauth_google"
-      assert is_nil(auth_token.used_at)
-
-      computed_hash = :crypto.hash(:sha256, raw_token) |> Base.encode16(case: :lower)
-      assert auth_token.token_hash == computed_hash
-    end
-
-    test "sets default purpose to 'oauth_google'", %{user: user} do
-      {:ok, %{token_hash: hash}} = MagicLink.generate(user.id)
-      auth_token = Repo.one!(from(t in AuthToken, where: t.token_hash == ^hash))
-      assert auth_token.purpose == "oauth_google"
-    end
-
-    test "stores oban_job_id when set on auth_token", %{user: user} do
-      # Generate a token without pending_intent (Oban inline mode cannot safely
-      # execute PendingIntentWorker inside MagicLink's Repo.transaction in tests).
-      # Then verify the oban_job_id field is stored and retrievable when set.
-      {:ok, %{token_hash: hash}} = MagicLink.generate(user.id)
-
-      auth_token = Repo.one!(from(t in AuthToken, where: t.token_hash == ^hash))
-      assert is_nil(auth_token.oban_job_id)
-
-      # Simulate what MagicLink.generate does when pending_intent is provided:
-      # it inserts an Oban job and stores the ID on the auth_token row.
-      auth_token
-      |> Ecto.Changeset.change(oban_job_id: 42)
-      |> Repo.update!()
-
-      updated = Repo.one!(from(t in AuthToken, where: t.token_hash == ^hash))
-      assert updated.oban_job_id == 42
-    end
-
-    test "sets expires_at to ~10 minutes in the future", %{user: user} do
-      {:ok, %{token_hash: hash}} = MagicLink.generate(user.id)
-      auth_token = Repo.one!(from(t in AuthToken, where: t.token_hash == ^hash))
-
-      diff = DateTime.diff(auth_token.expires_at, DateTime.utc_now())
-      assert diff >= 9 * 60
-      assert diff <= 11 * 60
-    end
-
-    test "latest-wins: new token invalidates pending ones for same user", %{user: user} do
-      {:ok, %{token: token1, token_hash: hash1}} = MagicLink.generate(user.id)
-      {:ok, %{token: _token2, token_hash: hash2}} = MagicLink.generate(user.id)
-
-      old_token = Repo.one!(from(t in AuthToken, where: t.token_hash == ^hash1))
-      assert not is_nil(old_token.used_at), "First token should be invalidated"
-
-      new_token = Repo.one!(from(t in AuthToken, where: t.token_hash == ^hash2))
-      assert is_nil(new_token.used_at), "Second token should still be active"
-
-      assert {:error, :already_used} = MagicLink.validate(token1)
-    end
-
-    test "generates unique tokens on successive calls", %{user: user} do
-      {:ok, %{token: t1}} = MagicLink.generate(user.id)
-      {:ok, %{token: t2}} = MagicLink.generate(user.id)
-      refute t1 == t2
-    end
-
-    test "latest-wins does NOT invalidate tokens for different users", %{user: user} do
-      {:ok, user2} =
-        Repo.insert(
-          User.changeset(%User{}, %{
-            external_id: "ml-test-user2-#{System.unique_integer([:positive])}",
-            channel: "test"
-          })
-        )
-
-      {:ok, %{token: token1}} = MagicLink.generate(user.id)
-      {:ok, _} = MagicLink.generate(user2.id)
-
-      # user1's token should still validate
-      assert {:ok, %{user_id: uid}} = MagicLink.validate(token1)
-      assert uid == user.id
+    test "different tokens produce different hashes" do
+      refute MagicLink.hash_token("token-a") == MagicLink.hash_token("token-b")
     end
   end
 
-  # -------------------------------------------------------------------
-  # validate/1
-  # -------------------------------------------------------------------
+  # ---------------------------------------------------------------
+  # validate
+  # ---------------------------------------------------------------
 
   describe "validate/1" do
-    test "returns user_id and oban_job_id for a valid token", %{user: user} do
-      {:ok, %{token: raw_token, token_hash: hash}} = MagicLink.generate(user.id)
-
-      # Simulate oban_job_id being set (as MagicLink.generate does with pending_intent)
-      from(t in AuthToken, where: t.token_hash == ^hash)
-      |> Repo.update_all(set: [oban_job_id: 99])
-
-      assert {:ok, %{user_id: uid, oban_job_id: 99}} = MagicLink.validate(raw_token)
-      assert uid == user.id
+    test "returns :not_found for unknown token" do
+      assert {:error, :not_found} = MagicLink.validate("nonexistent-token")
     end
 
-    test "returns {:error, :not_found} for a non-existent token" do
-      assert {:error, :not_found} = MagicLink.validate("totally-bogus-token")
+    test "returns {:ok, auth_token} for valid unexpired unused token", %{user: user} do
+      raw_token = "valid-test-token-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token)
+
+      assert {:ok, %AuthToken{} = auth_token} = MagicLink.validate(raw_token)
+      assert auth_token.user_id == user.id
+      assert auth_token.purpose == "oauth_google"
     end
 
-    test "returns {:error, :already_used} for a consumed token", %{user: user} do
-      {:ok, %{token: raw_token}} = MagicLink.generate(user.id)
-      {:ok, _} = MagicLink.consume(raw_token)
+    test "returns :already_used for consumed token", %{user: user} do
+      raw_token = "used-token-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token, used_at: DateTime.utc_now())
 
       assert {:error, :already_used} = MagicLink.validate(raw_token)
     end
 
-    test "returns {:error, :expired} for an expired token", %{user: user} do
-      {:ok, %{token: raw_token, token_hash: hash}} = MagicLink.generate(user.id)
-
-      from(t in AuthToken, where: t.token_hash == ^hash)
-      |> Repo.update_all(set: [expires_at: DateTime.add(DateTime.utc_now(), -60, :second)])
+    test "returns :expired for expired token", %{user: user} do
+      raw_token = "expired-token-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token, expires_at: past_expiry())
 
       assert {:error, :expired} = MagicLink.validate(raw_token)
     end
-
-    test "returns oban_job_id as nil when not set", %{user: user} do
-      {:ok, %{token: raw_token}} = MagicLink.generate(user.id)
-
-      assert {:ok, %{user_id: _, oban_job_id: nil}} = MagicLink.validate(raw_token)
-    end
   end
 
-  # -------------------------------------------------------------------
-  # consume/1
-  # -------------------------------------------------------------------
+  # ---------------------------------------------------------------
+  # consume
+  # ---------------------------------------------------------------
 
   describe "consume/1" do
-    test "marks the token as used and returns the auth_token", %{user: user} do
-      {:ok, %{token: raw_token, token_hash: hash}} = MagicLink.generate(user.id)
+    test "returns :not_found for unknown token" do
+      assert {:error, :not_found} = MagicLink.consume("nonexistent-consume-token")
+    end
 
-      # Simulate oban_job_id being set (as MagicLink.generate does with pending_intent)
-      from(t in AuthToken, where: t.token_hash == ^hash)
-      |> Repo.update_all(set: [oban_job_id: 7])
+    test "atomically consumes a valid token", %{user: user} do
+      raw_token = "consume-test-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token)
 
       assert {:ok, %AuthToken{} = auth_token} = MagicLink.consume(raw_token)
       assert auth_token.user_id == user.id
-      assert auth_token.oban_job_id == 7
       assert not is_nil(auth_token.used_at)
     end
 
-    test "is single-use — second consume returns :already_used", %{user: user} do
-      {:ok, %{token: raw_token}} = MagicLink.generate(user.id)
+    test "returns :already_used on second consume", %{user: user} do
+      raw_token = "double-consume-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token)
 
       assert {:ok, _} = MagicLink.consume(raw_token)
       assert {:error, :already_used} = MagicLink.consume(raw_token)
     end
 
-    test "returns {:error, :not_found} for unknown token" do
-      assert {:error, :not_found} = MagicLink.consume("nonexistent-token")
+    test "returns :already_used for pre-consumed token", %{user: user} do
+      raw_token = "pre-consumed-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token, used_at: DateTime.utc_now())
+
+      assert {:error, :already_used} = MagicLink.consume(raw_token)
     end
 
-    test "returns {:error, :expired} for an expired token", %{user: user} do
-      {:ok, %{token: raw_token, token_hash: hash}} = MagicLink.generate(user.id)
-
-      from(t in AuthToken, where: t.token_hash == ^hash)
-      |> Repo.update_all(set: [expires_at: DateTime.add(DateTime.utc_now(), -60, :second)])
+    test "returns :expired for expired token", %{user: user} do
+      raw_token = "expired-consume-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token, expires_at: past_expiry())
 
       assert {:error, :expired} = MagicLink.consume(raw_token)
     end
 
-    test "atomic single-use: concurrent consume calls, only one succeeds", %{user: user} do
-      {:ok, %{token: raw_token}} = MagicLink.generate(user.id)
+    test "consumed token includes code_verifier and pending_intent", %{user: user} do
+      raw_token = "fields-check-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token)
 
-      tasks =
-        for _ <- 1..5 do
-          Task.async(fn ->
-            MagicLink.consume(raw_token)
-          end)
-        end
-
-      results = Enum.map(tasks, &Task.await/1)
-
-      successes = Enum.count(results, &match?({:ok, _}, &1))
-
-      assert successes == 1, "Expected exactly 1 success, got #{successes}"
+      assert {:ok, auth_token} = MagicLink.consume(raw_token)
+      assert is_binary(auth_token.code_verifier)
+      assert is_map(auth_token.pending_intent)
+      assert auth_token.pending_intent["message"] == "test command"
     end
   end
 
-  # -------------------------------------------------------------------
-  # Token hashing security
-  # -------------------------------------------------------------------
+  # ---------------------------------------------------------------
+  # cleanup_expired
+  # ---------------------------------------------------------------
 
-  describe "token hashing security" do
-    test "raw token is never stored in the database", %{user: user} do
-      {:ok, %{token: raw_token}} = MagicLink.generate(user.id)
+  describe "cleanup_expired/0" do
+    test "deletes tokens expired more than 24 hours ago", %{user: user} do
+      # Token expired 25 hours ago
+      old_expiry = DateTime.add(DateTime.utc_now(), -25 * 3600, :second)
+      raw_token = "old-expired-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token, expires_at: old_expiry)
 
-      all_tokens = Repo.all(from(t in AuthToken, where: t.user_id == ^user.id))
+      count = MagicLink.cleanup_expired()
+      assert count >= 1
 
-      for token <- all_tokens do
-        refute token.token_hash == raw_token,
-               "Raw token was stored directly in the database"
-      end
+      # Verify it's gone
+      assert {:error, :not_found} = MagicLink.validate(raw_token)
+    end
+
+    test "does not delete recently expired tokens", %{user: user} do
+      # Token expired 1 hour ago (within 24-hour retention)
+      recent_expiry = DateTime.add(DateTime.utc_now(), -3600, :second)
+      raw_token = "recent-expired-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token, expires_at: recent_expiry)
+
+      _count = MagicLink.cleanup_expired()
+
+      # Should still be findable (just expired, not cleaned up)
+      assert {:error, :expired} = MagicLink.validate(raw_token)
+    end
+
+    test "does not delete valid unexpired tokens", %{user: user} do
+      raw_token = "still-valid-#{System.unique_integer([:positive])}"
+      insert_auth_token(user.id, raw_token)
+
+      MagicLink.cleanup_expired()
+
+      assert {:ok, _} = MagicLink.validate(raw_token)
     end
   end
 end

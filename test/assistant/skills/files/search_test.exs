@@ -20,7 +20,7 @@ defmodule Assistant.Skills.Files.SearchTest do
 
     # Returns whatever the test process stored in the process dictionary.
     # Default: {:ok, []}
-    def list_files(query, opts \\ []) do
+    def list_files(_access_token, query, opts \\ []) do
       send(self(), {:drive_list_files, query, opts})
 
       case Process.get(:mock_drive_response) do
@@ -41,7 +41,8 @@ defmodule Assistant.Skills.Files.SearchTest do
       conversation_id: "conv-1",
       execution_id: "exec-1",
       user_id: "user-1",
-      integrations: %{drive: MockDrive}
+      integrations: %{drive: MockDrive},
+      metadata: %{google_token: "test-token"}
     }
 
     Map.merge(base, overrides)
@@ -301,29 +302,44 @@ defmodule Assistant.Skills.Files.SearchTest do
   end
 
   # ---------------------------------------------------------------
-  # Integration defaults (no mock injected)
+  # Nil-check integration pattern (no drive configured / no token)
   # ---------------------------------------------------------------
 
-  describe "execute/2 default drive module" do
-    test "defaults to Drive module when no integration injected" do
-      # When context.integrations has no :drive key, it defaults to the
-      # real Drive module. We can't call it (no auth), but we verify
-      # the execute function doesn't crash on building the query.
+  describe "execute/2 nil-check pattern" do
+    test "returns error when drive integration is not configured" do
       context = %Context{
         conversation_id: "conv-1",
         execution_id: "exec-1",
         user_id: "user-1",
-        integrations: %{}
+        integrations: %{},
+        metadata: %{google_token: "test-token"}
       }
 
-      # This will fail at the Drive.list_files call (no Goth token),
-      # but should not raise — it should return an error result.
-      # The error comes from Drive.list_files -> get_connection -> Auth.token
-      # which returns {:error, ...}
-      result = Search.execute(%{"type" => "banana"}, context)
+      {:ok, result} = Search.execute(%{}, context)
+      assert result.status == :error
+      assert result.content =~ "Drive integration not configured"
+    end
 
-      # With invalid type, it short-circuits before calling Drive
-      assert {:ok, %Result{status: :error}} = result
+    test "returns error when google_token is missing" do
+      context = %Context{
+        conversation_id: "conv-1",
+        execution_id: "exec-1",
+        user_id: "user-1",
+        integrations: %{drive: MockDrive},
+        metadata: %{}
+      }
+
+      {:ok, result} = Search.execute(%{}, context)
+      assert result.status == :error
+      assert result.content =~ "Google authentication required"
+    end
+
+    test "still validates type before checking token" do
+      # Invalid type error should take precedence once token is present
+      {:ok, result} = Search.execute(%{"type" => "banana"}, build_context())
+
+      assert result.status == :error
+      assert result.content =~ "Unknown file type"
     end
   end
 end

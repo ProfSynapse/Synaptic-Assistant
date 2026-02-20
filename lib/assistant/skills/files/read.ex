@@ -29,20 +29,34 @@ defmodule Assistant.Skills.Files.Read do
   def execute(flags, context) do
     case Map.get(context.integrations, :drive) do
       nil ->
-        {:ok, %Result{status: :error, content: "Google Drive integration not configured."}}
+        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
 
       drive ->
-        token = context.google_token
-        file_id = Map.get(flags, "id")
-        format = Map.get(flags, "format")
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
 
-        cond do
-          is_nil(file_id) || file_id == "" ->
-            {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
-
-          true ->
-            read_and_format(drive, token, file_id, format)
+          token ->
+            do_execute(flags, drive, token)
         end
+    end
+  end
+
+  defp do_execute(flags, drive, token) do
+    file_id = Map.get(flags, "id")
+    format = Map.get(flags, "format")
+
+    cond do
+      is_nil(file_id) || file_id == "" ->
+        {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
+
+      true ->
+        read_and_format(drive, token, file_id, format)
     end
   end
 

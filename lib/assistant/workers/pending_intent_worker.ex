@@ -1,132 +1,132 @@
-# lib/assistant/workers/pending_intent_worker.ex — Oban worker for replaying user intent post-OAuth.
+# lib/assistant/workers/pending_intent_worker.ex — Oban worker for replaying
+# user commands after OAuth authorization completes.
 #
 # When a user invokes a Google-dependent skill without a connected account,
-# the orchestrator generates a magic link and parks a PendingIntentWorker Oban
-# job at a far-future scheduled_at. After the user completes OAuth, the
-# OAuthController reschedules this job to run immediately.
-#
-# The worker replays the original user message through the full orchestrator
-# pipeline (ensuring rate limiting, sentinel, and skill validation all apply).
-# It then delivers the response via the appropriate channel adapter.
+# a magic link is generated and this worker is enqueued with the original
+# command. After the user completes OAuth, the OAuthController reschedules
+# this job to run immediately. The worker replays the original message
+# through the full orchestrator pipeline (rate limiting, sentinel, skills).
 #
 # Related files:
-#   - lib/assistant_web/controllers/oauth_controller.ex (reschedules this worker)
-#   - lib/assistant/auth/magic_link.ex (generate/2 creates the parked job)
-#   - lib/assistant/orchestrator/engine.ex (processes the replayed message)
-#   - lib/assistant/channels/adapter.ex (channel delivery behaviour)
-#   - lib/assistant/channels/google_chat.ex (Google Chat delivery)
+#   - lib/assistant/auth/magic_link.ex (enqueues this worker during generate/3)
+#   - lib/assistant_web/controllers/oauth_controller.ex (reschedules on callback)
+#   - lib/assistant/orchestrator/engine.ex (message processing entry point)
+#   - lib/assistant/channels/google_chat.ex (channel adapter for replies)
+#   - config/config.exs (Oban queue config: oauth_replay queue)
 
 defmodule Assistant.Workers.PendingIntentWorker do
   @moduledoc """
   Oban worker that replays a user's original command after OAuth authorization.
 
-  ## Lifecycle
-
-    1. **Parked**: Inserted with `scheduled_at` far in the future when magic link
-       is generated. The job sits in `:scheduled` state until OAuth completes.
-    2. **Rescheduled**: `OAuthController.callback/2` updates `scheduled_at` to
-       `DateTime.utc_now()` after tokens are stored.
-    3. **Executed**: Oban picks up the job. Worker validates TTL, ensures the
-       conversation engine is running, replays the message, and delivers the
-       response via the original channel.
-
   ## Queue
 
-  Runs in the `:oauth_replay` queue.
+  Runs in the `:oauth_replay` queue (configured with 5 concurrent workers
+  in `config/config.exs`).
+
+  ## Lifecycle
+
+  1. Magic link generation enqueues this job with the user's original message,
+     conversation_id, channel, and reply_context.
+  2. The job is initially inserted as a normal job — it runs when picked up.
+  3. After OAuth callback stores the user's tokens, the controller may
+     reschedule this job if needed.
+  4. On execution, the worker checks staleness (10-minute TTL from insertion),
+     starts or finds the conversation engine, sends the message through the
+     full orchestrator pipeline, and delivers the response via the channel.
+
+  ## Staleness
+
+  Jobs older than 10 minutes from `inserted_at` are discarded. The user's
+  intent is likely stale by then, and replaying old commands could be
+  confusing.
 
   ## Uniqueness
 
-  One pending intent per user. If a new magic link is generated for the same
-  user, the old parked job is superseded (magic link latest-wins policy
-  invalidates the old auth_token, so the old job's oban_job_id becomes stale).
-
-  ## TTL
-
-  Jobs older than 10 minutes (from `inserted_at`) are discarded as stale.
-
-  ## Enqueuing
-
-      %{
-        user_id: "uuid",
-        conversation_id: "gchat:spaces/xxx",
-        original_message: "What's on my calendar?",
-        channel: "google_chat",
-        reply_context: %{"space_id" => "spaces/xxx", "thread_id" => "spaces/xxx/threads/yyy"}
-      }
-      |> PendingIntentWorker.new(scheduled_at: ~U[2099-01-01 00:00:00Z])
-      |> Oban.insert()
+  Uses `unique: [fields: [:args], period: :infinity, states: [:scheduled]]`
+  to prevent duplicate replay jobs for the same user intent.
   """
 
   use Oban.Worker,
     queue: :oauth_replay,
-    max_attempts: 3,
-    unique: [fields: [:args], keys: [:user_id], period: :infinity, states: [:scheduled]]
-
-  require Logger
+    max_attempts: 2,
+    unique: [fields: [:args], keys: [:user_id], period: 300, states: [:available, :scheduled]]
 
   alias Assistant.Orchestrator.Engine
 
-  @intent_ttl_seconds 10 * 60
+  require Logger
+
+  @staleness_seconds 600
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args, inserted_at: inserted_at}) do
     user_id = args["user_id"]
+    message = args["message"]
     conversation_id = args["conversation_id"]
-    original_message = args["original_message"]
     channel = args["channel"]
     reply_context = args["reply_context"] || %{}
+    mode = parse_mode(args["mode"])
 
-    unless user_id && conversation_id && original_message && channel do
+    unless user_id && message && conversation_id do
       Logger.error("PendingIntentWorker: missing required args",
-        args: inspect(Map.keys(args))
+        args: inspect(Map.take(args, ["user_id", "conversation_id"]))
       )
 
-      {:cancel, :missing_args}
+      {:cancel, :missing_required_args}
     else
-      if intent_stale?(inserted_at) do
-        Logger.info("PendingIntentWorker: intent too stale, discarding",
+      if stale?(inserted_at) do
+        Logger.info("PendingIntentWorker: discarding stale intent",
           user_id: user_id,
           conversation_id: conversation_id,
-          age_seconds: DateTime.diff(DateTime.utc_now(), inserted_at)
+          inserted_at: inspect(inserted_at)
         )
 
-        {:cancel, :intent_expired}
+        {:cancel, :stale_intent}
       else
-        replay_intent(user_id, conversation_id, original_message, channel, reply_context)
+        replay_message(user_id, message, conversation_id, channel, reply_context, mode)
       end
     end
   end
 
   # --- Private ---
 
-  defp intent_stale?(nil), do: false
-  defp intent_stale?(inserted_at) do
-    age = DateTime.diff(DateTime.utc_now(), inserted_at)
-    age > @intent_ttl_seconds
+  defp stale?(inserted_at) do
+    age_seconds = DateTime.diff(DateTime.utc_now(), inserted_at, :second)
+    age_seconds > @staleness_seconds
   end
 
-  defp replay_intent(user_id, conversation_id, original_message, channel, reply_context) do
+  # Parse the mode string from Oban args into an atom.
+  # Falls back to :multi_agent for nil or unrecognized values.
+  defp parse_mode("single_agent"), do: :single_agent
+  defp parse_mode("multi_agent"), do: :multi_agent
+  defp parse_mode(_), do: :multi_agent
+
+  defp replay_message(user_id, message, conversation_id, channel, reply_context, mode) do
     Logger.info("PendingIntentWorker: replaying intent",
       user_id: user_id,
       conversation_id: conversation_id,
       channel: channel,
-      message_preview: String.slice(original_message, 0, 50)
+      mode: mode
     )
 
-    with :ok <- ensure_engine_started(conversation_id, user_id, channel),
-         {:ok, response_text} <- Engine.send_message(conversation_id, original_message) do
-      deliver_response(channel, response_text, reply_context)
+    # Ensure the engine is running for this conversation
+    case ensure_engine_started(conversation_id, user_id, channel, mode) do
+      :ok ->
+        case Engine.send_message(conversation_id, message) do
+          {:ok, response_text} ->
+            deliver_reply(channel, response_text, reply_context)
+            :ok
 
-      Logger.info("PendingIntentWorker: intent replayed successfully",
-        user_id: user_id,
-        conversation_id: conversation_id
-      )
+          {:error, reason} ->
+            Logger.error("PendingIntentWorker: engine processing failed",
+              conversation_id: conversation_id,
+              reason: inspect(reason)
+            )
 
-      :ok
-    else
+            {:error, reason}
+        end
+
       {:error, reason} ->
-        Logger.error("PendingIntentWorker: replay failed",
-          user_id: user_id,
+        Logger.error("PendingIntentWorker: failed to start engine",
           conversation_id: conversation_id,
           reason: inspect(reason)
         )
@@ -135,9 +135,7 @@ defmodule Assistant.Workers.PendingIntentWorker do
     end
   end
 
-  # Start the orchestrator engine for this conversation if not already running.
-  # Follows the pattern from GoogleChatController.ensure_engine_started/2.
-  defp ensure_engine_started(conversation_id, user_id, channel) do
+  defp ensure_engine_started(conversation_id, user_id, channel, mode) do
     case Engine.get_state(conversation_id) do
       {:ok, _state} ->
         :ok
@@ -145,8 +143,8 @@ defmodule Assistant.Workers.PendingIntentWorker do
       {:error, :not_found} ->
         opts = [
           user_id: user_id,
-          channel: channel,
-          mode: :multi_agent
+          channel: channel || "google_chat",
+          mode: mode
         ]
 
         child_spec = %{
@@ -159,64 +157,44 @@ defmodule Assistant.Workers.PendingIntentWorker do
                Assistant.Orchestrator.ConversationSupervisor,
                child_spec
              ) do
-          {:ok, _pid} ->
-            Logger.info("PendingIntentWorker: started conversation engine",
-              conversation_id: conversation_id,
-              user_id: user_id
-            )
-
-            :ok
-
-          {:error, {:already_started, _pid}} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.error("PendingIntentWorker: failed to start engine",
-              conversation_id: conversation_id,
-              reason: inspect(reason)
-            )
-
-            {:error, reason}
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _pid}} -> :ok
+          {:error, reason} -> {:error, reason}
         end
     end
   end
 
-  # Deliver the response via the appropriate channel adapter.
-  defp deliver_response("google_chat", text, reply_context) do
+  defp deliver_reply("google_chat", response_text, reply_context) do
     space_id = reply_context["space_id"]
 
-    unless space_id do
-      Logger.warning("PendingIntentWorker: missing space_id in reply_context for google_chat")
-      :ok
-    else
+    if space_id do
       opts =
-        case reply_context["thread_id"] do
+        case reply_context["thread_name"] do
           nil -> []
-          thread_id -> [thread_name: thread_id]
+          thread -> [thread_name: thread]
         end
 
-      case Assistant.Channels.GoogleChat.send_reply(space_id, text, opts) do
-        :ok ->
-          :ok
+      case Assistant.Integrations.Google.Chat.send_message(space_id, response_text, opts) do
+        {:ok, _} ->
+          Logger.debug("PendingIntentWorker: reply sent via Google Chat",
+            space_id: space_id
+          )
 
         {:error, reason} ->
-          Logger.error("PendingIntentWorker: failed to deliver response via google_chat",
+          Logger.error("PendingIntentWorker: failed to send reply",
             space_id: space_id,
             reason: inspect(reason)
           )
-
-          :ok
       end
+    else
+      Logger.warning("PendingIntentWorker: no space_id in reply_context, cannot deliver reply")
     end
   end
 
-  # Fallback for other channels — log and move on.
-  # Additional channel adapters can be added here as they are implemented.
-  defp deliver_response(channel, _text, _reply_context) do
-    Logger.warning("PendingIntentWorker: unsupported channel for delivery",
+  # Fallback for unknown channels — log but don't fail the job
+  defp deliver_reply(channel, _response_text, _reply_context) do
+    Logger.warning("PendingIntentWorker: unsupported channel for reply delivery",
       channel: channel
     )
-
-    :ok
   end
 end

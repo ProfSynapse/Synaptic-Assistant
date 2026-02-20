@@ -17,7 +17,7 @@ defmodule Assistant.Skills.Email.SearchTest do
   defmodule MockGmail do
     @moduledoc false
 
-    def search_messages(query, opts) do
+    def search_messages(_token, query, opts) do
       send(self(), {:gmail_search, query, opts})
 
       case Process.get(:mock_gmail_search_response) do
@@ -36,7 +36,8 @@ defmodule Assistant.Skills.Email.SearchTest do
       conversation_id: "conv-1",
       execution_id: "exec-1",
       user_id: "user-1",
-      integrations: %{gmail: MockGmail}
+      integrations: %{gmail: MockGmail},
+      metadata: %{google_token: "test-access-token"}
     }
 
     Map.merge(base, overrides)

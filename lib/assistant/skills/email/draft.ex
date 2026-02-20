@@ -31,11 +31,20 @@ defmodule Assistant.Skills.Email.Draft do
         {:ok, %Result{status: :error, content: "Gmail integration not configured."}}
 
       gmail ->
-        token = context.google_token
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
 
-        case validate_params(flags) do
-          {:ok, params} -> create_draft(gmail, token, params)
-          {:error, message} -> {:ok, %Result{status: :error, content: message}}
+          token ->
+            case validate_params(flags) do
+              {:ok, params} -> create_draft(gmail, token, params)
+              {:error, message} -> {:ok, %Result{status: :error, content: message}}
+            end
         end
     end
   end

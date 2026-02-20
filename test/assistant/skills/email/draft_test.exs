@@ -17,7 +17,7 @@ defmodule Assistant.Skills.Email.DraftTest do
   defmodule MockGmail do
     @moduledoc false
 
-    def create_draft(to, subject, body, opts) do
+    def create_draft(_token, to, subject, body, opts) do
       send(self(), {:gmail_draft, to, subject, body, opts})
 
       case Process.get(:mock_gmail_draft_response) do
@@ -36,7 +36,8 @@ defmodule Assistant.Skills.Email.DraftTest do
       conversation_id: "conv-1",
       execution_id: "exec-1",
       user_id: "user-1",
-      integrations: %{gmail: MockGmail}
+      integrations: %{gmail: MockGmail},
+      metadata: %{google_token: "test-access-token"}
     }
 
     Map.merge(base, overrides)
