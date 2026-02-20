@@ -52,11 +52,13 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorkerTest do
       assert changes[:max_attempts] == 2
     end
 
-    test "includes uniqueness configuration" do
+    test "does not use uniqueness constraint" do
+      # Uniqueness was removed because agent_ids can be reused across turns
+      # within the same conversation, risking silent deduplication of valid saves.
       changeset = MemorySaveWorker.new(valid_args())
       changes = changeset.changes
 
-      assert changes[:unique] != nil
+      assert changes[:unique] == nil
     end
   end
 

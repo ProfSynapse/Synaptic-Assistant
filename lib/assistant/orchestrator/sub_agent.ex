@@ -206,7 +206,8 @@ defmodule Assistant.Orchestrator.SubAgent do
           status: :failed,
           result: "Failed to start sub-agent: #{inspect(reason)}",
           tool_calls_used: 0,
-          duration_ms: 0
+          duration_ms: 0,
+          messages: []
         }
     end
   end

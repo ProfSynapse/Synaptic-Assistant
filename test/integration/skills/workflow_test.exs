@@ -65,7 +65,10 @@ defmodule Assistant.Integration.Skills.WorkflowTest do
 
       case result do
         {:ok, %{skill: "workflow.create", result: skill_result}} ->
-          # May succeed or fail depending on filesystem permissions
+          # Weak assertion: may fail if LLM sends wrong arg names (e.g.,
+          # "description" vs "desc") or if workflows dir is not writable.
+          # TODO: Strengthen by ensuring a writable temp workflows dir is
+          # configured for the test, and tightening the LLM prompt.
           assert skill_result.status in [:ok, :error]
 
           # Clean up if created
@@ -93,7 +96,10 @@ defmodule Assistant.Integration.Skills.WorkflowTest do
 
       case result do
         {:ok, %{skill: "workflow.run", result: skill_result}} ->
-          # May fail if workflow doesn't exist; that's expected
+          # Weak assertion: "daily-report" workflow does not exist in the
+          # test environment, so the handler returns :error ("not found").
+          # This is expected — the test validates skill selection, not execution.
+          # TODO: Strengthen by creating the workflow file first, then running it.
           assert skill_result.status in [:ok, :error]
 
         {:ok, %{skill: other_skill}} ->
@@ -116,7 +122,10 @@ defmodule Assistant.Integration.Skills.WorkflowTest do
 
       case result do
         {:ok, %{skill: "workflow.cancel", result: skill_result}} ->
-          # May fail if no such workflow is scheduled; that's expected
+          # Weak assertion: no workflow named "daily-report" is scheduled in
+          # the test environment, so the handler returns :error ("not scheduled").
+          # This is expected — the test validates skill selection, not execution.
+          # TODO: Strengthen by scheduling a workflow first, then cancelling it.
           assert skill_result.status in [:ok, :error]
 
         {:ok, %{skill: other_skill}} ->

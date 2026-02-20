@@ -28,12 +28,6 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorker do
   Runs in the `:memory` queue (configured with 5 concurrent workers in
   `config/config.exs`).
 
-  ## Uniqueness
-
-  Uses `unique: [fields: [:args], keys: [:agent_id, :conversation_id], period: 30]`
-  to prevent duplicate saves if the same agent result is enqueued more than once
-  within a 30-second window.
-
   ## Retry Policy
 
   Max 2 attempts. Memory save failures are non-critical — a failed save
@@ -54,10 +48,13 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorker do
       |> Oban.insert()
   """
 
+  # No uniqueness constraint: enqueue_memory_saves/3 is called once per
+  # dispatch cycle, and agent_ids can be reused across turns within the same
+  # conversation, so a time-windowed unique constraint risks silently dropping
+  # valid saves for repeat dispatches.
   use Oban.Worker,
     queue: :memory,
-    max_attempts: 2,
-    unique: [fields: [:args], keys: [:agent_id, :conversation_id], period: 30]
+    max_attempts: 2
 
   require Logger
 

@@ -18,6 +18,11 @@
 defmodule Assistant.Integration.MockCallRecorder do
   @moduledoc false
 
+  # WARNING: This module uses a single named ETS table shared across all tests.
+  # Integration test modules MUST use `async: false` to prevent concurrent test
+  # processes from interleaving mock call records. If you add a new integration
+  # test module, always set `use ExUnit.Case, async: false` (or DataCase, async: false).
+
   @table :integration_mock_calls
 
   @doc """

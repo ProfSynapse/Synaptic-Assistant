@@ -70,7 +70,11 @@ defmodule Assistant.Integration.Skills.CalendarTest do
       case result do
         {:ok, %{skill: "calendar.create", result: skill_result}} ->
           # Primary assertion: correct skill selected.
-          # May return :error if LLM maps args differently than handler expects.
+          # Weak assertion: LLM may map datetime args differently than the
+          # handler expects (e.g., "date" + "time" vs "start"/"end" ISO strings),
+          # causing handler-level validation errors.
+          # TODO: Strengthen by pre-validating/normalizing datetime flags in the
+          # handler, or by tightening the LLM prompt to specify exact arg format.
           assert skill_result.status in [:ok, :error]
 
           if skill_result.status == :ok do
@@ -101,8 +105,10 @@ defmodule Assistant.Integration.Skills.CalendarTest do
       case result do
         {:ok, %{skill: "calendar.update", result: skill_result}} ->
           # Primary assertion: correct skill selected.
-          # May return :error if LLM maps arguments differently than the
-          # handler expects (e.g., "event_id" vs "id"). Accept both.
+          # Weak assertion: LLM may use "event_id" instead of "id" for the
+          # event identifier, causing the handler to reject the args.
+          # TODO: Strengthen by accepting both "event_id" and "id" in the
+          # calendar.update handler, or by tightening the skill body text.
           assert skill_result.status in [:ok, :error]
 
           if skill_result.status == :ok do
