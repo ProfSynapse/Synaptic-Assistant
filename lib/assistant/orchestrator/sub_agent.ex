@@ -250,6 +250,8 @@ defmodule Assistant.Orchestrator.SubAgent do
       result: nil,
       tool_calls_used: 0,
       duration_ms: nil,
+      # Full LLM conversation transcript (populated on completion)
+      messages: nil,
       # Pause/resume state
       awaiting_reason: nil,
       awaiting_partial_history: nil,
@@ -396,7 +398,8 @@ defmodule Assistant.Orchestrator.SubAgent do
       | status: final_result.status,
         result: final_result.result,
         tool_calls_used: final_result[:tool_calls_used] || state.tool_calls_used,
-        duration_ms: duration_ms
+        duration_ms: duration_ms,
+        messages: final_result[:messages]
     }
 
     # Use {:shutdown, result_map} so wait_for_completion can extract the
@@ -460,7 +463,8 @@ defmodule Assistant.Orchestrator.SubAgent do
         %{
           status: :failed,
           result: "LLM call failed: #{inspect(reason)}",
-          tool_calls_used: agent_state.skill_calls
+          tool_calls_used: agent_state.skill_calls,
+          messages: context.messages
         }
     end
   end
@@ -479,7 +483,8 @@ defmodule Assistant.Orchestrator.SubAgent do
         %{
           status: :completed,
           result: response.content,
-          tool_calls_used: agent_state.skill_calls
+          tool_calls_used: agent_state.skill_calls,
+          messages: context.messages
         }
 
       # Tool calls — execute and loop
@@ -499,7 +504,8 @@ defmodule Assistant.Orchestrator.SubAgent do
         %{
           status: :completed,
           result: response[:content] || "Agent completed with no output.",
-          tool_calls_used: agent_state.skill_calls
+          tool_calls_used: agent_state.skill_calls,
+          messages: context.messages
         }
     end
   end
@@ -588,7 +594,8 @@ defmodule Assistant.Orchestrator.SubAgent do
                 %{
                   status: :failed,
                   result: "Sub-agent shut down while awaiting orchestrator: #{inspect(reason)}",
-                  tool_calls_used: final_agent_state.skill_calls
+                  tool_calls_used: final_agent_state.skill_calls,
+                  messages: new_messages
                 }
             after
               300_000 ->
@@ -599,7 +606,8 @@ defmodule Assistant.Orchestrator.SubAgent do
                 %{
                   status: :failed,
                   result: "Timed out waiting for orchestrator response (5 minutes).",
-                  tool_calls_used: final_agent_state.skill_calls
+                  tool_calls_used: final_agent_state.skill_calls,
+                  messages: new_messages
                 }
             end
 
@@ -624,7 +632,8 @@ defmodule Assistant.Orchestrator.SubAgent do
             last_text ||
               "Tool call limit reached (#{agent_state.skill_calls}/#{agent_state.max_skill_calls}). " <>
                 "Partial work completed.",
-          tool_calls_used: agent_state.skill_calls
+          tool_calls_used: agent_state.skill_calls,
+          messages: context.messages
         }
     end
   end
@@ -1312,7 +1321,8 @@ defmodule Assistant.Orchestrator.SubAgent do
       status: state.status,
       result: extract_result_text(state.result),
       tool_calls_used: state.tool_calls_used,
-      duration_ms: state.duration_ms
+      duration_ms: state.duration_ms,
+      messages: state.messages
     }
   end
 

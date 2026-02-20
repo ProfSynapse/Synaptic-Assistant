@@ -50,6 +50,7 @@ defmodule Assistant.Orchestrator.Engine do
   alias Assistant.Orchestrator.{AgentScheduler, Context, Limits, LoopRunner, Nudger, SubAgent}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults}
   alias Assistant.Resilience.CircuitBreaker
+  alias Assistant.Scheduler.Workers.MemorySaveWorker
 
   require Logger
 
@@ -351,6 +352,9 @@ defmodule Assistant.Orchestrator.Engine do
                 }
               end)
 
+            # Enqueue async memory saves for completed agents (non-blocking)
+            enqueue_memory_saves(state, pending_dispatches, results)
+
             state
             |> Map.put(:dispatched_agents, new_dispatched)
             |> Map.update!(:messages, &(&1 ++ dispatch_result_messages))
@@ -529,6 +533,79 @@ defmodule Assistant.Orchestrator.Engine do
   end
 
   defp accumulate_usage(state, _usage), do: state
+
+  # --- Async Memory Save ---
+
+  # Enqueues a background Oban job for each completed sub-agent to persist the
+  # full agent transcript into the memory store. Fire-and-forget: failures are
+  # logged but never affect the user response.
+  defp enqueue_memory_saves(state, pending_dispatches, results) do
+    Enum.each(pending_dispatches, fn {_tc, params} ->
+      agent_result = Map.get(results, params.agent_id, %{})
+      status = agent_result[:status]
+
+      # Only save transcripts for agents that actually completed or failed
+      if status in [:completed, :failed] do
+        transcript = serialize_transcript(agent_result[:messages])
+
+        job_args = %{
+          user_id: state.user_id,
+          conversation_id: state.conversation_id,
+          agent_id: params.agent_id,
+          mission: params.mission,
+          transcript: transcript,
+          status: to_string(status)
+        }
+
+        case MemorySaveWorker.new(job_args) |> Oban.insert() do
+          {:ok, _job} ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning("Failed to enqueue memory save for agent",
+              agent_id: params.agent_id,
+              conversation_id: state.conversation_id,
+              reason: inspect(reason)
+            )
+        end
+      end
+    end)
+  end
+
+  # Serializes the sub-agent's message list into a compact text representation
+  # suitable for memory storage. Strips system prompts (large, static) and
+  # keeps user/assistant/tool messages which contain the actual work.
+  defp serialize_transcript(nil), do: nil
+
+  defp serialize_transcript(messages) when is_list(messages) do
+    messages
+    |> Enum.reject(fn msg -> msg[:role] == "system" end)
+    |> Enum.map_join("\n\n---\n\n", &format_transcript_message/1)
+  end
+
+  defp format_transcript_message(%{role: "assistant", tool_calls: tool_calls} = msg)
+       when is_list(tool_calls) and tool_calls != [] do
+    calls_text =
+      Enum.map_join(tool_calls, "\n", fn tc ->
+        name = get_in(tc, [:function, :name]) || get_in(tc, ["function", "name"]) || "unknown"
+        args = get_in(tc, [:function, :arguments]) || get_in(tc, ["function", "arguments"]) || ""
+        "[tool_call] #{name}: #{args}"
+      end)
+
+    case msg[:content] do
+      nil -> "[assistant]\n#{calls_text}"
+      "" -> "[assistant]\n#{calls_text}"
+      text -> "[assistant] #{text}\n#{calls_text}"
+    end
+  end
+
+  defp format_transcript_message(%{role: role, content: content}) do
+    "[#{role}] #{content}"
+  end
+
+  defp format_transcript_message(%{role: role}) do
+    "[#{role}]"
+  end
 
   # --- PubSub Broadcasts ---
 
