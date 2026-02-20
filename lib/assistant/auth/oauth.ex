@@ -209,6 +209,51 @@ defmodule Assistant.Auth.OAuth do
   end
 
   @doc """
+  Revoke an OAuth token at Google's revocation endpoint.
+
+  Should be called before deleting the token from the database so that the
+  grant is invalidated server-side and cannot be reused. Revocation failure
+  is non-fatal — the caller should log a warning and continue with local
+  deletion.
+
+  ## Parameters
+
+    - `access_token` — the access token (or refresh token) to revoke
+
+  ## Returns
+
+    `:ok` on successful revocation.
+    `{:error, reason}` if the HTTP call fails or Google returns an error.
+  """
+  @spec revoke_token(String.t()) :: :ok | {:error, term()}
+  def revoke_token(access_token) when is_binary(access_token) and access_token != "" do
+    url = "https://oauth2.googleapis.com/revoke"
+
+    case Req.post(url, form: %{"token" => access_token}) do
+      {:ok, %Req.Response{status: 200}} ->
+        Logger.info("Google OAuth token revoked successfully")
+        :ok
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.warning("Google OAuth token revocation returned non-200",
+          status: status,
+          body: inspect(body)
+        )
+
+        {:error, {:revocation_failed, status}}
+
+      {:error, reason} ->
+        Logger.warning("Google OAuth token revocation HTTP error",
+          reason: inspect(reason)
+        )
+
+        {:error, {:revocation_http_error, reason}}
+    end
+  end
+
+  def revoke_token(_), do: {:error, :no_token}
+
+  @doc """
   Verify and decode an HMAC-signed state parameter from the OAuth callback.
 
   ## Parameters

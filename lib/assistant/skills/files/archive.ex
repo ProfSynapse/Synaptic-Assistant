@@ -93,16 +93,25 @@ defmodule Assistant.Skills.Files.Archive do
     query =
       "name = '#{@archive_folder_name}' and mimeType = '#{@folder_mime_type}' and trashed = false"
 
-    scope_opts =
+    scopes =
       case enabled_drives do
-        [] -> []
+        [] -> [[]]
         drives ->
           case Scoping.build_query_params(drives) do
-            {:ok, params} -> params
-            {:error, :no_drives_enabled} -> []
+            {:ok, param_sets} -> param_sets
+            {:error, :no_drives_enabled} -> [[]]
           end
       end
 
+    find_archive_in_scopes(drive, token, query, scopes)
+  end
+
+  # Search each scope until the Archive folder is found, or create one.
+  defp find_archive_in_scopes(drive, token, _query, []) do
+    create_archive_folder(drive, token)
+  end
+
+  defp find_archive_in_scopes(drive, token, query, [scope_opts | rest]) do
     opts = Keyword.merge([pageSize: 1], scope_opts)
 
     case drive.list_files(token, query, opts) do
@@ -110,7 +119,7 @@ defmodule Assistant.Skills.Files.Archive do
         {:ok, id}
 
       {:ok, []} ->
-        create_archive_folder(drive, token)
+        find_archive_in_scopes(drive, token, query, rest)
 
       {:error, reason} ->
         {:error, reason}

@@ -64,6 +64,7 @@ defmodule Assistant.Workers.PendingIntentWorker do
     conversation_id = args["conversation_id"]
     channel = args["channel"]
     reply_context = args["reply_context"] || %{}
+    mode = parse_mode(args["mode"])
 
     unless user_id && message && conversation_id do
       Logger.error("PendingIntentWorker: missing required args",
@@ -81,7 +82,7 @@ defmodule Assistant.Workers.PendingIntentWorker do
 
         {:cancel, :stale_intent}
       else
-        replay_message(user_id, message, conversation_id, channel, reply_context)
+        replay_message(user_id, message, conversation_id, channel, reply_context, mode)
       end
     end
   end
@@ -93,15 +94,22 @@ defmodule Assistant.Workers.PendingIntentWorker do
     age_seconds > @staleness_seconds
   end
 
-  defp replay_message(user_id, message, conversation_id, channel, reply_context) do
+  # Parse the mode string from Oban args into an atom.
+  # Falls back to :multi_agent for nil or unrecognized values.
+  defp parse_mode("single_agent"), do: :single_agent
+  defp parse_mode("multi_agent"), do: :multi_agent
+  defp parse_mode(_), do: :multi_agent
+
+  defp replay_message(user_id, message, conversation_id, channel, reply_context, mode) do
     Logger.info("PendingIntentWorker: replaying intent",
       user_id: user_id,
       conversation_id: conversation_id,
-      channel: channel
+      channel: channel,
+      mode: mode
     )
 
     # Ensure the engine is running for this conversation
-    case ensure_engine_started(conversation_id, user_id, channel) do
+    case ensure_engine_started(conversation_id, user_id, channel, mode) do
       :ok ->
         case Engine.send_message(conversation_id, message) do
           {:ok, response_text} ->
@@ -127,7 +135,7 @@ defmodule Assistant.Workers.PendingIntentWorker do
     end
   end
 
-  defp ensure_engine_started(conversation_id, user_id, channel) do
+  defp ensure_engine_started(conversation_id, user_id, channel, mode) do
     case Engine.get_state(conversation_id) do
       {:ok, _state} ->
         :ok
@@ -136,7 +144,7 @@ defmodule Assistant.Workers.PendingIntentWorker do
         opts = [
           user_id: user_id,
           channel: channel || "google_chat",
-          mode: :multi_agent
+          mode: mode
         ]
 
         child_spec = %{

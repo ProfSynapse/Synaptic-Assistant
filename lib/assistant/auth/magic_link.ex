@@ -82,8 +82,7 @@ defmodule Assistant.Auth.MagicLink do
           {:ok, %{token: String.t(), url: String.t(), auth_token_id: String.t()}}
           | {:error, term()}
   def generate(user_id, channel, pending_intent) do
-    with :ok <- check_rate_limit(user_id),
-         raw_token <- generate_raw_token(),
+    with raw_token <- generate_raw_token(),
          token_hash <- hash_token(raw_token),
          {:ok, url, pkce} <- OAuth.authorize_url(user_id, channel, token_hash) do
       expires_at = DateTime.add(DateTime.utc_now(), @ttl_minutes * 60, :second)
@@ -97,29 +96,38 @@ defmodule Assistant.Auth.MagicLink do
         expires_at: expires_at
       }
 
-      # Invalidate any existing unused magic links for this user
-      invalidate_existing(user_id)
+      # Rate check + invalidation + insert in a single transaction to prevent
+      # concurrent requests bypassing the rate limit between the check and insert.
+      Repo.transaction(fn ->
+        case check_rate_limit(user_id) do
+          :ok ->
+            invalidate_existing(user_id)
 
-      case %AuthToken{}
-           |> AuthToken.changeset(attrs)
-           |> Repo.insert() do
-        {:ok, auth_token} ->
-          Logger.info("Magic link generated",
-            user_id: user_id,
-            auth_token_id: auth_token.id,
-            expires_at: DateTime.to_iso8601(expires_at)
-          )
+            case %AuthToken{}
+                 |> AuthToken.changeset(attrs)
+                 |> Repo.insert() do
+              {:ok, auth_token} ->
+                Logger.info("Magic link generated",
+                  user_id: user_id,
+                  auth_token_id: auth_token.id,
+                  expires_at: DateTime.to_iso8601(expires_at)
+                )
 
-          {:ok, %{token: raw_token, url: url, auth_token_id: auth_token.id}}
+                %{token: raw_token, url: url, auth_token_id: auth_token.id}
 
-        {:error, changeset} ->
-          Logger.error("Magic link insert failed",
-            user_id: user_id,
-            errors: inspect(changeset.errors)
-          )
+              {:error, changeset} ->
+                Logger.error("Magic link insert failed",
+                  user_id: user_id,
+                  errors: inspect(changeset.errors)
+                )
 
-          {:error, {:insert_failed, changeset}}
-      end
+                Repo.rollback({:insert_failed, changeset})
+            end
+
+          {:error, :rate_limited} ->
+            Repo.rollback(:rate_limited)
+        end
+      end)
     end
   end
 

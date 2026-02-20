@@ -328,13 +328,15 @@ defmodule AssistantWeb.OAuthController do
           user_id: auth_token.user_id
         )
 
-        args = %{
-          user_id: auth_token.user_id,
-          message: intent["message"],
-          conversation_id: intent["conversation_id"],
-          channel: intent["channel"],
-          reply_context: intent["reply_context"]
-        }
+        args =
+          %{
+            user_id: auth_token.user_id,
+            message: intent["message"],
+            conversation_id: intent["conversation_id"],
+            channel: intent["channel"],
+            reply_context: intent["reply_context"]
+          }
+          |> maybe_put_mode(intent)
 
         args
         |> Assistant.Workers.PendingIntentWorker.new()
@@ -348,6 +350,11 @@ defmodule AssistantWeb.OAuthController do
         :ok
     end
   end
+
+  # Include mode in worker args if present in the pending intent.
+  # Defaults to nil (worker falls back to :multi_agent).
+  defp maybe_put_mode(args, %{"mode" => mode}) when is_binary(mode), do: Map.put(args, :mode, mode)
+  defp maybe_put_mode(args, _intent), do: args
 
   defp error_response(conn, status, message) do
     conn

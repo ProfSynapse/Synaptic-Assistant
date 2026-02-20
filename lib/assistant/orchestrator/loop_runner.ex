@@ -37,7 +37,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
   """
 
   alias Assistant.Analytics
-  alias Assistant.Orchestrator.{Context, LLMHelpers}
+  alias Assistant.Orchestrator.{Context, GoogleContext, LLMHelpers}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
   alias Assistant.Skills.Result, as: SkillResult
 
@@ -241,8 +241,6 @@ defmodule Assistant.Orchestrator.LoopRunner do
 
   defp build_skill_context(loop_state) do
     user_id = loop_state[:user_id] || "unknown"
-    enabled_drives = load_enabled_drives(user_id)
-    google_token = resolve_google_token(user_id)
 
     %Assistant.Skills.Context{
       conversation_id: loop_state[:conversation_id] || "unknown",
@@ -251,30 +249,10 @@ defmodule Assistant.Orchestrator.LoopRunner do
       channel: loop_state[:channel],
       integrations: Assistant.Integrations.Registry.default_integrations(),
       metadata: %{
-        google_token: google_token,
-        enabled_drives: enabled_drives
+        google_token: GoogleContext.resolve_google_token(user_id),
+        enabled_drives: GoogleContext.load_enabled_drives(user_id)
       }
     }
-  end
-
-  # Resolve a per-user Google access token. Returns nil if not connected or
-  # refresh fails — skills return auth error messages and lazy auth handles
-  # the reconnect flow.
-  defp resolve_google_token("unknown"), do: nil
-
-  defp resolve_google_token(user_id) do
-    case Assistant.Integrations.Google.Auth.user_token(user_id) do
-      {:ok, token} -> token
-      {:error, _} -> nil
-    end
-  end
-
-  defp load_enabled_drives("unknown"), do: []
-
-  defp load_enabled_drives(user_id) do
-    user_id
-    |> Assistant.ConnectedDrives.enabled_for_user()
-    |> Enum.map(fn d -> %{drive_id: d.drive_id, drive_type: d.drive_type} end)
   end
 
   defp record_llm_analytics(loop_state, response, model, status, reason \\ nil) do

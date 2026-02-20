@@ -56,6 +56,12 @@ config :assistant, Oban,
     calendar: 3,
     scheduled: 5,
     oauth_replay: 5
+  ],
+  plugins: [
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"0 3 * * *", Assistant.Workers.AuthTokenCleanupWorker}
+     ]}
   ]
 
 # Quantum cron scheduler

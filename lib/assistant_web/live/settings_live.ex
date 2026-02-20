@@ -13,6 +13,7 @@ defmodule AssistantWeb.SettingsLive do
   alias Assistant.OrchestratorSystemPrompt
   alias Assistant.SkillPermissions
   alias Assistant.Transcripts
+  alias Assistant.Auth.OAuth
   alias Assistant.Auth.TokenStore
   alias Assistant.ConnectedDrives
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
@@ -257,6 +258,19 @@ defmodule AssistantWeb.SettingsLive do
         {:noreply, put_flash(socket, :error, "You must be logged in.")}
 
       %{user_id: user_id} when not is_nil(user_id) ->
+        # Revoke token at Google before deleting from DB.
+        # Failure is non-fatal — log and continue with local deletion.
+        case TokenStore.get_google_token(user_id) do
+          {:ok, oauth_token} ->
+            case OAuth.revoke_token(oauth_token.access_token) do
+              :ok -> :ok
+              {:error, _reason} -> :ok
+            end
+
+          {:error, :not_connected} ->
+            :ok
+        end
+
         TokenStore.delete_google_token(user_id)
 
         {:noreply,

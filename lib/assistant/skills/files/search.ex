@@ -69,22 +69,20 @@ defmodule Assistant.Skills.Files.Search do
   end
 
   defp search_files(drive, token, query, limit, enabled_drives) do
-    scope_opts =
+    scopes =
       case enabled_drives do
         [] ->
           # No drives configured — search user's default scope
-          []
+          [[]]
 
         drives ->
           case Scoping.build_query_params(drives) do
-            {:ok, params} -> params
-            {:error, :no_drives_enabled} -> []
+            {:ok, param_sets} -> param_sets
+            {:error, :no_drives_enabled} -> [[]]
           end
       end
 
-    opts = Keyword.merge([pageSize: limit], scope_opts)
-
-    case drive.list_files(token, query, opts) do
+    case query_all_scopes(drive, token, query, limit, scopes) do
       {:ok, []} ->
         {:ok,
          %Result{
@@ -109,6 +107,33 @@ defmodule Assistant.Skills.Files.Search do
            status: :error,
            content: "Drive search failed: #{inspect(reason)}"
          }}
+    end
+  end
+
+  # Issue one files.list call per scope, merge and deduplicate by file ID,
+  # then trim to the requested limit.
+  defp query_all_scopes(drive, token, query, limit, scopes) do
+    results =
+      Enum.reduce_while(scopes, {:ok, []}, fn scope_opts, {:ok, acc} ->
+        opts = Keyword.merge([pageSize: limit], scope_opts)
+
+        case drive.list_files(token, query, opts) do
+          {:ok, files} -> {:cont, {:ok, acc ++ files}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case results do
+      {:ok, all_files} ->
+        deduped =
+          all_files
+          |> Enum.uniq_by(& &1.id)
+          |> Enum.take(limit)
+
+        {:ok, deduped}
+
+      {:error, _} = err ->
+        err
     end
   end
 

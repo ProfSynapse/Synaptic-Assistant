@@ -63,7 +63,7 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   alias Assistant.Analytics
   alias Assistant.Config.{Loader, PromptLoader}
-  alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
+  alias Assistant.Orchestrator.{GoogleContext, LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Executor, Registry, Result}
 
@@ -1229,8 +1229,6 @@ defmodule Assistant.Orchestrator.SubAgent do
       engine_state[:parent_conversation_id] || engine_state[:conversation_id] || "unknown"
 
     user_id = engine_state[:user_id] || "unknown"
-    enabled_drives = load_enabled_drives(user_id)
-    google_token = resolve_google_token(user_id)
 
     %Context{
       conversation_id: engine_state[:conversation_id] || "unknown",
@@ -1242,30 +1240,10 @@ defmodule Assistant.Orchestrator.SubAgent do
         agent_id: dispatch_params.agent_id,
         root_conversation_id: root_conversation_id,
         agent_type: engine_state[:agent_type] || :orchestrator,
-        google_token: google_token,
-        enabled_drives: enabled_drives
+        google_token: GoogleContext.resolve_google_token(user_id),
+        enabled_drives: GoogleContext.load_enabled_drives(user_id)
       }
     }
-  end
-
-  # Resolve a per-user Google access token. Returns nil if not connected or
-  # refresh fails — skills return auth error messages and lazy auth handles
-  # the reconnect flow.
-  defp resolve_google_token("unknown"), do: nil
-
-  defp resolve_google_token(user_id) do
-    case Assistant.Integrations.Google.Auth.user_token(user_id) do
-      {:ok, token} -> token
-      {:error, _} -> nil
-    end
-  end
-
-  defp load_enabled_drives("unknown"), do: []
-
-  defp load_enabled_drives(user_id) do
-    user_id
-    |> Assistant.ConnectedDrives.enabled_for_user()
-    |> Enum.map(fn d -> %{drive_id: d.drive_id, drive_type: d.drive_type} end)
   end
 
   defp build_model_opts(dispatch_params, context) do

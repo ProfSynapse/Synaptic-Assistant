@@ -115,6 +115,26 @@ defmodule Assistant.Auth.OAuthTest do
     test "rejects non-base64 garbage" do
       assert {:error, :invalid_state} = OAuth.verify_state("not-valid-state!!!")
     end
+
+    test "rejects expired state (beyond TTL)" do
+      # Build a validly-signed state with a timestamp 601 seconds in the past
+      # (TTL is 600s), so the HMAC is correct but the time check fails.
+      expired_timestamp =
+        (System.system_time(:second) - 601) |> Integer.to_string()
+
+      payload = "user-exp|google_chat|hash-exp|#{expired_timestamp}"
+
+      key = AssistantWeb.Endpoint.config(:secret_key_base)
+
+      signature =
+        :crypto.mac(:hmac, :sha256, key, payload)
+        |> Base.url_encode64(padding: false)
+
+      raw = "#{payload}|#{signature}"
+      state = Base.url_encode64(raw, padding: false)
+
+      assert {:error, :invalid_state} = OAuth.verify_state(state)
+    end
   end
 
   # ---------------------------------------------------------------

@@ -6,7 +6,7 @@ defmodule Assistant.Schemas.AuthToken do
   Tokens are consumed atomically via `UPDATE ... WHERE used_at IS NULL`.
   The `pending_intent` field is encrypted at rest and stores the original
   user command to be replayed after successful OAuth.
-  The `code_verifier` stores the PKCE code_verifier for the OAuth flow.
+  The `code_verifier` is encrypted at rest via Cloak AES-GCM (same as OAuth tokens).
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -19,7 +19,7 @@ defmodule Assistant.Schemas.AuthToken do
   schema "auth_tokens" do
     field :token_hash, :string
     field :purpose, :string
-    field :code_verifier, :string
+    field :code_verifier, Assistant.Encrypted.Binary
     field :oban_job_id, :integer
     field :pending_intent, Assistant.Encrypted.Map
     field :expires_at, :utc_datetime_usec
