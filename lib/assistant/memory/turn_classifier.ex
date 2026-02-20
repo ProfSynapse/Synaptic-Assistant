@@ -200,7 +200,7 @@ defmodule Assistant.Memory.TurnClassifier do
     end
   end
 
-  @hardcoded_fallback_model "anthropic/claude-haiku-4-5-20251001"
+  @hardcoded_fallback_model "openai/gpt-5-mini"
 
   defp resolve_classification_model do
     # Prefer sentinel role (cheapest fast-tier model), fall back to compaction, then hardcoded

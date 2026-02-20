@@ -91,7 +91,6 @@ models:
     use_cases:
       - sub_agent
       - compaction
-      - sentinel
     supports_tools: true
     max_context_tokens: 200000
     cost_tier: low
@@ -102,6 +101,7 @@ models:
     use_cases:
       - sub_agent
       - compaction
+      - sentinel
     supports_tools: true
     max_context_tokens: 400000
     cost_tier: low
