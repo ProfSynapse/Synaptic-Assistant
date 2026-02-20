@@ -75,6 +75,8 @@ defmodule Assistant.Orchestrator.Sentinel do
   - Irreversible actions (email.send, files.archive) require strong alignment
   - An agent should not perform actions outside its mission domain, even if the user might want it — the orchestrator handles cross-domain coordination
   - If the original request is missing (null), evaluate against mission scope only
+
+  Use the reasoning field to think step-by-step through alignment before committing to a decision.
   """
 
   @sentinel_response_format %{
@@ -85,17 +87,21 @@ defmodule Assistant.Orchestrator.Sentinel do
       schema: %{
         type: "object",
         properties: %{
+          reasoning: %{
+            type: "string",
+            description:
+              "Step-by-step analysis: does this action align with the original request and the agent's declared mission?"
+          },
           decision: %{
             type: "string",
-            enum: ["approve", "reject"],
-            description: "Whether to approve or reject the proposed action"
+            enum: ["approve", "reject"]
           },
           reason: %{
             type: "string",
-            description: "One-line explanation for the decision"
+            description: "One-line summary of the decision for logging"
           }
         },
-        required: ["decision", "reason"],
+        required: ["reasoning", "decision", "reason"],
         additionalProperties: false
       }
     }
@@ -255,7 +261,16 @@ defmodule Assistant.Orchestrator.Sentinel do
       |> String.trim()
 
     case Jason.decode(cleaned) do
+      {:ok, %{"reasoning" => reasoning, "decision" => "approve", "reason" => reason}} ->
+        Logger.debug("Sentinel reasoning", reasoning: reasoning)
+        {:ok, :approved, reason}
+
+      {:ok, %{"reasoning" => reasoning, "decision" => "reject", "reason" => reason}} ->
+        Logger.debug("Sentinel reasoning", reasoning: reasoning)
+        {:ok, :rejected, reason}
+
       {:ok, %{"decision" => "approve", "reason" => reason}} ->
+        # Fallback: reasoning field missing (fail-open model compatibility)
         {:ok, :approved, reason}
 
       {:ok, %{"decision" => "reject", "reason" => reason}} ->
