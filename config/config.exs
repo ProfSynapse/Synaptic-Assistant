@@ -54,7 +54,8 @@ config :assistant, Oban,
     notifications: 3,
     email: 5,
     calendar: 3,
-    scheduled: 5
+    scheduled: 5,
+    oauth_replay: 5
   ]
 
 # Quantum cron scheduler

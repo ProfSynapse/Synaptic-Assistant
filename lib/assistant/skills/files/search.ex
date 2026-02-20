@@ -1,10 +1,12 @@
 # lib/assistant/skills/files/search.ex — Handler for files.search skill.
 #
 # Searches Google Drive files using the Drive API wrapper. Supports text query,
-# MIME type filtering, folder scoping, and result limiting.
+# MIME type filtering, folder scoping, and result limiting. Uses Drive.Scoping
+# to constrain searches to the user's enabled drives.
 #
 # Related files:
 #   - lib/assistant/integrations/google/drive.ex (Drive API client)
+#   - lib/assistant/integrations/google/drive/scoping.ex (query param builder)
 #   - lib/assistant/skills/handler.ex (behaviour)
 #   - priv/skills/files/search.md (skill definition)
 
@@ -21,6 +23,7 @@ defmodule Assistant.Skills.Files.Search do
   alias Assistant.Skills.Helpers, as: SkillsHelpers
   alias Assistant.Skills.Result
   alias Assistant.Integrations.Google.Drive
+  alias Assistant.Integrations.Google.Drive.Scoping
 
   @default_limit 20
   @max_limit 100
@@ -29,8 +32,27 @@ defmodule Assistant.Skills.Files.Search do
 
   @impl true
   def execute(flags, context) do
-    drive = Map.get(context.integrations, :drive, Drive)
+    case Map.get(context.integrations, :drive) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
 
+      drive ->
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
+
+          token ->
+            do_execute(flags, drive, token, context)
+        end
+    end
+  end
+
+  defp do_execute(flags, drive, token, context) do
     query = Map.get(flags, "query")
     type = Map.get(flags, "type")
     folder = Map.get(flags, "folder")
@@ -38,15 +60,31 @@ defmodule Assistant.Skills.Files.Search do
 
     case build_query(query, type, folder) do
       {:ok, q} ->
-        search_files(drive, q, limit)
+        enabled_drives = context.metadata[:enabled_drives] || []
+        search_files(drive, token, q, limit, enabled_drives)
 
       {:error, reason} ->
         {:ok, %Result{status: :error, content: reason}}
     end
   end
 
-  defp search_files(drive, query, limit) do
-    case drive.list_files(query, pageSize: limit) do
+  defp search_files(drive, token, query, limit, enabled_drives) do
+    scope_opts =
+      case enabled_drives do
+        [] ->
+          # No drives configured — search user's default scope
+          []
+
+        drives ->
+          case Scoping.build_query_params(drives) do
+            {:ok, params} -> params
+            {:error, :no_drives_enabled} -> []
+          end
+      end
+
+    opts = Keyword.merge([pageSize: limit], scope_opts)
+
+    case drive.list_files(token, query, opts) do
       {:ok, []} ->
         {:ok,
          %Result{

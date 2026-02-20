@@ -1,6 +1,6 @@
 # lib/assistant/skills/files/update.ex — Handler for files.update skill.
 #
-# Reads a Google Drive file, applies a string replacement (search → replace),
+# Reads a Google Drive file, applies a string replacement (search -> replace),
 # and writes the modified content back. Supports single or global replacement.
 #
 # Related files:
@@ -19,11 +19,30 @@ defmodule Assistant.Skills.Files.Update do
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.Result
-  alias Assistant.Integrations.Google.Drive
 
   @impl true
   def execute(flags, context) do
-    drive = Map.get(context.integrations, :drive, Drive)
+    case Map.get(context.integrations, :drive) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
+
+      drive ->
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
+
+          token ->
+            do_execute(flags, drive, token)
+        end
+    end
+  end
+
+  defp do_execute(flags, drive, token) do
     file_id = Map.get(flags, "id")
     search = Map.get(flags, "search")
     replace = Map.get(flags, "replace")
@@ -45,14 +64,14 @@ defmodule Assistant.Skills.Files.Update do
          }}
 
       true ->
-        do_update(drive, file_id, search, replace, replace_all?)
+        do_update(drive, token, file_id, search, replace, replace_all?)
     end
   end
 
-  defp do_update(drive, file_id, search, replace, replace_all?) do
-    with {:ok, content} <- drive.read_file(file_id),
+  defp do_update(drive, token, file_id, search, replace, replace_all?) do
+    with {:ok, content} <- drive.read_file(token, file_id),
          {:changed, updated} <- apply_replacement(content, search, replace, replace_all?),
-         {:ok, file} <- drive.update_file_content(file_id, updated) do
+         {:ok, file} <- drive.update_file_content(token, file_id, updated) do
       count = count_replacements(content, search, replace_all?)
 
       {:ok,

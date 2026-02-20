@@ -1081,6 +1081,170 @@ a {
   max-height: 22px;
 }
 
+/* Google connection status */
+
+.sa-google-status {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.sa-google-status-connected,
+.sa-google-status-disconnected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sa-google-status-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sa-google-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.sa-google-status-badge--connected {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.sa-google-status-badge--disconnected {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.sa-google-status-email {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.sa-btn--danger-text {
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.sa-btn--danger-text:hover {
+  background: #fef2f2;
+  border-color: #dc2626;
+}
+
+/* Drive settings */
+
+.sa-drive-settings {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.sa-drive-settings h3 {
+  margin: 0 0 2px;
+}
+
+.sa-drive-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: #fff8e1;
+  color: #6d5c00;
+  font-size: 0.85rem;
+  margin-top: 12px;
+}
+
+.sa-drive-notice--info {
+  background: #e8f4fd;
+  color: #0b4f71;
+}
+
+.sa-drive-list {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.sa-drive-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #fff;
+}
+
+.sa-drive-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sa-drive-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.sa-drive-name {
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.sa-drive-type {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.sa-drive-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.sa-drive-disconnect {
+  color: #94a3b8;
+  transition: color 0.15s ease;
+}
+
+.sa-drive-disconnect:hover {
+  color: #ef4444;
+}
+
+.sa-drive-connect-personal {
+  margin-top: 12px;
+}
+
+.sa-drive-available {
+  margin-top: 20px;
+}
+
+.sa-drive-available h4 {
+  margin: 0 0 4px;
+}
+
+@keyframes sa-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.sa-spin {
+  animation: sa-spin 0.8s linear infinite;
+}
+
 /* Table */
 
 .sa-table {

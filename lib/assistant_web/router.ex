@@ -17,8 +17,26 @@ defmodule AssistantWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Browser-like pipeline without CSRF protection.
+  # Used for per-user OAuth flows where requests originate from external sources
+  # (magic link clicks from chat, Google OAuth redirects) — no CSRF token available.
+  # Security is provided by single-use magic link tokens, PKCE, and HMAC-signed state.
+  pipeline :oauth_browser do
+    plug :accepts, ["html"]
+    plug :put_secure_browser_headers
+  end
+
   pipeline :google_chat_auth do
     plug AssistantWeb.Plugs.GoogleChatAuth
+  end
+
+  # Per-user Google OAuth flow (magic link → Google consent → callback)
+  # No CSRF protection: /start is from a magic link, /callback is from Google redirect.
+  scope "/auth/google", AssistantWeb do
+    pipe_through :oauth_browser
+
+    get "/start", OAuthController, :start
+    get "/callback", OAuthController, :callback
   end
 
   # Health check — used by Railway and monitoring

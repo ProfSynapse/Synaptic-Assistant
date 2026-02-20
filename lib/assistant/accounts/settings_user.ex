@@ -13,6 +13,8 @@ defmodule Assistant.Accounts.SettingsUser do
     field :confirmed_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
 
+    belongs_to :user, Assistant.Schemas.User
+
     timestamps(type: :utc_datetime)
   end
 

@@ -32,20 +32,31 @@ defmodule Assistant.Skills.Email.List do
         {:ok, %Result{status: :error, content: "Gmail integration not configured."}}
 
       gmail ->
-        limit = Helpers.parse_limit(Map.get(flags, "limit"))
-        query = build_query(flags)
-        full? = Helpers.full_mode?(flags)
-        list_messages(gmail, query, limit, full?)
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
+
+          token ->
+            limit = Helpers.parse_limit(Map.get(flags, "limit"))
+            query = build_query(flags)
+            full? = Helpers.full_mode?(flags)
+            list_messages(gmail, token, query, limit, full?)
+        end
     end
   end
 
-  defp list_messages(gmail, query, limit, full?) do
-    case gmail.list_messages(query, max_results: limit) do
+  defp list_messages(gmail, token, query, limit, full?) do
+    case gmail.list_messages(token, query, max_results: limit) do
       {:ok, []} ->
         {:ok, %Result{status: :ok, content: "No messages found.", metadata: %{count: 0}}}
 
       {:ok, ids} ->
-        messages = resolve_messages(gmail, ids)
+        messages = resolve_messages(gmail, token, ids)
         content = format_output(messages, full?)
         {:ok, %Result{status: :ok, content: content, metadata: %{count: length(messages)}}}
 
@@ -54,9 +65,9 @@ defmodule Assistant.Skills.Email.List do
     end
   end
 
-  defp resolve_messages(gmail, ids) do
+  defp resolve_messages(gmail, token, ids) do
     Enum.reduce(ids, [], fn %{id: id}, acc ->
-      case gmail.get_message(id) do
+      case gmail.get_message(token, id) do
         {:ok, msg} ->
           [msg | acc]
 

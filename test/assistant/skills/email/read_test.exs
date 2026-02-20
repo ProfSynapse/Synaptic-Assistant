@@ -17,7 +17,7 @@ defmodule Assistant.Skills.Email.ReadTest do
   defmodule MockGmail do
     @moduledoc false
 
-    def get_message(id, _user_id \\ "me", _opts \\ []) do
+    def get_message(_token, id, _opts \\ []) do
       send(self(), {:gmail_get, id})
 
       case Process.get({:mock_gmail_get_response, id}) do
@@ -53,7 +53,8 @@ defmodule Assistant.Skills.Email.ReadTest do
       conversation_id: "conv-1",
       execution_id: "exec-1",
       user_id: "user-1",
-      integrations: %{gmail: MockGmail}
+      integrations: %{gmail: MockGmail},
+      metadata: %{google_token: "test-access-token"}
     }
 
     Map.merge(base, overrides)

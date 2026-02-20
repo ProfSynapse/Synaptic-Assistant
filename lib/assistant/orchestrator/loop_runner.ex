@@ -240,13 +240,41 @@ defmodule Assistant.Orchestrator.LoopRunner do
   # --- Private Helpers ---
 
   defp build_skill_context(loop_state) do
+    user_id = loop_state[:user_id] || "unknown"
+    enabled_drives = load_enabled_drives(user_id)
+    google_token = resolve_google_token(user_id)
+
     %Assistant.Skills.Context{
       conversation_id: loop_state[:conversation_id] || "unknown",
       execution_id: Ecto.UUID.generate(),
-      user_id: loop_state[:user_id] || "unknown",
+      user_id: user_id,
       channel: loop_state[:channel],
-      integrations: Assistant.Integrations.Registry.default_integrations()
+      integrations: Assistant.Integrations.Registry.default_integrations(),
+      metadata: %{
+        google_token: google_token,
+        enabled_drives: enabled_drives
+      }
     }
+  end
+
+  # Resolve a per-user Google access token. Returns nil if not connected or
+  # refresh fails — skills return auth error messages and lazy auth handles
+  # the reconnect flow.
+  defp resolve_google_token("unknown"), do: nil
+
+  defp resolve_google_token(user_id) do
+    case Assistant.Integrations.Google.Auth.user_token(user_id) do
+      {:ok, token} -> token
+      {:error, _} -> nil
+    end
+  end
+
+  defp load_enabled_drives("unknown"), do: []
+
+  defp load_enabled_drives(user_id) do
+    user_id
+    |> Assistant.ConnectedDrives.enabled_for_user()
+    |> Enum.map(fn d -> %{drive_id: d.drive_id, drive_type: d.drive_type} end)
   end
 
   defp record_llm_analytics(loop_state, response, model, status, reason \\ nil) do

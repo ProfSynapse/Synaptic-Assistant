@@ -19,11 +19,30 @@ defmodule Assistant.Skills.Files.Write do
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.Result
-  alias Assistant.Integrations.Google.Drive
 
   @impl true
   def execute(flags, context) do
-    drive = Map.get(context.integrations, :drive, Drive)
+    case Map.get(context.integrations, :drive) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
+
+      drive ->
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
+
+          token ->
+            do_execute(flags, drive, token)
+        end
+    end
+  end
+
+  defp do_execute(flags, drive, token) do
     name = Map.get(flags, "name")
     content = Map.get(flags, "content", "")
     folder = Map.get(flags, "folder")
@@ -38,17 +57,17 @@ defmodule Assistant.Skills.Files.Write do
          %Result{status: :error, content: "Missing required parameter: --content (file content)."}}
 
       true ->
-        create_file(drive, name, content, folder, mime_type)
+        create_file(drive, token, name, content, folder, mime_type)
     end
   end
 
-  defp create_file(drive, name, content, folder, mime_type) do
+  defp create_file(drive, token, name, content, folder, mime_type) do
     opts =
       []
       |> maybe_add(:parent_id, folder)
       |> maybe_add(:mime_type, mime_type)
 
-    case drive.create_file(name, content, opts) do
+    case drive.create_file(token, name, content, opts) do
       {:ok, file} ->
         link_line = if file[:web_view_link], do: "\nLink: #{file.web_view_link}", else: ""
 

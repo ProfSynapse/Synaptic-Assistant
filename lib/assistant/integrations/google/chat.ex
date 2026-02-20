@@ -67,7 +67,7 @@ defmodule Assistant.Integrations.Google.Chat do
     thread_name = Keyword.get(opts, :thread_name)
     truncated_text = truncate_message(text)
 
-    with {:ok, token} <- Auth.token() do
+    with {:ok, token} <- Auth.service_token() do
       body = build_body(truncated_text, thread_name)
       query_params = build_query_params(thread_name)
       url = "#{@base_url}/#{space_name}/messages"

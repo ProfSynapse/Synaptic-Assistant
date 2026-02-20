@@ -1,11 +1,14 @@
-# lib/assistant/integrations/google/auth.ex — Google OAuth2 token wrapper.
+# lib/assistant/integrations/google/auth.ex — Dual-mode Google auth wrapper.
 #
-# Wraps Goth to provide a clean interface for fetching Google OAuth2 access
-# tokens. Used by all Google API clients (Drive, Chat, Gmail, Calendar) to
-# authenticate requests.
+# Provides two token paths:
+#   1. service_token/0 — Goth service account for Google Chat bot operations
+#   2. user_token/1 — Per-user OAuth2 token from oauth_tokens table, with
+#      automatic refresh when expired via Auth.OAuth.refresh_access_token/1
 #
 # Related files:
 #   - lib/assistant/application.ex (starts Goth in the supervision tree)
+#   - lib/assistant/auth/oauth.ex (stateless token exchange + refresh)
+#   - lib/assistant/auth/token_store.ex (encrypted CRUD for oauth_tokens)
 #   - config/runtime.exs (Google credentials configuration)
 #   - lib/assistant/integrations/google/drive.ex (consumer — Drive API)
 #   - lib/assistant/integrations/google/chat.ex (consumer — Chat API)
@@ -14,61 +17,99 @@
 
 defmodule Assistant.Integrations.Google.Auth do
   @moduledoc """
-  Google OAuth2 token management via Goth.
+  Dual-mode Google OAuth2 token management.
 
-  Provides a simple interface for fetching access tokens from the Goth
-  process (`Assistant.Goth`). Tokens are automatically refreshed by Goth
-  before expiry.
+  Two authentication paths:
+
+  - `service_token/0` — Goth service account token for Google Chat bot
+    operations. Tokens are auto-refreshed by the supervised Goth process.
+
+  - `user_token/1` — Per-user OAuth2 token from the `oauth_tokens` table.
+    Checks whether the cached access token is still valid; if expired,
+    transparently refreshes via `Auth.OAuth.refresh_access_token/1` and
+    caches the new token in the database.
 
   ## Usage
 
-      case Assistant.Integrations.Google.Auth.token() do
-        {:ok, access_token} -> # use the token string
-        {:error, reason} -> # handle missing credentials or refresh failure
+      # Service account (Chat bot)
+      case Auth.service_token() do
+        {:ok, access_token} -> # use for Chat API calls
+        {:error, reason} -> # handle missing credentials
+      end
+
+      # Per-user token (Drive, Gmail, Calendar)
+      case Auth.user_token(user_id) do
+        {:ok, access_token} -> # use for user-scoped API calls
+        {:error, :not_connected} -> # user needs to connect Google account
+        {:error, :refresh_failed} -> # refresh token revoked or invalid
       end
   """
 
   require Logger
 
+  alias Assistant.Auth.{OAuth, TokenStore}
+
   @goth_name Assistant.Goth
 
+  # --- Service Account (Chat bot) ---
+
   @doc """
-  Fetch a current access token from the Goth instance.
+  Fetch a service account access token from the supervised Goth instance.
+
+  Used exclusively for Google Chat bot operations. All other Google API
+  calls (Drive, Gmail, Calendar) use `user_token/1` with per-user OAuth.
 
   Returns `{:ok, token_string}` on success or `{:error, reason}` on failure.
-  The token is valid for at least a few minutes (Goth refreshes proactively).
   """
-  @spec token() :: {:ok, String.t()} | {:error, term()}
-  def token do
+  @spec service_token() :: {:ok, String.t()} | {:error, term()}
+  def service_token do
     case Goth.fetch(@goth_name) do
       {:ok, %{token: access_token}} ->
         {:ok, access_token}
 
       {:error, reason} = error ->
-        Logger.warning("Failed to fetch Google access token: #{inspect(reason)}")
+        Logger.warning("Failed to fetch Google service account token: #{inspect(reason)}")
         error
     end
   end
 
-  @doc """
-  Fetch a current access token, raising on failure.
+  # --- Per-User Token ---
 
-  Useful in contexts where missing credentials indicate a configuration error
-  that should not be silently handled.
+  @doc """
+  Fetch a per-user access token for Google API calls.
+
+  Looks up the user's stored OAuth token, checks validity, and refreshes
+  if expired. The refreshed token is cached in the database to avoid
+  redundant refresh calls within the token's lifetime (~1 hour).
+
+  ## Returns
+
+    - `{:ok, access_token}` — valid access token ready for API calls
+    - `{:error, :not_connected}` — no OAuth token stored for this user
+    - `{:error, :refresh_failed}` — refresh token is invalid or revoked;
+      user needs to re-authorize via magic link
   """
-  @spec token!() :: String.t()
-  def token! do
-    case token() do
-      {:ok, access_token} -> access_token
-      {:error, reason} -> raise "Google Auth token fetch failed: #{inspect(reason)}"
+  @spec user_token(String.t()) :: {:ok, String.t()} | {:error, :not_connected | :refresh_failed}
+  def user_token(user_id) do
+    case TokenStore.get_google_token(user_id) do
+      {:error, :not_connected} = error ->
+        error
+
+      {:ok, oauth_token} ->
+        if TokenStore.access_token_valid?(oauth_token) do
+          {:ok, oauth_token.access_token}
+        else
+          refresh_and_cache(user_id, oauth_token.refresh_token)
+        end
     end
   end
 
+  # --- Legacy Compatibility ---
+
   @doc """
-  Check whether Google credentials are configured.
+  Check whether Google service account credentials are configured.
 
   Returns `true` if the `:google_credentials` application env is set.
-  Useful for feature-gating code paths that depend on Google APIs.
   """
   @spec configured?() :: boolean()
   def configured? do
@@ -76,19 +117,48 @@ defmodule Assistant.Integrations.Google.Auth do
   end
 
   @doc """
-  The required Google API scopes for this application.
+  The Google Chat bot scope (service account only).
 
-  Centralized here so both `application.ex` (Goth startup) and any scope
-  validation logic reference the same list.
+  Per-user scopes are defined in `Auth.OAuth.user_scopes/0`.
   """
   @spec scopes() :: [String.t()]
   def scopes do
-    [
-      "https://www.googleapis.com/auth/chat.bot",
-      "https://www.googleapis.com/auth/drive.readonly",
-      "https://www.googleapis.com/auth/drive.file",
-      "https://www.googleapis.com/auth/gmail.modify",
-      "https://www.googleapis.com/auth/calendar"
-    ]
+    ["https://www.googleapis.com/auth/chat.bot"]
+  end
+
+  # --- Private ---
+
+  defp refresh_and_cache(user_id, refresh_token) do
+    case OAuth.refresh_access_token(refresh_token) do
+      {:ok, access_token} ->
+        # Cache the refreshed token with a ~1 hour expiry
+        expires_at = DateTime.add(DateTime.utc_now(), 3500, :second)
+
+        case TokenStore.update_access_token(user_id, access_token, expires_at) do
+          {:ok, _} -> :ok
+          {:error, reason} ->
+            Logger.warning("Failed to cache refreshed token",
+              user_id: user_id,
+              reason: inspect(reason)
+            )
+        end
+
+        {:ok, access_token}
+
+      {:error, :refresh_failed} ->
+        Logger.warning("Token refresh failed for user — may need re-authorization",
+          user_id: user_id
+        )
+
+        {:error, :refresh_failed}
+
+      {:error, reason} ->
+        Logger.warning("Token refresh error",
+          user_id: user_id,
+          reason: inspect(reason)
+        )
+
+        {:error, :refresh_failed}
+    end
   end
 end

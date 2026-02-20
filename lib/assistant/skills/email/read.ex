@@ -33,14 +33,25 @@ defmodule Assistant.Skills.Email.Read do
         {:ok, %Result{status: :error, content: "Gmail integration not configured."}}
 
       gmail ->
-        raw_id = Map.get(flags, "id")
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
 
-        if is_nil(raw_id) || raw_id == "" do
-          {:ok,
-           %Result{status: :error, content: "Missing required parameter: --id (message ID)."}}
-        else
-          ids = parse_ids(raw_id)
-          fetch_messages(gmail, ids)
+          token ->
+            raw_id = Map.get(flags, "id")
+
+            if is_nil(raw_id) || raw_id == "" do
+              {:ok,
+               %Result{status: :error, content: "Missing required parameter: --id (message ID)."}}
+            else
+              ids = parse_ids(raw_id)
+              fetch_messages(gmail, token, ids)
+            end
         end
     end
   end
@@ -52,15 +63,15 @@ defmodule Assistant.Skills.Email.Read do
     |> Enum.reject(&(&1 == ""))
   end
 
-  defp fetch_messages(gmail, ids) do
-    results = Enum.map(ids, &fetch_one(gmail, &1))
+  defp fetch_messages(gmail, token, ids) do
+    results = Enum.map(ids, &fetch_one(gmail, token, &1))
     content = Enum.map_join(results, @divider, &elem(&1, 1))
     all_ids = Enum.map(results, &elem(&1, 0))
     {:ok, %Result{status: :ok, content: content, metadata: %{message_ids: all_ids}}}
   end
 
-  defp fetch_one(gmail, id) do
-    case gmail.get_message(id) do
+  defp fetch_one(gmail, token, id) do
+    case gmail.get_message(token, id) do
       {:ok, msg} ->
         Logger.info("Email read",
           message_id: id,
