@@ -575,16 +575,19 @@ defmodule Assistant.Orchestrator.Engine do
   # Serializes the sub-agent's message list into a compact text representation
   # suitable for memory storage. Strips system prompts (large, static) and
   # keeps user/assistant/tool messages which contain the actual work.
-  defp serialize_transcript(nil), do: nil
+  @doc false
+  def serialize_transcript(nil), do: nil
 
-  defp serialize_transcript(messages) when is_list(messages) do
+  @doc false
+  def serialize_transcript(messages) when is_list(messages) do
     messages
     |> Enum.reject(fn msg -> msg[:role] == "system" end)
     |> Enum.map_join("\n\n---\n\n", &format_transcript_message/1)
   end
 
-  defp format_transcript_message(%{role: "assistant", tool_calls: tool_calls} = msg)
-       when is_list(tool_calls) and tool_calls != [] do
+  @doc false
+  def format_transcript_message(%{role: "assistant", tool_calls: tool_calls} = msg)
+      when is_list(tool_calls) and tool_calls != [] do
     calls_text =
       Enum.map_join(tool_calls, "\n", fn tc ->
         name = get_in(tc, [:function, :name]) || get_in(tc, ["function", "name"]) || "unknown"
@@ -599,11 +602,13 @@ defmodule Assistant.Orchestrator.Engine do
     end
   end
 
-  defp format_transcript_message(%{role: role, content: content}) do
+  @doc false
+  def format_transcript_message(%{role: role, content: content}) do
     "[#{role}] #{content}"
   end
 
-  defp format_transcript_message(%{role: role}) do
+  @doc false
+  def format_transcript_message(%{role: role}) do
     "[#{role}]"
   end
 

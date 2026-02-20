@@ -10,7 +10,7 @@ defmodule Assistant.Schemas.MemoryEntry do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @source_types ~w(conversation skill_execution user_explicit system)
+  @source_types ~w(conversation skill_execution user_explicit system agent_result)
 
   schema "memory_entries" do
     field :content, :string
@@ -60,5 +60,6 @@ defmodule Assistant.Schemas.MemoryEntry do
     |> validate_number(:decay_factor, greater_than_or_equal_to: 0, less_than_or_equal_to: 1)
     |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:source_conversation_id)
+    |> check_constraint(:source_type, name: :valid_source_type)
   end
 end
