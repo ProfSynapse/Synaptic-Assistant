@@ -68,6 +68,8 @@ defmodule Assistant.Orchestrator.Sentinel do
   - REQUEST ALIGNMENT: Does this action serve what the user asked for?
   - MISSION SCOPE: Is this action within what the agent was assigned to do?
 
+  Use the "reasoning" field to think step-by-step before committing to a decision. Analyze request alignment and mission scope, then decide.
+
   Key reasoning principles:
   - Read-only actions (search, list, get, read) are low risk — approve if even loosely related
   - Prerequisite steps are valid: searching for info before the main action is normal workflow
@@ -85,6 +87,11 @@ defmodule Assistant.Orchestrator.Sentinel do
       schema: %{
         type: "object",
         properties: %{
+          reasoning: %{
+            type: "string",
+            description:
+              "Step-by-step analysis: does this action align with the request and mission?"
+          },
           decision: %{
             type: "string",
             enum: ["approve", "reject"],
@@ -92,10 +99,10 @@ defmodule Assistant.Orchestrator.Sentinel do
           },
           reason: %{
             type: "string",
-            description: "One-line explanation for the decision"
+            description: "One-line summary of the decision for logging"
           }
         },
-        required: ["decision", "reason"],
+        required: ["reasoning", "decision", "reason"],
         additionalProperties: false
       }
     }
@@ -255,6 +262,13 @@ defmodule Assistant.Orchestrator.Sentinel do
       |> String.trim()
 
     case Jason.decode(cleaned) do
+      {:ok, %{"reasoning" => _reasoning, "decision" => "approve", "reason" => reason}} ->
+        {:ok, :approved, reason}
+
+      {:ok, %{"reasoning" => _reasoning, "decision" => "reject", "reason" => reason}} ->
+        {:ok, :rejected, reason}
+
+      # Backward compat: accept responses without reasoning field
       {:ok, %{"decision" => "approve", "reason" => reason}} ->
         {:ok, :approved, reason}
 
