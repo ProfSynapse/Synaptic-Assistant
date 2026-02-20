@@ -87,8 +87,9 @@ defmodule Assistant.Integration.Helpers do
       execution_id: Ecto.UUID.generate(),
       user_id: user_id,
       channel: :test,
+      google_token: google_token_for_domain(domain),
       integrations: integrations_for_domain(domain),
-      metadata: %{agent_type: :integration_test}
+      metadata: metadata_for_domain(domain)
     }
 
     Map.merge(base, overrides)
@@ -129,6 +130,24 @@ defmodule Assistant.Integration.Helpers do
       drive: Assistant.Integration.MockDrive,
       openrouter: Assistant.Integration.MockOpenRouter
     }
+  end
+
+  # Google-dependent domains need a fake token so handlers don't short-circuit
+  # with "Google authentication required" before reaching mock integrations.
+  @google_domains [:email, :calendar, :files]
+
+  defp google_token_for_domain(domain) when domain in @google_domains do
+    "fake-integration-test-token"
+  end
+
+  defp google_token_for_domain(_domain), do: nil
+
+  defp metadata_for_domain(domain) when domain in @google_domains do
+    %{agent_type: :integration_test, google_token: "fake-integration-test-token"}
+  end
+
+  defp metadata_for_domain(_domain) do
+    %{agent_type: :integration_test}
   end
 
   # -------------------------------------------------------------------

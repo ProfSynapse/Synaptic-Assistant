@@ -75,9 +75,12 @@ end
 defmodule Assistant.Integration.MockGmail do
   @moduledoc false
 
+  # Function signatures match lib/assistant/integrations/google/gmail.ex.
+  # All functions accept access_token as the first parameter (per-user OAuth2).
+
   alias Assistant.Integration.MockCallRecorder
 
-  def list_messages(_user_id \\ "me", _query, _opts \\ []) do
+  def list_messages(_access_token, _query, _opts \\ []) do
     MockCallRecorder.record(:gmail, :list_messages)
 
     {:ok,
@@ -87,7 +90,7 @@ defmodule Assistant.Integration.MockGmail do
      ]}
   end
 
-  def get_message(_message_id, _user_id \\ "me", _opts \\ []) do
+  def get_message(_access_token, _message_id, _opts \\ []) do
     MockCallRecorder.record(:gmail, :get_message)
 
     {:ok,
@@ -103,17 +106,17 @@ defmodule Assistant.Integration.MockGmail do
      }}
   end
 
-  def send_message(_to, _subject, _body, _opts \\ []) do
+  def send_message(_access_token, _to, _subject, _body, _opts \\ []) do
     MockCallRecorder.record(:gmail, :send_message)
     {:ok, %{id: "msg_sent_001", thread_id: "thread_sent_001"}}
   end
 
-  def create_draft(_to, _subject, _body, _opts \\ []) do
+  def create_draft(_access_token, _to, _subject, _body, _opts \\ []) do
     MockCallRecorder.record(:gmail, :create_draft)
     {:ok, %{id: "draft_001"}}
   end
 
-  def search_messages(_query, _opts \\ []) do
+  def search_messages(_access_token, _query, _opts \\ []) do
     MockCallRecorder.record(:gmail, :search_messages)
 
     {:ok,
@@ -135,9 +138,12 @@ end
 defmodule Assistant.Integration.MockCalendar do
   @moduledoc false
 
+  # Function signatures match lib/assistant/integrations/google/calendar.ex.
+  # All functions accept access_token as the first parameter (per-user OAuth2).
+
   alias Assistant.Integration.MockCallRecorder
 
-  def list_events(_calendar_id \\ "primary", _opts \\ []) do
+  def list_events(_access_token, _calendar_id \\ "primary", _opts \\ []) do
     MockCallRecorder.record(:calendar, :list_events)
 
     {:ok,
@@ -167,7 +173,7 @@ defmodule Assistant.Integration.MockCalendar do
      ]}
   end
 
-  def get_event(_event_id, _calendar_id \\ "primary") do
+  def get_event(_access_token, _event_id, _calendar_id \\ "primary") do
     MockCallRecorder.record(:calendar, :get_event)
 
     {:ok,
@@ -184,7 +190,7 @@ defmodule Assistant.Integration.MockCalendar do
      }}
   end
 
-  def create_event(_event_params, _calendar_id \\ "primary") do
+  def create_event(_access_token, _event_params, _calendar_id \\ "primary") do
     MockCallRecorder.record(:calendar, :create_event)
 
     {:ok,
@@ -201,7 +207,7 @@ defmodule Assistant.Integration.MockCalendar do
      }}
   end
 
-  def update_event(_event_id, _event_params, _calendar_id \\ "primary") do
+  def update_event(_access_token, _event_id, _event_params, _calendar_id \\ "primary") do
     MockCallRecorder.record(:calendar, :update_event)
 
     {:ok,
@@ -222,9 +228,12 @@ end
 defmodule Assistant.Integration.MockDrive do
   @moduledoc false
 
+  # Function signatures match lib/assistant/integrations/google/drive.ex.
+  # All functions accept access_token as the first parameter (per-user OAuth2).
+
   alias Assistant.Integration.MockCallRecorder
 
-  def list_files(_query, _opts \\ []) do
+  def list_files(_access_token, _query, _opts \\ []) do
     MockCallRecorder.record(:drive, :list_files)
 
     {:ok,
@@ -250,7 +259,7 @@ defmodule Assistant.Integration.MockDrive do
      ]}
   end
 
-  def get_file(_file_id) do
+  def get_file(_access_token, _file_id) do
     MockCallRecorder.record(:drive, :get_file)
 
     {:ok,
@@ -265,12 +274,12 @@ defmodule Assistant.Integration.MockDrive do
      }}
   end
 
-  def read_file(_file_id, _opts \\ []) do
+  def read_file(_access_token, _file_id, _opts \\ []) do
     MockCallRecorder.record(:drive, :read_file)
     {:ok, "# Project Roadmap\n\n## Q1 Goals\n- Launch v2.0\n- Improve performance by 30%\n"}
   end
 
-  def create_file(_name, _content, _opts \\ []) do
+  def create_file(_access_token, _name, _content, _opts \\ []) do
     MockCallRecorder.record(:drive, :create_file)
 
     {:ok,
@@ -281,7 +290,7 @@ defmodule Assistant.Integration.MockDrive do
      }}
   end
 
-  def update_file_content(_file_id, _content, _mime_type \\ "text/plain") do
+  def update_file_content(_access_token, _file_id, _content, _mime_type \\ "text/plain") do
     MockCallRecorder.record(:drive, :update_file_content)
 
     {:ok,
@@ -292,7 +301,7 @@ defmodule Assistant.Integration.MockDrive do
      }}
   end
 
-  def move_file(_file_id, _new_parent_id, _remove_parents \\ true) do
+  def move_file(_access_token, _file_id, _new_parent_id, _remove_parents \\ true) do
     MockCallRecorder.record(:drive, :move_file)
     {:ok, %{id: "file_001", name: "Project Roadmap", parents: ["folder_archive"]}}
   end
