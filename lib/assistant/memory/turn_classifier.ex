@@ -43,8 +43,7 @@ defmodule Assistant.Memory.TurnClassifier do
               )
 
   @classification_prompt """
-  Classify this conversation exchange. Reply with JSON only:
-  {"action": "save_facts" | "compact" | "nothing", "reason": "one line"}
+  Classify this conversation exchange.
 
   save_facts: exchange contains new facts about named entities (people, orgs, projects)
   compact: clear topic change from what was previously discussed
@@ -53,6 +52,30 @@ defmodule Assistant.Memory.TurnClassifier do
   User: {{user_message}}
   Assistant: {{assistant_response}}
   """
+
+  @classification_response_format %{
+    type: "json_schema",
+    json_schema: %{
+      name: "turn_classification",
+      strict: true,
+      schema: %{
+        type: "object",
+        properties: %{
+          action: %{
+            type: "string",
+            enum: ["save_facts", "compact", "nothing"],
+            description: "Classification action for this conversation turn"
+          },
+          reason: %{
+            type: "string",
+            description: "One-line explanation for the classification"
+          }
+        },
+        required: ["action", "reason"],
+        additionalProperties: false
+      }
+    }
+  }
 
   # --- Client API ---
 
@@ -107,7 +130,12 @@ defmodule Assistant.Memory.TurnClassifier do
 
     Logger.debug("Turn classification using model", model: model, conversation_id: conversation_id)
 
-    case @llm_client.chat_completion(messages, model: model, temperature: 0.0, max_tokens: 100) do
+    case @llm_client.chat_completion(messages,
+           model: model,
+           temperature: 0.0,
+           max_tokens: 500,
+           response_format: @classification_response_format
+         ) do
       {:ok, %{content: content}} ->
         handle_classification(content, conversation_id, user_id, user_message, assistant_response)
 
