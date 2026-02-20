@@ -73,8 +73,27 @@ Two separate tables: `settings_users` (web dashboard login) and `users` (chat us
 - Auto-linked in `OAuthController` callback via email match: `maybe_link_settings_user/2`
 - **Always use `settings_user.user_id`** (not `settings_user.id`) when calling TokenStore, ConnectedDrives
 
+### Async Background Memory Save Hook (PR #16)
+After every sub-agent completes, `engine.ex` enqueues `MemorySaveWorker` (fire-and-forget) to save the full agent transcript to memory. Critical patterns:
+- **NEVER use `start_link` in sub_agent.ex** — must be `GenServer.start`. EXIT signal from shutdown propagates to the linked caller Task and kills it before `wait_for_completion/2` reads the `:DOWN` message. Comment in code explains this.
+- **`source_type: "agent_result"`** is valid in `memory_entry.ex` — added in PR #16. The `@source_types` enum and DB CHECK constraint both include it.
+- **Transcript cap**: 50KB max before Oban enqueue (`@max_transcript_bytes 50_000` in engine.ex)
+- **Oban queue**: `:memory` (5 workers, no uniqueness constraint — intentionally removed)
+
+### Orchestrator Model Benchmark (PR #16)
+Benchmark at `/tmp/orchestrator_bench.exs` — run with `set -a && source .env && set +a && mix run /tmp/orchestrator_bench.exs -- --models model1,model2`
+- **Best orchestrator**: `google/gemini-3.1-pro-preview` — 20/20 (100%), only model that uses `depends_on` upfront
+- haiku-4.5 = sonnet-4.6 = 70%; gpt-5-mini = 65%; gpt-5.2 = 60%
+- Multi-dispatch failures in haiku/sonnet are architectural (sequential dispatch by design), not prompt issues
+
+### Integration Test Suite (PR #16)
+`test/integration/` — real LLM API calls + mocked external services. 30 tests across 7 skill domains.
+- Run: `TEST_MODEL=anthropic/claude-haiku-4.5 mix test test/integration/ --include integration`
+- Excluded from default `mix test` — already configured in test_helper.exs
+
 ### Phase Status
 - Phase 1-4 complete and merged (PR #9). Branch: `main`.
 - Phase 4 covers: Gmail (5 skills), Calendar (3 skills), Workflow scheduler (4 skills + WorkflowWorker + QuantumLoader).
 - Phase 5 (PR #11): Per-user Google OAuth2 with magic link authorization flow.
 - Phase 6 (PR #15): Scoped Drive access + OAuth2 improvements (race fix, revocation, encrypted code_verifier, cleanup worker).
+- Phase 7 (PR #16): Orchestrator prompt rewrite, async memory save hook, integration test suite.
