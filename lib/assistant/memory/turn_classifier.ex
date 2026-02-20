@@ -105,6 +105,8 @@ defmodule Assistant.Memory.TurnClassifier do
       %{role: "user", content: prompt}
     ]
 
+    Logger.debug("Turn classification using model", model: model, conversation_id: conversation_id)
+
     case @llm_client.chat_completion(messages, model: model, temperature: 0.0, max_tokens: 100) do
       {:ok, %{content: content}} ->
         handle_classification(content, conversation_id, user_id, user_message, assistant_response)
@@ -112,6 +114,7 @@ defmodule Assistant.Memory.TurnClassifier do
       {:error, reason} ->
         Logger.warning("Turn classification failed, skipping",
           conversation_id: conversation_id,
+          model: model,
           reason: inspect(reason)
         )
     end
@@ -197,6 +200,8 @@ defmodule Assistant.Memory.TurnClassifier do
     end
   end
 
+  @hardcoded_fallback_model "anthropic/claude-haiku-4-5-20251001"
+
   defp resolve_classification_model do
     # Prefer sentinel role (cheapest fast-tier model), fall back to compaction, then hardcoded
     case ConfigLoader.model_for(:sentinel) do
@@ -206,9 +211,13 @@ defmodule Assistant.Memory.TurnClassifier do
       nil ->
         case ConfigLoader.model_for(:compaction) do
           %{id: id} -> id
-          nil -> "anthropic/claude-haiku-4-5-20251001"
+          nil -> @hardcoded_fallback_model
         end
     end
+  rescue
+    _error ->
+      Logger.warning("ConfigLoader unavailable for classification model, using hardcoded fallback")
+      @hardcoded_fallback_model
   end
 
   defp truncate(text, max_length) when is_binary(text) do

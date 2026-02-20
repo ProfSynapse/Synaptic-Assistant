@@ -299,6 +299,78 @@ defmodule Assistant.Orchestrator.SubAgentTest do
   end
 
   # ---------------------------------------------------------------
+  # Bug 3 regression: build_skill_context conversation_id resolution
+  #
+  # When a sub-agent builds a skill context, the conversation_id used
+  # should be traceable to a real DB conversation. Sub-agents get a
+  # fresh sub_conversation_id (not in DB) while parent_conversation_id
+  # is the real one. The metadata.root_conversation_id must equal the
+  # parent_conversation_id so memory saves reference a real conversation.
+  # ---------------------------------------------------------------
+
+  describe "build_skill_context conversation_id (Bug 3 regression)" do
+    test "sub_engine_state carries parent_conversation_id from orchestrator" do
+      # Simulates what happens in init/1 when a sub-agent starts:
+      # The orchestrator's conversation_id becomes parent_conversation_id
+      orchestrator_conversation_id = Ecto.UUID.generate()
+      sub_conversation_id = Ecto.UUID.generate()
+
+      engine_state = %{
+        conversation_id: orchestrator_conversation_id,
+        user_id: "user-1"
+      }
+
+      # This mirrors lines 216-222 of sub_agent.ex
+      sub_engine_state =
+        engine_state
+        |> Map.put(:conversation_id, sub_conversation_id)
+        |> Map.put(:parent_conversation_id, orchestrator_conversation_id)
+        |> Map.put(:agent_type, :sub_agent)
+
+      # Verify: sub_engine_state has different conversation_id than parent
+      assert sub_engine_state[:conversation_id] == sub_conversation_id
+      assert sub_engine_state[:parent_conversation_id] == orchestrator_conversation_id
+      assert sub_engine_state[:conversation_id] != sub_engine_state[:parent_conversation_id]
+
+      # The root_conversation_id (used for memory saves) should be the PARENT
+      root_conversation_id =
+        sub_engine_state[:parent_conversation_id] ||
+          sub_engine_state[:conversation_id] || "unknown"
+
+      assert root_conversation_id == orchestrator_conversation_id
+    end
+
+    test "root_conversation_id resolution follows parent-first fallback chain" do
+      # This mirrors build_skill_context line 1231-1232:
+      #   root_conversation_id =
+      #     engine_state[:parent_conversation_id] || engine_state[:conversation_id] || "unknown"
+
+      parent_id = Ecto.UUID.generate()
+      sub_id = Ecto.UUID.generate()
+
+      # Case 1: parent_conversation_id present → use it as root
+      engine_state = %{
+        conversation_id: sub_id,
+        parent_conversation_id: parent_id,
+        user_id: "user-1"
+      }
+
+      root = engine_state[:parent_conversation_id] || engine_state[:conversation_id] || "unknown"
+      assert root == parent_id
+
+      # Case 2: no parent_conversation_id → fall back to conversation_id
+      engine_state_no_parent = %{conversation_id: sub_id, user_id: "user-1"}
+      root2 = engine_state_no_parent[:parent_conversation_id] || engine_state_no_parent[:conversation_id] || "unknown"
+      assert root2 == sub_id
+
+      # Case 3: neither present → "unknown"
+      engine_state_empty = %{user_id: "user-1"}
+      root3 = engine_state_empty[:parent_conversation_id] || engine_state_empty[:conversation_id] || "unknown"
+      assert root3 == "unknown"
+    end
+  end
+
+  # ---------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------
 

@@ -639,11 +639,25 @@ defmodule Assistant.Orchestrator.SubAgent do
     skill_name = args["skill"]
     skill_args = args["arguments"] || %{}
 
-    # Scope enforcement: only allowed skills
-    if not SkillPermissions.enabled?(skill_name) do
-      {tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}
-    else
-      if skill_name in dispatch_params.skills do
+    cond do
+      is_nil(skill_name) ->
+        {tc, "Error: Missing required \"skill\" parameter in use_skill call."}
+
+      not SkillPermissions.enabled?(skill_name) ->
+        {tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}
+
+      skill_name not in dispatch_params.skills ->
+        Logger.warning("Sub-agent attempted out-of-scope skill",
+          agent_id: dispatch_params.agent_id,
+          skill: skill_name,
+          allowed: dispatch_params.skills
+        )
+
+        {tc,
+         "Error: Skill \"#{skill_name}\" is not available to this agent. " <>
+           "Available skills: #{Enum.join(dispatch_params.skills, ", ")}"}
+
+      true ->
         # Sentinel security gate
         proposed_action = %{
           skill_name: skill_name,
@@ -666,17 +680,6 @@ defmodule Assistant.Orchestrator.SubAgent do
 
             {tc, "Action rejected by security gate: #{reason}"}
         end
-      else
-        Logger.warning("Sub-agent attempted out-of-scope skill",
-          agent_id: dispatch_params.agent_id,
-          skill: skill_name,
-          allowed: dispatch_params.skills
-        )
-
-        {tc,
-         "Error: Skill \"#{skill_name}\" is not available to this agent. " <>
-           "Available skills: #{Enum.join(dispatch_params.skills, ", ")}"}
-      end
     end
   end
 
@@ -1229,7 +1232,7 @@ defmodule Assistant.Orchestrator.SubAgent do
       engine_state[:parent_conversation_id] || engine_state[:conversation_id] || "unknown"
 
     %Context{
-      conversation_id: engine_state[:conversation_id] || "unknown",
+      conversation_id: root_conversation_id,
       execution_id: Ecto.UUID.generate(),
       user_id: engine_state[:user_id] || "unknown",
       channel: engine_state[:channel],
