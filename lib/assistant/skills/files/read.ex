@@ -27,27 +27,33 @@ defmodule Assistant.Skills.Files.Read do
 
   @impl true
   def execute(flags, context) do
-    drive = Map.get(context.integrations, :drive, Drive)
-    file_id = Map.get(flags, "id")
-    format = Map.get(flags, "format")
+    case Map.get(context.integrations, :drive) do
+      nil ->
+        {:ok, %Result{status: :error, content: "Google Drive integration not configured."}}
 
-    cond do
-      is_nil(file_id) || file_id == "" ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
+      drive ->
+        token = context.google_token
+        file_id = Map.get(flags, "id")
+        format = Map.get(flags, "format")
 
-      true ->
-        read_and_format(drive, file_id, format)
+        cond do
+          is_nil(file_id) || file_id == "" ->
+            {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
+
+          true ->
+            read_and_format(drive, token, file_id, format)
+        end
     end
   end
 
-  defp read_and_format(drive, file_id, format) do
+  defp read_and_format(drive, token, file_id, format) do
     opts = if format, do: [export_mime_type: format], else: []
 
-    case drive.read_file(file_id, opts) do
+    case drive.read_file(token, file_id, opts) do
       {:ok, content} when is_binary(content) ->
         {display_content, truncated?} = maybe_truncate(content)
 
-        header = build_header(drive, file_id)
+        header = build_header(drive, token, file_id)
 
         truncation_note =
           if truncated?,
@@ -83,8 +89,8 @@ defmodule Assistant.Skills.Files.Read do
     end
   end
 
-  defp build_header(drive, file_id) do
-    case drive.get_file(file_id) do
+  defp build_header(drive, token, file_id) do
+    case drive.get_file(token, file_id) do
       {:ok, metadata} ->
         type_label =
           if Drive.google_workspace_type?(metadata.mime_type), do: " (exported as text)", else: ""

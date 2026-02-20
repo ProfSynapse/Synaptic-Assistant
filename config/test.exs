@@ -26,8 +26,19 @@ config :assistant, AssistantWeb.Endpoint,
   secret_key_base: "27fsLlwxFAdrfzZvsTKefyNOFNT2ucWuIv/xYSS2myafQ6FEGytY1Gew0fD2BWU2",
   server: false
 
-# Oban: inline mode for deterministic test execution
-config :assistant, Oban, testing: :inline
+# Oban: inline mode for deterministic test execution, no cron plugins
+config :assistant, Oban, testing: :inline, plugins: false
+
+# Cloak encryption key for tests (deterministic, NOT used in prod)
+config :assistant, Assistant.Vault,
+  ciphers: [
+    default: {
+      Cloak.Ciphers.AES.GCM,
+      tag: "AES.GCM.V1",
+      # 32-byte test-only key
+      key: Base.decode64!("dCtzMVByc1hTZ3RwNGNSRVlDemVxUCtiaGs2UGxGY1k=")
+    }
+  ]
 
 # Avoid runtime crashes in tests that exercise OpenRouter paths without mocks.
 config :assistant, :openrouter_api_key, "test-openrouter-key"

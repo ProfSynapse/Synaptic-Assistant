@@ -1,7 +1,9 @@
 # lib/assistant/integrations/google/chat.ex — Google Chat REST API client.
 #
 # Provides functions for sending messages to Google Chat spaces via the
-# REST API. Uses service account authentication via Google.Auth.
+# REST API. Uses service account authentication via Auth.service_token/0.
+# Chat is a bot-level integration (not per-user), so it does NOT accept
+# an access_token parameter — it fetches its own service account token.
 #
 # Related files:
 #   - lib/assistant/integrations/google/auth.ex (token provider)
@@ -12,8 +14,10 @@ defmodule Assistant.Integrations.Google.Chat do
   @moduledoc """
   Google Chat REST API client for sending messages.
 
-  Sends messages to Google Chat spaces using service account authentication.
-  Supports threaded replies via the `thread_name` option.
+  Sends messages to Google Chat spaces using service account authentication
+  via `Auth.service_token/0`. Unlike Drive, Gmail, and Calendar clients,
+  Chat does NOT accept a per-user `access_token` — it always uses the
+  service account.
 
   ## Usage
 
@@ -67,7 +71,7 @@ defmodule Assistant.Integrations.Google.Chat do
     thread_name = Keyword.get(opts, :thread_name)
     truncated_text = truncate_message(text)
 
-    with {:ok, token} <- Auth.token() do
+    with {:ok, token} <- Auth.service_token() do
       body = build_body(truncated_text, thread_name)
       query_params = build_query_params(thread_name)
       url = "#{@base_url}/#{space_name}/messages"

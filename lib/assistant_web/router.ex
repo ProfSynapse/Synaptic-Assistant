@@ -1,17 +1,11 @@
+# lib/assistant_web/router.ex — Phoenix router for webhook and OAuth endpoints.
+#
+# Routes include JSON API endpoints for webhooks and browser-facing HTML
+# endpoints for the OAuth2 authorization flow (magic link start + callback).
+# Webhook routes will be added as channel adapters are implemented.
+
 defmodule AssistantWeb.Router do
   use AssistantWeb, :router
-
-  import AssistantWeb.SettingsUserAuth
-
-  pipeline :browser do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {AssistantWeb.Layouts, :root}
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
-    plug :fetch_current_scope_for_settings_user
-  end
 
   pipeline :api do
     plug :accepts, ["json"]
@@ -42,52 +36,11 @@ defmodule AssistantWeb.Router do
     post "/telegram", WebhookController, :telegram
   end
 
-  ## Authentication routes
-
-  scope "/", AssistantWeb do
-    pipe_through [:browser, :require_authenticated_settings_user]
-
-    live_session :require_authenticated_settings_user,
-      on_mount: [{AssistantWeb.SettingsUserAuth, :require_authenticated}] do
-      live "/", SettingsLive, :profile
-      live "/settings", SettingsLive, :profile
-      live "/settings/workflows/:name/edit", WorkflowEditorLive, :edit
-      live "/settings/:section", SettingsLive, :section
-
-      live "/settings_users/settings", SettingsUserLive.Settings, :edit
-
-      live "/settings_users/settings/confirm-email/:token",
-           SettingsUserLive.Settings,
-           :confirm_email
-    end
-
-    post "/settings_users/update-password", SettingsUserSessionController, :update_password
-  end
-
-  scope "/", AssistantWeb do
-    pipe_through [:browser]
-
-    get "/settings_users/auth/google", SettingsUserOAuthController, :request
-    get "/settings_users/auth/google/callback", SettingsUserOAuthController, :callback
-
-    live_session :current_settings_user,
-      on_mount: [{AssistantWeb.SettingsUserAuth, :mount_current_scope}] do
-      live "/settings_users/register", SettingsUserLive.Registration, :new
-      live "/settings_users/log-in", SettingsUserLive.Login, :new
-      live "/settings_users/magic-link", SettingsUserLive.Login, :magic
-      live "/settings_users/log-in/:token", SettingsUserLive.Confirmation, :new
-    end
-
-    post "/settings_users/log-in", SettingsUserSessionController, :create
-    delete "/settings_users/log-out", SettingsUserSessionController, :delete
-  end
-
-  if Application.compile_env(:assistant, :dev_routes, false) do
-    scope "/dev" do
-      pipe_through :browser
-
-      get "/quick-login", AssistantWeb.SettingsUserDevController, :quick_login
-      forward "/mailbox", Plug.Swoosh.MailboxPreview
-    end
+  # OAuth2 browser flow — magic link start + Google callback.
+  # These routes serve HTML (not JSON) and are outside any auth pipeline.
+  # Security is enforced by magic link validation (start) and HMAC state (callback).
+  scope "/auth/google", AssistantWeb do
+    get "/start", OAuthController, :start
+    get "/callback", OAuthController, :callback
   end
 end

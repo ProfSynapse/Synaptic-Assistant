@@ -30,13 +30,14 @@ defmodule Assistant.Skills.Calendar.List do
         {:ok, %Result{status: :error, content: "Google Calendar integration not configured."}}
 
       calendar ->
+        token = context.google_token
         calendar_id = Map.get(flags, "calendar", "primary")
         limit = Helpers.parse_limit(Map.get(flags, "limit"))
 
         case build_opts(flags) do
           {:ok, opts} ->
             opts = Keyword.put(opts, :max_results, limit)
-            list_events(calendar, calendar_id, opts)
+            list_events(calendar, token, calendar_id, opts)
 
           {:error, reason} ->
             {:ok, %Result{status: :error, content: reason}}
@@ -44,8 +45,8 @@ defmodule Assistant.Skills.Calendar.List do
     end
   end
 
-  defp list_events(calendar, calendar_id, opts) do
-    case calendar.list_events(calendar_id, opts) do
+  defp list_events(calendar, token, calendar_id, opts) do
+    case calendar.list_events(token, calendar_id, opts) do
       {:ok, []} ->
         {:ok, %Result{status: :ok, content: "No events found.", metadata: %{count: 0}}}
 

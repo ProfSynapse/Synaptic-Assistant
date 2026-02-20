@@ -60,20 +60,7 @@
       "Bash(git rm:*)",
       "Bash(tee:*)",
       "Bash(mktemp:*)",
-      "Bash(MIX_ENV=dev mix compile:*)",
-      "Bash(/Users/jrosenbaum/Documents/Code/Synaptic-Assistant/.worktrees/feature/google-oauth2-magic-link/test/assistant/auth/magic_link_test.exs:*)",
-      "Bash(/Users/jrosenbaum/Documents/Code/Synaptic-Assistant/.worktrees/feature/google-oauth2-magic-link/test/assistant/auth/oauth_test.exs:*)",
-      "Bash(ELEVENLABS_VOICE_ID=test-voice-id MIX_ENV=test mix test:*)",
-      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-voice-id MIX_ENV=test mix test:*)",
-      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-voice-id CLOAK_ENCRYPTION_KEY=\"Q5UmN+2rIM+Fpep+9KYgyKHKNMLuj9vwL2plpp+ADko=\" MIX_ENV=test mix test:*)",
-      "Bash(/Users/jrosenbaum/Documents/Code/Synaptic-Assistant/.worktrees/feature/google-oauth2-magic-link/test/assistant/auth/auth_test.exs:*)",
-      "Bash(ELEVENLABS_VOICE_ID=test-voice MIX_ENV=test mix test:*)",
-      "Bash(ELEVENLABS_VOICE_ID=test-voice-id mix test:*)",
-      "Bash(ENV_VAR=placeholder mix test:*)",
-      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-id mix test:*)",
-      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-id CLOAK_ENCRYPTION_KEY=\"d+s1PrsXSgtp4cREYCzeqP+bhk6PlFcY2RhspbKrEJA=\" mix test:*)",
-      "Bash(lsof:*)",
-      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test mix compile:*)"
+      "Bash(MIX_ENV=dev mix compile:*)"
     ]
   }
 }

@@ -1,9 +1,11 @@
 # lib/assistant/integrations/google/calendar.ex — Google Calendar API wrapper.
 #
-# Thin wrapper around GoogleApi.Calendar.V3 that handles Goth authentication
-# and normalizes response structs into plain maps. Used by calendar domain
-# skills (calendar.list, calendar.get, calendar.create, calendar.update) and
-# any component needing Calendar access.
+# Thin wrapper around GoogleApi.Calendar.V3 that normalizes response structs
+# into plain maps. All public API functions accept an `access_token` as their
+# first parameter — the caller (orchestrator/context builder) is responsible
+# for resolving the token. Used by calendar domain skills (calendar.list,
+# calendar.get, calendar.create, calendar.update) and any component needing
+# Calendar access.
 #
 # Related files:
 #   - lib/assistant/integrations/google/auth.ex (token provider)
@@ -17,8 +19,9 @@ defmodule Assistant.Integrations.Google.Calendar do
   Google Calendar API client wrapping `GoogleApi.Calendar.V3`.
 
   Provides high-level functions for listing, getting, creating, and updating
-  events in Google Calendar. Authentication is handled via
-  `Assistant.Integrations.Google.Auth` (Goth-based service account tokens).
+  events in Google Calendar. All API-calling public functions accept an
+  `access_token` as their first parameter — the caller is responsible for
+  resolving the token (via `Auth.user_token/1` or `Auth.service_token/0`).
 
   All public functions return normalized plain maps rather than GoogleApi
   structs, making them easier to work with in skill handlers and tests.
@@ -26,20 +29,20 @@ defmodule Assistant.Integrations.Google.Calendar do
   ## Usage
 
       # List upcoming events
-      {:ok, events} = Calendar.list_events("primary", time_min: "2026-02-18T00:00:00Z")
+      {:ok, events} = Calendar.list_events(access_token, "primary", time_min: "2026-02-18T00:00:00Z")
 
       # Get a single event
-      {:ok, event} = Calendar.get_event("event_id_123")
+      {:ok, event} = Calendar.get_event(access_token, "event_id_123")
 
       # Create an event
-      {:ok, event} = Calendar.create_event(%{
+      {:ok, event} = Calendar.create_event(access_token, %{
         summary: "Team standup",
         start: "2026-02-19T09:00:00Z",
         end: "2026-02-19T09:30:00Z"
       })
 
       # Update an event
-      {:ok, event} = Calendar.update_event("event_id_123", %{summary: "Updated title"})
+      {:ok, event} = Calendar.update_event(access_token, "event_id_123", %{summary: "Updated title"})
   """
 
   require Logger
@@ -53,6 +56,7 @@ defmodule Assistant.Integrations.Google.Calendar do
 
   ## Parameters
 
+    - `access_token` - OAuth2 access token string
     - `calendar_id` - Calendar identifier (default `"primary"`)
     - `opts` - Optional keyword list:
       - `:time_min` - Lower bound (RFC 3339 string)
@@ -66,27 +70,27 @@ defmodule Assistant.Integrations.Google.Calendar do
     - `{:ok, [normalized_event_map]}` on success
     - `{:error, term()}` on failure
   """
-  @spec list_events(String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
-  def list_events(calendar_id \\ "primary", opts \\ []) do
-    with {:ok, conn} <- get_connection() do
-      api_opts =
-        [
-          maxResults: Keyword.get(opts, :max_results, 10),
-          singleEvents: Keyword.get(opts, :single_events, true),
-          orderBy: Keyword.get(opts, :order_by, "startTime")
-        ]
-        |> add_opt(:timeMin, Keyword.get(opts, :time_min))
-        |> add_opt(:timeMax, Keyword.get(opts, :time_max))
+  @spec list_events(String.t(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def list_events(access_token, calendar_id \\ "primary", opts \\ []) do
+    conn = get_connection(access_token)
 
-      case Events.calendar_events_list(conn, calendar_id, api_opts) do
-        {:ok, %Model.Events{items: items}} ->
-          normalized = Enum.map(items || [], &normalize_event/1)
-          {:ok, normalized}
+    api_opts =
+      [
+        maxResults: Keyword.get(opts, :max_results, 10),
+        singleEvents: Keyword.get(opts, :single_events, true),
+        orderBy: Keyword.get(opts, :order_by, "startTime")
+      ]
+      |> add_opt(:timeMin, Keyword.get(opts, :time_min))
+      |> add_opt(:timeMax, Keyword.get(opts, :time_max))
 
-        {:error, reason} ->
-          Logger.warning("Calendar list_events failed: #{inspect(reason)}")
-          {:error, reason}
-      end
+    case Events.calendar_events_list(conn, calendar_id, api_opts) do
+      {:ok, %Model.Events{items: items}} ->
+        normalized = Enum.map(items || [], &normalize_event/1)
+        {:ok, normalized}
+
+      {:error, reason} ->
+        Logger.warning("Calendar list_events failed: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -95,6 +99,7 @@ defmodule Assistant.Integrations.Google.Calendar do
 
   ## Parameters
 
+    - `access_token` - OAuth2 access token string
     - `event_id` - The event identifier
     - `calendar_id` - Calendar identifier (default `"primary"`)
 
@@ -103,17 +108,17 @@ defmodule Assistant.Integrations.Google.Calendar do
     - `{:ok, normalized_event_map}` on success
     - `{:error, term()}` on failure
   """
-  @spec get_event(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
-  def get_event(event_id, calendar_id \\ "primary") do
-    with {:ok, conn} <- get_connection() do
-      case Events.calendar_events_get(conn, calendar_id, event_id) do
-        {:ok, %Model.Event{} = event} ->
-          {:ok, normalize_event(event)}
+  @spec get_event(String.t(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def get_event(access_token, event_id, calendar_id \\ "primary") do
+    conn = get_connection(access_token)
 
-        {:error, reason} ->
-          Logger.warning("Calendar get_event failed for #{event_id}: #{inspect(reason)}")
-          {:error, reason}
-      end
+    case Events.calendar_events_get(conn, calendar_id, event_id) do
+      {:ok, %Model.Event{} = event} ->
+        {:ok, normalize_event(event)}
+
+      {:error, reason} ->
+        Logger.warning("Calendar get_event failed for #{event_id}: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -122,6 +127,7 @@ defmodule Assistant.Integrations.Google.Calendar do
 
   ## Parameters
 
+    - `access_token` - OAuth2 access token string
     - `event_params` - Map with event details:
       - `:summary` - Event title (required)
       - `:description` - Event description (optional)
@@ -136,19 +142,18 @@ defmodule Assistant.Integrations.Google.Calendar do
     - `{:ok, normalized_event_map}` on success
     - `{:error, term()}` on failure
   """
-  @spec create_event(map(), String.t()) :: {:ok, map()} | {:error, term()}
-  def create_event(event_params, calendar_id \\ "primary") do
-    with {:ok, conn} <- get_connection() do
-      event_body = build_event_struct(event_params)
+  @spec create_event(String.t(), map(), String.t()) :: {:ok, map()} | {:error, term()}
+  def create_event(access_token, event_params, calendar_id \\ "primary") do
+    conn = get_connection(access_token)
+    event_body = build_event_struct(event_params)
 
-      case Events.calendar_events_insert(conn, calendar_id, body: event_body) do
-        {:ok, %Model.Event{} = event} ->
-          {:ok, normalize_event(event)}
+    case Events.calendar_events_insert(conn, calendar_id, body: event_body) do
+      {:ok, %Model.Event{} = event} ->
+        {:ok, normalize_event(event)}
 
-        {:error, reason} ->
-          Logger.warning("Calendar create_event failed: #{inspect(reason)}")
-          {:error, reason}
-      end
+      {:error, reason} ->
+        Logger.warning("Calendar create_event failed: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -160,8 +165,9 @@ defmodule Assistant.Integrations.Google.Calendar do
 
   ## Parameters
 
+    - `access_token` - OAuth2 access token string
     - `event_id` - The event identifier
-    - `event_params` - Map with fields to update (same shape as `create_event/2`)
+    - `event_params` - Map with fields to update (same shape as `create_event/3`)
     - `calendar_id` - Calendar identifier (default `"primary"`)
 
   ## Returns
@@ -169,10 +175,11 @@ defmodule Assistant.Integrations.Google.Calendar do
     - `{:ok, normalized_event_map}` on success
     - `{:error, term()}` on failure
   """
-  @spec update_event(String.t(), map(), String.t()) :: {:ok, map()} | {:error, term()}
-  def update_event(event_id, event_params, calendar_id \\ "primary") do
-    with {:ok, conn} <- get_connection(),
-         {:ok, existing} <- fetch_raw_event(conn, calendar_id, event_id) do
+  @spec update_event(String.t(), String.t(), map(), String.t()) :: {:ok, map()} | {:error, term()}
+  def update_event(access_token, event_id, event_params, calendar_id \\ "primary") do
+    conn = get_connection(access_token)
+
+    with {:ok, existing} <- fetch_raw_event(conn, calendar_id, event_id) do
       updated = merge_event_updates(existing, event_params)
 
       case Events.calendar_events_update(conn, calendar_id, event_id, body: updated) do
@@ -189,14 +196,8 @@ defmodule Assistant.Integrations.Google.Calendar do
 
   # -- Private --
 
-  defp get_connection do
-    case Assistant.Integrations.Google.Auth.token() do
-      {:ok, access_token} ->
-        {:ok, Connection.new(access_token)}
-
-      {:error, _reason} = error ->
-        error
-    end
+  defp get_connection(access_token) do
+    Connection.new(access_token)
   end
 
   defp fetch_raw_event(conn, calendar_id, event_id) do

@@ -32,15 +32,16 @@ defmodule Assistant.Skills.Email.Search do
         {:ok, %Result{status: :error, content: "Gmail integration not configured."}}
 
       gmail ->
+        token = context.google_token
         limit = Helpers.parse_limit(Map.get(flags, "limit"))
         query = build_query(flags)
         full? = Helpers.full_mode?(flags)
-        search_messages(gmail, query, limit, full?)
+        search_messages(gmail, token, query, limit, full?)
     end
   end
 
-  defp search_messages(gmail, query, limit, full?) do
-    case gmail.search_messages(query, limit: limit) do
+  defp search_messages(gmail, token, query, limit, full?) do
+    case gmail.search_messages(token, query, limit: limit) do
       {:ok, []} ->
         {:ok,
          %Result{
