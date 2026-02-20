@@ -5,6 +5,12 @@
 #   2. user_token/1 — Per-user OAuth2 token from oauth_tokens table, with
 #      automatic refresh when expired via Auth.OAuth.refresh_access_token/1
 #
+# Concurrent refresh safety:
+#   When multiple requests hit an expired token simultaneously, :global.trans/3
+#   serializes refresh calls per-user. The first process acquires the lock and
+#   performs the Google refresh; subsequent processes wait, then re-check the
+#   DB for the freshly cached token (double-checked locking pattern).
+#
 # Related files:
 #   - lib/assistant/application.ex (starts Goth in the supervision tree)
 #   - lib/assistant/auth/oauth.ex (stateless token exchange + refresh)
@@ -28,6 +34,16 @@ defmodule Assistant.Integrations.Google.Auth do
     Checks whether the cached access token is still valid; if expired,
     transparently refreshes via `Auth.OAuth.refresh_access_token/1` and
     caches the new token in the database.
+
+  ## Concurrent Refresh Safety
+
+  When multiple requests for the same user arrive simultaneously with an
+  expired token, `:global.trans/3` serializes refresh calls per-user:
+
+  1. The first process acquires a per-user lock and performs the refresh.
+  2. Concurrent processes block on the lock, then re-check the DB for
+     the freshly cached token (double-checked locking).
+  3. No additional supervision tree entries or GenServers required.
 
   ## Usage
 
@@ -99,7 +115,7 @@ defmodule Assistant.Integrations.Google.Auth do
         if TokenStore.access_token_valid?(oauth_token) do
           {:ok, oauth_token.access_token}
         else
-          refresh_and_cache(user_id, oauth_token.refresh_token)
+          serialized_refresh(user_id, oauth_token.refresh_token)
         end
     end
   end
@@ -127,6 +143,47 @@ defmodule Assistant.Integrations.Google.Auth do
   end
 
   # --- Private ---
+
+  # Serialize concurrent refreshes for the same user via :global.trans/3.
+  # Uses double-checked locking: after acquiring the lock, re-reads the DB
+  # to see if another process already refreshed the token while we waited.
+  defp serialized_refresh(user_id, refresh_token) do
+    lock_id = {:token_refresh, user_id}
+
+    # :global.trans/3 acquires a cluster-wide lock on {lock_id, self()}.
+    # All processes for the same user_id serialize here. The lock is
+    # released when the function returns.
+    result =
+      :global.trans({lock_id, self()}, fn ->
+        # Double-check: re-read from DB — another process may have refreshed
+        # while we were waiting for the lock.
+        case TokenStore.get_google_token(user_id) do
+          {:ok, fresh_token} ->
+            if TokenStore.access_token_valid?(fresh_token) do
+              {:ok, fresh_token.access_token}
+            else
+              refresh_and_cache(user_id, refresh_token)
+            end
+
+          {:error, :not_connected} ->
+            {:error, :not_connected}
+        end
+      end)
+
+    # :global.trans returns :aborted if it cannot acquire the lock
+    # (e.g., nodes disagree). Fall back to a direct refresh attempt.
+    case result do
+      :aborted ->
+        Logger.warning("Global lock acquisition failed, falling back to direct refresh",
+          user_id: user_id
+        )
+
+        refresh_and_cache(user_id, refresh_token)
+
+      other ->
+        other
+    end
+  end
 
   defp refresh_and_cache(user_id, refresh_token) do
     case OAuth.refresh_access_token(refresh_token) do

@@ -188,15 +188,13 @@ defmodule Assistant.Auth.OAuth do
   def refresh_access_token(refresh_token) do
     with {:ok, client_id} <- fetch_client_id(),
          {:ok, client_secret} <- fetch_client_secret() do
-      source =
-        {:refresh_token,
-         %{
-           client_id: client_id,
-           client_secret: client_secret,
-           refresh_token: refresh_token
-         }}
+      credentials = %{
+        "client_id" => client_id,
+        "client_secret" => client_secret,
+        "refresh_token" => refresh_token
+      }
 
-      case Goth.Token.fetch(source) do
+      case Goth.Token.fetch(source: {:refresh_token, credentials}) do
         {:ok, %{token: access_token}} ->
           {:ok, access_token}
 
