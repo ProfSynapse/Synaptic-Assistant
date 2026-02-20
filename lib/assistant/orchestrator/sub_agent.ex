@@ -185,7 +185,13 @@ defmodule Assistant.Orchestrator.SubAgent do
       engine_state: engine_state
     ]
 
-    case start_link(opts) do
+    # Use GenServer.start (NOT start_link) to avoid linking the GenServer
+    # to the calling Task. With start_link, when the GenServer exits via
+    # {:stop, {:shutdown, result_map}, state}, the EXIT signal propagates
+    # to the linked Task and kills it before wait_for_completion can read
+    # the :DOWN message from the monitor. The monitor alone is sufficient
+    # for detecting GenServer termination.
+    case GenServer.start(__MODULE__, opts, name: via_tuple(agent_id)) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
         wait_for_completion(agent_id, ref)
