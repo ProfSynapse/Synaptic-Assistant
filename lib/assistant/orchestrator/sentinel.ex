@@ -155,9 +155,22 @@ defmodule Assistant.Orchestrator.Sentinel do
     case @llm_client.chat_completion(messages,
            model: model,
            temperature: 0.0,
-           max_tokens: 150,
+           max_tokens: 4096,
            response_format: @sentinel_response_format
          ) do
+      {:ok, %{content: nil} = response} ->
+        # Reasoning models (e.g. gpt-5-mini) may consume all tokens on
+        # reasoning, returning nil content. Log the finish_reason for
+        # diagnosis — "length" confirms token exhaustion.
+        Logger.warning("Sentinel received nil content from LLM (reasoning model token exhaustion?)",
+          agent_id: proposed_action[:agent_id],
+          skill_name: proposed_action[:skill_name],
+          model: model,
+          finish_reason: response[:finish_reason]
+        )
+
+        {:ok, :approved}
+
       {:ok, %{content: content}} ->
         case parse_decision(content) do
           {:ok, :approved, reason} ->

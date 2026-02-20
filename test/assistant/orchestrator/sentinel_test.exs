@@ -524,7 +524,7 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
         # Verify opts
         assert opts[:temperature] == 0.0
-        assert opts[:max_tokens] == 150
+        assert opts[:max_tokens] == 4096
         assert opts[:response_format] != nil
 
         approve_response("Aligned.")
