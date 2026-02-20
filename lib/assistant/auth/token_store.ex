@@ -1,138 +1,176 @@
-# lib/assistant/auth/token_store.ex — Encrypted CRUD for the oauth_tokens table.
+# lib/assistant/auth/token_store.ex — Encrypted CRUD for per-user OAuth tokens.
 #
-# Provides get, upsert, delete, and validity checks for per-user OAuth tokens.
-# All token fields (refresh_token, access_token) are encrypted at rest via
-# Cloak.Ecto (Assistant.Encrypted.Binary). Uses Assistant.Repo directly.
+# Provides a context module for reading, writing, and deleting oauth_tokens
+# rows. Tokens are encrypted at rest via Cloak AES-GCM (handled transparently
+# by the OAuthToken schema's Encrypted.Binary fields).
 #
 # Related files:
-#   - lib/assistant/schemas/oauth_token.ex (Ecto schema)
-#   - lib/assistant/auth/oauth.ex (token exchange and refresh)
-#   - lib/assistant/integrations/google/auth.ex (consumer — user_token/1)
-#   - lib/assistant/encrypted/binary.ex (Cloak encryption type)
+#   - lib/assistant/schemas/oauth_token.ex (Ecto schema with Cloak encryption)
+#   - lib/assistant/auth/oauth.ex (token exchange + refresh logic)
+#   - lib/assistant/auth/magic_link.ex (magic link lifecycle)
+#   - priv/repo/migrations/20260220130000_create_oauth_tokens.exs
 
 defmodule Assistant.Auth.TokenStore do
   @moduledoc """
-  Encrypted CRUD operations for OAuth tokens stored in the `oauth_tokens` table.
+  Encrypted CRUD operations for per-user OAuth tokens.
 
-  All token values are encrypted at rest via `Assistant.Encrypted.Binary`
-  (Cloak.Ecto with AES-GCM). This module provides the data access layer;
-  token refresh logic lives in `Assistant.Auth.OAuth`.
+  All token fields (`refresh_token`, `access_token`) are encrypted at rest
+  via `Assistant.Encrypted.Binary`. This module handles storage only — token
+  exchange and refresh logic lives in `Auth.OAuth`.
+
+  ## Usage
+
+      # Store tokens after OAuth code exchange
+      {:ok, oauth_token} = TokenStore.upsert_google_token(user_id, %{
+        refresh_token: "1//...",
+        access_token: "ya29...",
+        token_expires_at: ~U[2026-02-20 13:00:00Z],
+        provider_email: "user@example.com",
+        provider_uid: "12345",
+        scopes: "openid email profile ..."
+      })
+
+      # Retrieve for token refresh
+      {:ok, oauth_token} = TokenStore.get_google_token(user_id)
+
+      # Delete on disconnect
+      :ok = TokenStore.delete_google_token(user_id)
   """
-
-  require Logger
 
   import Ecto.Query
 
   alias Assistant.Repo
   alias Assistant.Schemas.OAuthToken
 
-  @doc """
-  Fetch an OAuth token for a user and provider.
+  require Logger
 
-  Returns `{:ok, %OAuthToken{}}` if found, `{:error, :not_found}` otherwise.
-  Token fields are decrypted transparently by Cloak.Ecto on read.
+  @google_provider "google"
+
+  @doc """
+  Get the Google OAuth token for a user.
+
+  Returns `{:ok, %OAuthToken{}}` if found, `{:error, :not_connected}` if
+  no token exists for this user.
   """
-  @spec get_token(binary(), String.t()) :: {:ok, OAuthToken.t()} | {:error, :not_found}
-  def get_token(user_id, provider \\ "google") do
+  @spec get_google_token(String.t()) :: {:ok, OAuthToken.t()} | {:error, :not_connected}
+  def get_google_token(user_id) do
     case Repo.one(
            from(t in OAuthToken,
-             where: t.user_id == ^user_id and t.provider == ^provider
+             where: t.user_id == ^user_id and t.provider == ^@google_provider
            )
          ) do
-      nil -> {:error, :not_found}
+      nil -> {:error, :not_connected}
       token -> {:ok, token}
     end
   end
 
   @doc """
-  Insert or update an OAuth token for a user and provider.
+  Upsert (insert or update) Google OAuth tokens for a user.
 
-  Uses `Repo.insert/2` with `on_conflict` to atomically upsert. If a row
-  already exists for the `(user_id, provider)` pair, it updates the token
-  fields. This handles both first-time authorization and token refresh.
+  On conflict (same user_id + provider), updates the refresh_token,
+  access_token, token_expires_at, provider_email, provider_uid, and scopes.
 
   ## Parameters
 
-    * `attrs` - Map with keys:
-      * `:user_id` (required) - The user's UUID
-      * `:provider` (required) - Provider name (e.g., "google")
-      * `:refresh_token` (required on first insert) - Plaintext refresh token (encrypted on write)
-      * `:access_token` (optional) - Plaintext access token (encrypted on write)
-      * `:token_expires_at` (optional) - DateTime when access token expires
-      * `:provider_uid` (optional) - Google 'sub' claim
-      * `:provider_email` (optional) - User's Google email
-      * `:scopes` (optional) - Space-delimited granted scopes
+    - `user_id` — the user's ID
+    - `attrs` — map with token fields:
+      - `:refresh_token` (required) — the refresh token from Google
+      - `:access_token` (optional) — the current access token
+      - `:token_expires_at` (optional) — when the access token expires
+      - `:provider_email` (optional) — Google account email
+      - `:provider_uid` (optional) — Google 'sub' claim
+      - `:scopes` (optional) — space-delimited OAuth scopes
 
   ## Returns
 
-    `{:ok, %OAuthToken{}}` on success, `{:error, changeset}` on validation failure.
+    `{:ok, %OAuthToken{}}` on success, `{:error, changeset}` on failure.
   """
-  @spec upsert_token(map()) :: {:ok, OAuthToken.t()} | {:error, Ecto.Changeset.t()}
-  def upsert_token(attrs) do
-    changeset = OAuthToken.changeset(%OAuthToken{}, attrs)
+  @spec upsert_google_token(String.t(), map()) ::
+          {:ok, OAuthToken.t()} | {:error, Ecto.Changeset.t()}
+  def upsert_google_token(user_id, attrs) do
+    full_attrs =
+      attrs
+      |> Map.put(:user_id, user_id)
+      |> Map.put(:provider, @google_provider)
 
-    # Fields to update on conflict (everything except user_id, provider, id, inserted_at)
-    update_fields = [
-      :access_token,
-      :token_expires_at,
-      :provider_uid,
-      :provider_email,
-      :scopes,
-      :updated_at
-    ]
-
-    # Only update refresh_token if a new one is provided (Google only sends it on first auth)
-    update_fields =
-      if attrs[:refresh_token] || attrs["refresh_token"] do
-        [:refresh_token | update_fields]
-      else
-        update_fields
-      end
-
-    Repo.insert(changeset,
-      on_conflict: {:replace, update_fields},
+    %OAuthToken{}
+    |> OAuthToken.changeset(full_attrs)
+    |> Repo.insert(
+      on_conflict:
+        {:replace,
+         [:refresh_token, :access_token, :token_expires_at, :provider_email, :provider_uid,
+          :scopes, :updated_at]},
       conflict_target: [:user_id, :provider],
       returning: true
     )
   end
 
   @doc """
-  Delete an OAuth token for a user and provider.
+  Update the cached access_token and its expiry for a user's Google token.
 
-  Called when a refresh token is revoked (invalid_grant from Google) to force
-  re-authorization via a new magic link.
+  Called after a successful token refresh to cache the new access token,
+  avoiding unnecessary refreshes on subsequent requests within the token's
+  lifetime.
 
-  Returns `{:ok, %OAuthToken{}}` if deleted, `{:error, :not_found}` if no row existed.
+  Returns `{:ok, %OAuthToken{}}` or `{:error, :not_connected}`.
   """
-  @spec delete_token(binary(), String.t()) :: {:ok, OAuthToken.t()} | {:error, :not_found}
-  def delete_token(user_id, provider \\ "google") do
-    case Repo.one(
-           from(t in OAuthToken,
-             where: t.user_id == ^user_id and t.provider == ^provider
-           )
-         ) do
-      nil ->
-        {:error, :not_found}
+  @spec update_access_token(String.t(), String.t(), DateTime.t()) ::
+          {:ok, OAuthToken.t()} | {:error, :not_connected | Ecto.Changeset.t()}
+  def update_access_token(user_id, access_token, expires_at) do
+    case get_google_token(user_id) do
+      {:ok, token} ->
+        token
+        |> Ecto.Changeset.change(access_token: access_token, token_expires_at: expires_at)
+        |> Repo.update()
 
-      token ->
-        Repo.delete(token)
+      {:error, :not_connected} = error ->
+        error
     end
   end
 
   @doc """
-  Check if an OAuth token's access token is still valid (not expired).
+  Delete the Google OAuth token for a user (disconnect).
 
-  Returns `true` if the token has an `access_token` and `token_expires_at` is
-  in the future (with a 60-second buffer for clock skew).
+  Returns `:ok` if deleted or if no token existed (idempotent).
   """
-  @spec token_valid?(OAuthToken.t()) :: boolean()
-  def token_valid?(%OAuthToken{access_token: nil}), do: false
+  @spec delete_google_token(String.t()) :: :ok
+  def delete_google_token(user_id) do
+    {_count, _} =
+      from(t in OAuthToken,
+        where: t.user_id == ^user_id and t.provider == ^@google_provider
+      )
+      |> Repo.delete_all()
 
-  def token_valid?(%OAuthToken{token_expires_at: nil}), do: false
+    :ok
+  end
 
-  def token_valid?(%OAuthToken{token_expires_at: expires_at}) do
+  @doc """
+  Check if a user has a connected Google account.
+
+  Returns `true` if an oauth_tokens row exists for this user+provider.
+  """
+  @spec google_connected?(String.t()) :: boolean()
+  def google_connected?(user_id) do
+    Repo.exists?(
+      from(t in OAuthToken,
+        where: t.user_id == ^user_id and t.provider == ^@google_provider
+      )
+    )
+  end
+
+  @doc """
+  Check if the cached access_token is still valid (not expired).
+
+  Returns `true` if the token exists and `token_expires_at` is in the future
+  (with a 60-second buffer for clock skew).
+  """
+  @spec access_token_valid?(OAuthToken.t()) :: boolean()
+  def access_token_valid?(%OAuthToken{access_token: nil}), do: false
+
+  def access_token_valid?(%OAuthToken{token_expires_at: nil}), do: false
+
+  def access_token_valid?(%OAuthToken{token_expires_at: expires_at}) do
     buffer = 60
-    now = DateTime.utc_now()
-    DateTime.diff(expires_at, now) > buffer
+    DateTime.compare(expires_at, DateTime.add(DateTime.utc_now(), buffer, :second)) == :gt
   end
 end

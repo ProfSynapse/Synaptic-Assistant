@@ -65,7 +65,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   alias Assistant.Auth.MagicLink
   alias Assistant.Config.{Loader, PromptLoader}
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
-  alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
+  alias Assistant.Orchestrator.{GoogleContext, LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Executor, Registry, Result}
 
@@ -754,7 +754,9 @@ defmodule Assistant.Orchestrator.SubAgent do
         reply_context: %{}
       }
 
-      case MagicLink.generate(skill_context.user_id, pending_intent: pending_intent) do
+      channel = to_string(engine_state[:channel] || "unknown")
+
+      case MagicLink.generate(skill_context.user_id, channel, pending_intent) do
         {:ok, %{url: url}} ->
           {:needs_auth, url}
 
@@ -1343,7 +1345,9 @@ defmodule Assistant.Orchestrator.SubAgent do
       metadata: %{
         agent_id: dispatch_params.agent_id,
         root_conversation_id: root_conversation_id,
-        agent_type: engine_state[:agent_type] || :orchestrator
+        agent_type: engine_state[:agent_type] || :orchestrator,
+        google_token: GoogleContext.resolve_google_token(user_id),
+        enabled_drives: GoogleContext.load_enabled_drives(user_id)
       }
     }
   end

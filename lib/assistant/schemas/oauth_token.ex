@@ -1,11 +1,10 @@
 defmodule Assistant.Schemas.OAuthToken do
   @moduledoc """
-  OAuth token schema. Stores per-user OAuth2 credentials (refresh + access tokens)
-  for external providers. Tokens are encrypted at rest via Cloak AES-GCM.
+  Per-user OAuth2 token for external providers (currently Google).
 
-  One row per user/provider pair (enforced by unique constraint).
-  Currently supports Google; the provider CHECK constraint can be extended
-  for future providers (e.g., HubSpot, Microsoft Graph).
+  Refresh and access tokens are encrypted at rest via Cloak AES-GCM.
+  One token row per (user, provider) pair. The `provider_email` field
+  stores the Google account email for display and first-connect confirmation.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -13,7 +12,7 @@ defmodule Assistant.Schemas.OAuthToken do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @valid_providers ~w(google)
+  @providers ~w(google)
 
   schema "oauth_tokens" do
     field :provider, :string
@@ -32,13 +31,11 @@ defmodule Assistant.Schemas.OAuthToken do
   @required_fields [:user_id, :provider, :refresh_token]
   @optional_fields [:provider_uid, :provider_email, :access_token, :token_expires_at, :scopes]
 
-  def changeset(oauth_token, attrs) do
-    oauth_token
+  def changeset(token, attrs) do
+    token
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
-    |> validate_inclusion(:provider, @valid_providers)
-    |> foreign_key_constraint(:user_id)
+    |> validate_inclusion(:provider, @providers)
     |> unique_constraint([:user_id, :provider])
   end
-
 end

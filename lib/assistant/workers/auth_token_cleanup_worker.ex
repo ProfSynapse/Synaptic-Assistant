@@ -1,53 +1,52 @@
-# lib/assistant/workers/auth_token_cleanup_worker.ex — Periodic cleanup of expired auth_tokens.
+# lib/assistant/workers/auth_token_cleanup_worker.ex — Oban cron worker for
+# purging expired auth_tokens.
 #
-# Runs as an Oban cron job to delete auth_tokens rows that are expired or consumed.
-# This prevents unbounded growth of the auth_tokens table from magic link usage.
+# Runs daily at 03:00 UTC (configured in config/config.exs Oban cron).
+# Deletes auth_token rows that are both expired (expires_at < now) AND
+# already used (used_at IS NOT NULL). Pending (unused) tokens are left alone
+# even if expired — they are harmless and may be useful for audit.
 #
 # Related files:
-#   - lib/assistant/schemas/auth_token.ex (Ecto schema)
-#   - lib/assistant/auth/magic_link.ex (generates/consumes auth_tokens)
-#   - config/config.exs (Oban cron configuration)
+#   - lib/assistant/schemas/auth_token.ex (schema)
+#   - lib/assistant/auth/token_store.ex (token CRUD)
+#   - config/config.exs (Oban cron schedule)
 
 defmodule Assistant.Workers.AuthTokenCleanupWorker do
   @moduledoc """
-  Oban cron worker that deletes stale auth_token rows.
+  Oban cron worker that purges expired, already-used auth tokens.
 
-  Targets rows that are either:
-  - Consumed (used_at IS NOT NULL) and older than 24 hours
-  - Expired (expires_at < now) and older than 24 hours
+  Runs daily at 03:00 UTC. Only deletes rows where `expires_at < NOW()`
+  AND `used_at IS NOT NULL` — pending tokens are never deleted, even if
+  expired, to preserve the audit trail and avoid races with in-flight
+  OAuth callbacks.
 
-  Runs daily in the :default queue via Oban cron.
+  ## Queue
+
+  Runs in the `:default` queue (no dedicated queue needed for a daily
+  lightweight cleanup job).
   """
 
-  use Oban.Worker,
-    queue: :default,
-    max_attempts: 1
-
-  require Logger
+  use Oban.Worker, queue: :default, max_attempts: 3
 
   import Ecto.Query
 
   alias Assistant.Repo
   alias Assistant.Schemas.AuthToken
 
-  @retention_hours 24
+  require Logger
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
-    cutoff = DateTime.add(DateTime.utc_now(), -@retention_hours * 3600, :second)
+    now = DateTime.utc_now()
 
-    {deleted, _} =
-      from(t in AuthToken,
-        where:
-          (not is_nil(t.used_at) and t.inserted_at < ^cutoff) or
-            (t.expires_at < ^cutoff)
-      )
+    {deleted_count, _} =
+      AuthToken
+      |> where([t], t.expires_at < ^now)
+      |> where([t], not is_nil(t.used_at))
       |> Repo.delete_all()
 
-    if deleted > 0 do
-      Logger.info("AuthTokenCleanupWorker: purged stale auth_tokens",
-        deleted_count: deleted
-      )
+    if deleted_count > 0 do
+      Logger.info("AuthTokenCleanupWorker: purged #{deleted_count} expired token(s)")
     end
 
     :ok

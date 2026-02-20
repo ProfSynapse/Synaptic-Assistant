@@ -21,6 +21,9 @@ defmodule Assistant.Schemas.User do
     has_many :created_tasks, Assistant.Schemas.Task, foreign_key: :creator_id
     has_many :memory_entries, Assistant.Schemas.MemoryEntry
     has_many :memory_entities, Assistant.Schemas.MemoryEntity
+    has_many :connected_drives, Assistant.Schemas.ConnectedDrive
+    has_many :oauth_tokens, Assistant.Schemas.OAuthToken
+    has_many :auth_tokens, Assistant.Schemas.AuthToken
 
     timestamps(type: :utc_datetime_usec)
   end

@@ -1,6 +1,6 @@
 # lib/assistant/skills/files/update.ex — Handler for files.update skill.
 #
-# Reads a Google Drive file, applies a string replacement (search → replace),
+# Reads a Google Drive file, applies a string replacement (search -> replace),
 # and writes the modified content back. Supports single or global replacement.
 #
 # Related files:
@@ -24,28 +24,47 @@ defmodule Assistant.Skills.Files.Update do
   def execute(flags, context) do
     case Map.get(context.integrations, :drive) do
       nil ->
-        {:ok, %Result{status: :error, content: "Google Drive integration not configured."}}
+        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
 
       drive ->
-        token = context.google_token
-        file_id = Map.get(flags, "id")
-        search = Map.get(flags, "search")
-        replace = Map.get(flags, "replace")
-        replace_all? = Map.get(flags, "all", false)
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
 
-        cond do
-          is_nil(file_id) || file_id == "" ->
-            {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
-
-          is_nil(search) || search == "" ->
-            {:ok, %Result{status: :error, content: "Missing required parameter: --search (text to find)."}}
-
-          is_nil(replace) ->
-            {:ok, %Result{status: :error, content: "Missing required parameter: --replace (replacement text)."}}
-
-          true ->
-            do_update(drive, token, file_id, search, replace, replace_all?)
+          token ->
+            do_execute(flags, drive, token)
         end
+    end
+  end
+
+  defp do_execute(flags, drive, token) do
+    file_id = Map.get(flags, "id")
+    search = Map.get(flags, "search")
+    replace = Map.get(flags, "replace")
+    replace_all? = Map.get(flags, "all", false)
+
+    cond do
+      is_nil(file_id) || file_id == "" ->
+        {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
+
+      is_nil(search) || search == "" ->
+        {:ok,
+         %Result{status: :error, content: "Missing required parameter: --search (text to find)."}}
+
+      is_nil(replace) ->
+        {:ok,
+         %Result{
+           status: :error,
+           content: "Missing required parameter: --replace (replacement text)."
+         }}
+
+      true ->
+        do_update(drive, token, file_id, search, replace, replace_all?)
     end
   end
 

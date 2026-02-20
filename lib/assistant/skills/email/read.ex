@@ -33,15 +33,25 @@ defmodule Assistant.Skills.Email.Read do
         {:ok, %Result{status: :error, content: "Gmail integration not configured."}}
 
       gmail ->
-        token = context.google_token
-        raw_id = Map.get(flags, "id")
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
 
-        if is_nil(raw_id) || raw_id == "" do
-          {:ok,
-           %Result{status: :error, content: "Missing required parameter: --id (message ID)."}}
-        else
-          ids = parse_ids(raw_id)
-          fetch_messages(gmail, token, ids)
+          token ->
+            raw_id = Map.get(flags, "id")
+
+            if is_nil(raw_id) || raw_id == "" do
+              {:ok,
+               %Result{status: :error, content: "Missing required parameter: --id (message ID)."}}
+            else
+              ids = parse_ids(raw_id)
+              fetch_messages(gmail, token, ids)
+            end
         end
     end
   end

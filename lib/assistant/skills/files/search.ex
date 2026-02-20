@@ -1,10 +1,12 @@
 # lib/assistant/skills/files/search.ex — Handler for files.search skill.
 #
 # Searches Google Drive files using the Drive API wrapper. Supports text query,
-# MIME type filtering, folder scoping, and result limiting.
+# MIME type filtering, folder scoping, and result limiting. Uses Drive.Scoping
+# to constrain searches to the user's enabled drives.
 #
 # Related files:
 #   - lib/assistant/integrations/google/drive.ex (Drive API client)
+#   - lib/assistant/integrations/google/drive/scoping.ex (query param builder)
 #   - lib/assistant/skills/handler.ex (behaviour)
 #   - priv/skills/files/search.md (skill definition)
 
@@ -21,6 +23,7 @@ defmodule Assistant.Skills.Files.Search do
   alias Assistant.Skills.Helpers, as: SkillsHelpers
   alias Assistant.Skills.Result
   alias Assistant.Integrations.Google.Drive
+  alias Assistant.Integrations.Google.Drive.Scoping
 
   @default_limit 20
   @max_limit 100
@@ -31,27 +34,55 @@ defmodule Assistant.Skills.Files.Search do
   def execute(flags, context) do
     case Map.get(context.integrations, :drive) do
       nil ->
-        {:ok, %Result{status: :error, content: "Google Drive integration not configured."}}
+        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
 
       drive ->
-        token = context.google_token
-        query = Map.get(flags, "query")
-        type = Map.get(flags, "type")
-        folder = Map.get(flags, "folder")
-        limit = SkillsHelpers.parse_limit(Map.get(flags, "limit"), @default_limit, @max_limit)
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
 
-        case build_query(query, type, folder) do
-          {:ok, q} ->
-            search_files(drive, token, q, limit)
-
-          {:error, reason} ->
-            {:ok, %Result{status: :error, content: reason}}
+          token ->
+            do_execute(flags, drive, token, context)
         end
     end
   end
 
-  defp search_files(drive, token, query, limit) do
-    case drive.list_files(token, query, pageSize: limit) do
+  defp do_execute(flags, drive, token, context) do
+    query = Map.get(flags, "query")
+    type = Map.get(flags, "type")
+    folder = Map.get(flags, "folder")
+    limit = SkillsHelpers.parse_limit(Map.get(flags, "limit"), @default_limit, @max_limit)
+
+    case build_query(query, type, folder) do
+      {:ok, q} ->
+        enabled_drives = context.metadata[:enabled_drives] || []
+        search_files(drive, token, q, limit, enabled_drives)
+
+      {:error, reason} ->
+        {:ok, %Result{status: :error, content: reason}}
+    end
+  end
+
+  defp search_files(drive, token, query, limit, enabled_drives) do
+    scopes =
+      case enabled_drives do
+        [] ->
+          # No drives configured — search user's default scope
+          [[]]
+
+        drives ->
+          case Scoping.build_query_params(drives) do
+            {:ok, param_sets} -> param_sets
+            {:error, :no_drives_enabled} -> [[]]
+          end
+      end
+
+    case query_all_scopes(drive, token, query, limit, scopes) do
       {:ok, []} ->
         {:ok,
          %Result{
@@ -76,6 +107,33 @@ defmodule Assistant.Skills.Files.Search do
            status: :error,
            content: "Drive search failed: #{inspect(reason)}"
          }}
+    end
+  end
+
+  # Issue one files.list call per scope, merge and deduplicate by file ID,
+  # then trim to the requested limit.
+  defp query_all_scopes(drive, token, query, limit, scopes) do
+    results =
+      Enum.reduce_while(scopes, {:ok, []}, fn scope_opts, {:ok, acc} ->
+        opts = Keyword.merge([pageSize: limit], scope_opts)
+
+        case drive.list_files(token, query, opts) do
+          {:ok, files} -> {:cont, {:ok, acc ++ files}}
+          {:error, _} = err -> {:halt, err}
+        end
+      end)
+
+    case results do
+      {:ok, all_files} ->
+        deduped =
+          all_files
+          |> Enum.uniq_by(& &1.id)
+          |> Enum.take(limit)
+
+        {:ok, deduped}
+
+      {:error, _} = err ->
+        err
     end
   end
 

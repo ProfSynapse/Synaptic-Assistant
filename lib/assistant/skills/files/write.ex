@@ -24,25 +24,40 @@ defmodule Assistant.Skills.Files.Write do
   def execute(flags, context) do
     case Map.get(context.integrations, :drive) do
       nil ->
-        {:ok, %Result{status: :error, content: "Google Drive integration not configured."}}
+        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
 
       drive ->
-        token = context.google_token
-        name = Map.get(flags, "name")
-        content = Map.get(flags, "content", "")
-        folder = Map.get(flags, "folder")
-        mime_type = Map.get(flags, "type")
+        case context.metadata[:google_token] do
+          nil ->
+            {:ok,
+             %Result{
+               status: :error,
+               content:
+                 "Google authentication required. Please connect your Google account."
+             }}
 
-        cond do
-          is_nil(name) || name == "" ->
-            {:ok, %Result{status: :error, content: "Missing required parameter: --name (file name)."}}
-
-          is_nil(content) ->
-            {:ok, %Result{status: :error, content: "Missing required parameter: --content (file content)."}}
-
-          true ->
-            create_file(drive, token, name, content, folder, mime_type)
+          token ->
+            do_execute(flags, drive, token)
         end
+    end
+  end
+
+  defp do_execute(flags, drive, token) do
+    name = Map.get(flags, "name")
+    content = Map.get(flags, "content", "")
+    folder = Map.get(flags, "folder")
+    mime_type = Map.get(flags, "type")
+
+    cond do
+      is_nil(name) || name == "" ->
+        {:ok, %Result{status: :error, content: "Missing required parameter: --name (file name)."}}
+
+      is_nil(content) ->
+        {:ok,
+         %Result{status: :error, content: "Missing required parameter: --content (file content)."}}
+
+      true ->
+        create_file(drive, token, name, content, folder, mime_type)
     end
   end
 

@@ -1,14 +1,12 @@
 # lib/assistant/integrations/google/drive.ex — Google Drive API wrapper.
 #
-# Thin wrapper around GoogleApi.Drive.V3 that normalizes response structs into
-# plain maps. All public API functions accept an `access_token` as their first
-# parameter — the caller (orchestrator/context builder) is responsible for
-# resolving the token. Used by file domain skills (files.search, files.read,
-# files.write, files.update, files.archive) and any component needing Drive
-# access.
+# Thin wrapper around GoogleApi.Drive.V3 that normalizes response structs
+# into plain maps. All public functions accept an `access_token` as first
+# parameter (per-user OAuth or service-account) to create a Tesla connection.
 #
 # Related files:
 #   - lib/assistant/integrations/google/auth.ex (token provider)
+#   - lib/assistant/integrations/google/drive/scoping.ex (query param builder)
 #   - lib/assistant/skills/files/search.ex (consumer — files.search skill)
 #   - lib/assistant/skills/files/read.ex (consumer — files.read skill)
 #   - lib/assistant/skills/files/write.ex (consumer — files.write skill)
@@ -19,10 +17,9 @@ defmodule Assistant.Integrations.Google.Drive do
   @moduledoc """
   Google Drive API client wrapping `GoogleApi.Drive.V3`.
 
-  Provides high-level functions for listing, reading, and creating files
-  in Google Drive. All API-calling public functions accept an `access_token`
-  as their first parameter — the caller is responsible for resolving the
-  token (via `Auth.user_token/1` or `Auth.service_token/0`).
+  Provides high-level functions for listing, reading, creating, and updating
+  files in Google Drive. All public functions that make API calls accept an
+  `access_token` string as the first parameter.
 
   All public functions return normalized plain maps rather than GoogleApi structs,
   making them easier to work with in skill handlers and tests.
@@ -30,21 +27,24 @@ defmodule Assistant.Integrations.Google.Drive do
   ## Usage
 
       # Search for files
-      {:ok, files} = Drive.list_files(access_token, "name contains 'report'", pageSize: 10)
+      {:ok, files} = Drive.list_files(token, "name contains 'report'", pageSize: 10)
 
       # Read file content (auto-detects Google Workspace types)
-      {:ok, content} = Drive.read_file(access_token, "1a2b3c4d")
+      {:ok, content} = Drive.read_file(token, "1a2b3c4d")
 
       # Create a new file
-      {:ok, file} = Drive.create_file(access_token, "notes.txt", "Hello world")
+      {:ok, file} = Drive.create_file(token, "notes.txt", "Hello world")
 
       # Update an existing file's content
-      {:ok, file} = Drive.update_file_content(access_token, "1a2b3c4d", "Updated content")
+      {:ok, file} = Drive.update_file_content(token, "1a2b3c4d", "Updated content")
+
+      # List shared drives
+      {:ok, drives} = Drive.list_shared_drives(token)
   """
 
   require Logger
 
-  alias GoogleApi.Drive.V3.Api.Files
+  alias GoogleApi.Drive.V3.Api.{Drives, Files}
   alias GoogleApi.Drive.V3.Connection
   alias GoogleApi.Drive.V3.Model
 
@@ -78,6 +78,10 @@ defmodule Assistant.Integrations.Google.Drive do
       - `:pageSize` - Max results (default 20, max 1000)
       - `:orderBy` - Sort order (default `"modifiedTime desc"`)
       - `:fields` - Response fields selector
+      - `:corpora` - Search scope (`"user"`, `"drive"`, `"allDrives"`)
+      - `:driveId` - Specific shared drive ID (when corpora is `"drive"`)
+      - `:includeItemsFromAllDrives` - Include shared drive items
+      - `:supportsAllDrives` - Indicate shared drive support
 
   ## Returns
 
@@ -87,7 +91,7 @@ defmodule Assistant.Integrations.Google.Drive do
   @spec list_files(String.t(), String.t(), keyword()) ::
           {:ok, [map()]} | {:error, term()}
   def list_files(access_token, query, opts \\ []) do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
 
     api_opts =
       [
@@ -97,6 +101,10 @@ defmodule Assistant.Integrations.Google.Drive do
         fields: Keyword.get(opts, :fields, @default_fields)
       ]
       |> add_opt(:pageToken, Keyword.get(opts, :pageToken))
+      |> add_opt(:corpora, Keyword.get(opts, :corpora))
+      |> add_opt(:driveId, Keyword.get(opts, :driveId))
+      |> add_opt(:includeItemsFromAllDrives, Keyword.get(opts, :includeItemsFromAllDrives))
+      |> add_opt(:supportsAllDrives, Keyword.get(opts, :supportsAllDrives))
 
     case Files.drive_files_list(conn, api_opts) do
       {:ok, %Model.FileList{files: files}} ->
@@ -124,9 +132,12 @@ defmodule Assistant.Integrations.Google.Drive do
   """
   @spec get_file(String.t(), String.t()) :: {:ok, map()} | {:error, :not_found | term()}
   def get_file(access_token, file_id) do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
 
-    case Files.drive_files_get(conn, file_id, fields: @single_file_fields) do
+    case Files.drive_files_get(conn, file_id,
+           fields: @single_file_fields,
+           supportsAllDrives: true
+         ) do
       {:ok, %Model.File{} = file} ->
         {:ok, normalize_file(file)}
 
@@ -159,7 +170,7 @@ defmodule Assistant.Integrations.Google.Drive do
   """
   @spec read_file(String.t(), String.t(), keyword()) :: {:ok, binary()} | {:error, term()}
   def read_file(access_token, file_id, opts \\ []) do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
 
     with {:ok, metadata} <- get_file(access_token, file_id) do
       if google_workspace_type?(metadata.mime_type) do
@@ -202,7 +213,7 @@ defmodule Assistant.Integrations.Google.Drive do
   """
   @spec create_file(String.t(), String.t(), binary(), keyword()) :: {:ok, map()} | {:error, term()}
   def create_file(access_token, name, content, opts \\ []) do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
     mime_type = Keyword.get(opts, :mime_type, "text/plain")
     parent_id = Keyword.get(opts, :parent_id)
 
@@ -217,14 +228,16 @@ defmodule Assistant.Integrations.Google.Drive do
            "multipart",
            metadata,
            content,
-           fields: "id,name,webViewLink"
+           fields: "id,name,webViewLink",
+           supportsAllDrives: true
          ) do
       {:ok, %Model.File{} = file} ->
-        {:ok, %{
-          id: file.id,
-          name: file.name,
-          web_view_link: file.webViewLink
-        }}
+        {:ok,
+         %{
+           id: file.id,
+           name: file.name,
+           web_view_link: file.webViewLink
+         }}
 
       {:error, reason} ->
         Logger.warning("Drive create_file failed for #{name}: #{inspect(reason)}")
@@ -255,7 +268,7 @@ defmodule Assistant.Integrations.Google.Drive do
   @spec update_file_content(String.t(), String.t(), binary(), String.t()) ::
           {:ok, map()} | {:error, term()}
   def update_file_content(access_token, file_id, content, mime_type \\ "text/plain") do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
     metadata = %Model.File{mimeType: mime_type}
 
     case Files.drive_files_update_iodata(
@@ -264,14 +277,16 @@ defmodule Assistant.Integrations.Google.Drive do
            "multipart",
            metadata,
            content,
-           fields: "id,name,webViewLink"
+           fields: "id,name,webViewLink",
+           supportsAllDrives: true
          ) do
       {:ok, %Model.File{} = file} ->
-        {:ok, %{
-          id: file.id,
-          name: file.name,
-          web_view_link: file.webViewLink
-        }}
+        {:ok,
+         %{
+           id: file.id,
+           name: file.name,
+           web_view_link: file.webViewLink
+         }}
 
       {:error, %Tesla.Env{status: 404}} ->
         {:error, :not_found}
@@ -327,11 +342,11 @@ defmodule Assistant.Integrations.Google.Drive do
   @spec move_file(String.t(), String.t(), String.t(), boolean()) ::
           {:ok, map()} | {:error, term()}
   def move_file(access_token, file_id, new_parent_id, remove_parents \\ true) do
-    conn = get_connection(access_token)
+    conn = Connection.new(access_token)
 
     with {:ok, file_meta} <- get_file(access_token, file_id) do
       api_opts =
-        [addParents: new_parent_id, fields: "id,name,parents"]
+        [addParents: new_parent_id, fields: "id,name,parents", supportsAllDrives: true]
         |> maybe_remove_parents(file_meta, remove_parents)
 
       case Files.drive_files_update(conn, file_id, api_opts) do
@@ -345,7 +360,53 @@ defmodule Assistant.Integrations.Google.Drive do
     end
   end
 
+  @doc """
+  List shared drives accessible to the authenticated user.
+
+  Returns a flat list of shared drives with their IDs and names.
+  Paginates automatically to return all results.
+
+  ## Parameters
+
+    - `access_token` - OAuth2 access token string
+
+  ## Returns
+
+    - `{:ok, [%{id: String.t(), name: String.t()}]}` on success
+    - `{:error, term()}` on failure
+  """
+  @spec list_shared_drives(String.t()) :: {:ok, [map()]} | {:error, term()}
+  def list_shared_drives(access_token) do
+    conn = Connection.new(access_token)
+    list_shared_drives_page(conn, nil, [])
+  end
+
   # -- Private --
+
+  defp list_shared_drives_page(conn, page_token, acc) do
+    opts =
+      [pageSize: 100, fields: "drives(id,name),nextPageToken"]
+      |> add_opt(:pageToken, page_token)
+
+    case Drives.drive_drives_list(conn, opts) do
+      {:ok, %{drives: drives, nextPageToken: next_token}} ->
+        normalized =
+          (drives || [])
+          |> Enum.map(fn d -> %{id: d.id, name: d.name} end)
+
+        all = acc ++ normalized
+
+        if next_token do
+          list_shared_drives_page(conn, next_token, all)
+        else
+          {:ok, all}
+        end
+
+      {:error, reason} ->
+        Logger.warning("Drive list_shared_drives failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
 
   defp maybe_remove_parents(opts, _file_meta, false), do: opts
 
@@ -357,10 +418,6 @@ defmodule Assistant.Integrations.Google.Drive do
       _ ->
         opts
     end
-  end
-
-  defp get_connection(access_token) do
-    Connection.new(access_token)
   end
 
   defp export_file(conn, file_id, export_mime_type) do

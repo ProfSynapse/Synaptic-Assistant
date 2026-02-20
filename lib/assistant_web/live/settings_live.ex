@@ -13,7 +13,15 @@ defmodule AssistantWeb.SettingsLive do
   alias Assistant.OrchestratorSystemPrompt
   alias Assistant.SkillPermissions
   alias Assistant.Transcripts
+  alias Assistant.Auth.OAuth
+  alias Assistant.Auth.TokenStore
+  alias Assistant.ConnectedDrives
+  alias Assistant.Integrations.Google.Auth, as: GoogleAuth
+  alias Assistant.Integrations.Google.Drive, as: GoogleDrive
   alias Assistant.Workflows
+
+  import AssistantWeb.Components.DriveSettings, only: [drive_settings: 1]
+  import AssistantWeb.Components.GoogleConnectStatus, only: [google_connect_status: 1]
 
   @sections ~w(profile models analytics memory apps workflows skills help)
 
@@ -144,6 +152,11 @@ defmodule AssistantWeb.SettingsLive do
      |> assign(:selected_memory, nil)
      |> assign(:apps_modal_open, false)
      |> assign(:app_catalog, @app_catalog)
+     |> assign(:connected_drives, [])
+     |> assign(:available_drives, [])
+     |> assign(:drives_loading, false)
+     |> assign(:google_connected, false)
+     |> assign(:google_email, nil)
      |> assign(:skills_permissions, [])
      |> assign(:help_articles, @help_articles)
      |> assign(:help_topic, nil)
@@ -237,6 +250,157 @@ defmodule AssistantWeb.SettingsLive do
      socket
      |> assign(:apps_modal_open, false)
      |> put_flash(:info, "#{app_name} added to your approved app connections list.")}
+  end
+
+  def handle_event("disconnect_google", _params, socket) do
+    case current_settings_user(socket) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "You must be logged in.")}
+
+      %{user_id: user_id} when not is_nil(user_id) ->
+        # Revoke token at Google before deleting from DB.
+        # Failure is non-fatal — log and continue with local deletion.
+        case TokenStore.get_google_token(user_id) do
+          {:ok, oauth_token} ->
+            case OAuth.revoke_token(oauth_token.access_token) do
+              :ok -> :ok
+              {:error, _reason} -> :ok
+            end
+
+          {:error, :not_connected} ->
+            :ok
+        end
+
+        TokenStore.delete_google_token(user_id)
+
+        {:noreply,
+         socket
+         |> assign(:google_connected, false)
+         |> assign(:google_email, nil)
+         |> put_flash(:info, "Google Workspace disconnected.")}
+
+      _settings_user ->
+        {:noreply, put_flash(socket, :error, "No linked user account.")}
+    end
+  end
+
+  def handle_event("refresh_drives", _params, socket) do
+    socket = assign(socket, :drives_loading, true)
+
+    user_id =
+      case current_settings_user(socket) do
+        %{user_id: uid} when not is_nil(uid) -> uid
+        _ -> nil
+      end
+
+    token_result =
+      if user_id,
+        do: GoogleAuth.user_token(user_id),
+        else: {:error, :no_user}
+
+    case token_result do
+      {:ok, access_token} ->
+        case GoogleDrive.list_shared_drives(access_token) do
+          {:ok, drives} ->
+            {:noreply,
+             socket
+             |> assign(:available_drives, drives)
+             |> assign(:drives_loading, false)
+             |> put_flash(:info, "Discovered #{length(drives)} shared drive(s).")}
+
+          {:error, _reason} ->
+            {:noreply,
+             socket
+             |> assign(:drives_loading, false)
+             |> put_flash(:error, "Failed to fetch shared drives from Google.")}
+        end
+
+      {:error, :not_connected} ->
+        {:noreply,
+         socket
+         |> assign(:drives_loading, false)
+         |> put_flash(:error, "Connect your Google account first to discover drives.")}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(:drives_loading, false)
+         |> put_flash(:error, "Google credentials not configured.")}
+    end
+  end
+
+  def handle_event("toggle_drive", %{"id" => id, "enabled" => enabled}, socket) do
+    enabled? = enabled == "true"
+
+    case ConnectedDrives.toggle(id, enabled?) do
+      {:ok, _drive} ->
+        {:noreply, load_connected_drives(socket)}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Drive not found.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to toggle drive.")}
+    end
+  end
+
+  def handle_event("connect_drive", %{"drive_id" => drive_id, "name" => name}, socket) do
+    case current_settings_user(socket) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "You must be logged in.")}
+
+      %{user_id: user_id} when not is_nil(user_id) ->
+        attrs = %{drive_id: drive_id, drive_name: name, drive_type: "shared"}
+
+        case ConnectedDrives.connect(user_id, attrs) do
+          {:ok, _drive} ->
+            {:noreply,
+             socket
+             |> load_connected_drives()
+             |> put_flash(:info, "Connected #{name}.")}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to connect #{name}.")}
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No linked user account.")}
+    end
+  end
+
+  def handle_event("connect_personal_drive", _params, socket) do
+    case current_settings_user(socket) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "You must be logged in.")}
+
+      %{user_id: user_id} when not is_nil(user_id) ->
+        case ConnectedDrives.ensure_personal_drive(user_id) do
+          {:ok, _drive} ->
+            {:noreply,
+             socket
+             |> load_connected_drives()
+             |> put_flash(:info, "Connected My Drive.")}
+
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to connect My Drive.")}
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No linked user account.")}
+    end
+  end
+
+  def handle_event("disconnect_drive", %{"id" => id}, socket) do
+    case ConnectedDrives.disconnect(id) do
+      {:ok, _drive} ->
+        {:noreply,
+         socket
+         |> load_connected_drives()
+         |> put_flash(:info, "Drive disconnected.")}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to disconnect drive.")}
+    end
   end
 
   def handle_event("open_model_modal", params, socket) do
@@ -390,6 +554,8 @@ defmodule AssistantWeb.SettingsLive do
   defp load_section_data(socket, "models"), do: load_models(socket)
   defp load_section_data(socket, "analytics"), do: load_analytics(socket)
   defp load_section_data(socket, "memory"), do: socket |> load_transcripts() |> load_memories()
+  defp load_section_data(socket, "apps"),
+    do: socket |> load_google_status() |> load_connected_drives()
   defp load_section_data(socket, "skills"), do: load_skill_permissions(socket)
   defp load_section_data(socket, _section), do: socket
 
@@ -460,8 +626,8 @@ defmodule AssistantWeb.SettingsLive do
 
     user_id =
       case current_settings_user(socket) do
-        nil -> nil
-        settings_user -> settings_user.id
+        %{user_id: uid} when not is_nil(uid) -> uid
+        _ -> nil
       end
 
     query_opts = [
@@ -490,6 +656,41 @@ defmodule AssistantWeb.SettingsLive do
 
   defp load_skill_permissions(socket) do
     assign(socket, :skills_permissions, SkillPermissions.list_permissions())
+  end
+
+  defp load_google_status(socket) do
+    case current_settings_user(socket) do
+      %{user_id: user_id} when not is_nil(user_id) ->
+        case TokenStore.get_google_token(user_id) do
+          {:ok, token} ->
+            socket
+            |> assign(:google_connected, true)
+            |> assign(:google_email, token.provider_email)
+
+          {:error, :not_connected} ->
+            socket
+            |> assign(:google_connected, false)
+            |> assign(:google_email, nil)
+        end
+
+      _ ->
+        socket
+    end
+  rescue
+    _ -> socket
+  end
+
+  defp load_connected_drives(socket) do
+    case current_settings_user(socket) do
+      %{user_id: user_id} when not is_nil(user_id) ->
+        drives = ConnectedDrives.list_for_user(user_id)
+        assign(socket, :connected_drives, drives)
+
+      _ ->
+        socket
+    end
+  rescue
+    _ -> socket
   end
 
   defp load_profile(socket) do
@@ -1379,7 +1580,27 @@ defmodule AssistantWeb.SettingsLive do
                 </div>
                 <p>{app.summary}</p>
                 <p class="sa-muted">Scopes: {app.scopes}</p>
+                <.google_connect_status
+                  :if={app.id == "google_workspace"}
+                  connected={@google_connected}
+                  email={@google_email}
+                />
               </article>
+            </div>
+
+            <.drive_settings
+              :if={@google_connected}
+              connected_drives={@connected_drives}
+              available_drives={@available_drives}
+              drives_loading={@drives_loading}
+              has_google_token={GoogleAuth.configured?()}
+            />
+            <div :if={!@google_connected} class="sa-drive-settings">
+              <h3>Google Drive Access</h3>
+              <div class="sa-drive-notice sa-drive-notice--info">
+                <.icon name="hero-information-circle" class="h-5 w-5" />
+                <span>Connect your Google account above to manage Drive access.</span>
+              </div>
             </div>
 
             <.modal :if={@apps_modal_open} id="apps-modal" title="Add App" max_width="lg" on_cancel={JS.push("close_add_app_modal")}>
