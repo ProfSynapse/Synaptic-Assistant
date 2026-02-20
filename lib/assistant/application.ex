@@ -28,6 +28,8 @@ defmodule Assistant.Application do
         {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Assistant.PubSub}
       ] ++
+        # Google Chat bot service account (conditional — only when credentials are configured).
+        # Used ONLY for chat.bot scope. Per-user OAuth2 is stateless (no supervised process).
         maybe_goth() ++
         [
           # Cron scheduler (before Oban — scheduled jobs may enqueue Oban work)
@@ -76,12 +78,11 @@ defmodule Assistant.Application do
     :ok
   end
 
-  # Returns Goth child spec if Google credentials are configured, empty list otherwise.
+  # Returns Goth child spec if Google service account credentials are configured.
   # This allows the app to start in dev environments without Google credentials.
   #
-  # The service account Goth process is used ONLY for Google Chat bot operations.
-  # Per-user Google API calls (Drive, Gmail, Calendar) use per-user OAuth2 tokens
-  # managed by Auth.TokenStore and refreshed via Auth.OAuth.
+  # Goth is now used ONLY for the Chat bot (chat.bot scope).
+  # Per-user OAuth2 tokens are managed by Auth.TokenStore and refreshed via Auth.OAuth.
   defp maybe_goth do
     case Application.get_env(:assistant, :google_credentials) do
       nil ->
@@ -91,7 +92,9 @@ defmodule Assistant.Application do
         scopes = Assistant.Integrations.Google.Auth.scopes()
 
         [
-          {Goth, name: Assistant.Goth, source: {:service_account, credentials, scopes: scopes}}
+          {Goth,
+           name: Assistant.Goth,
+           source: {:service_account, credentials, [scopes: scopes]}}
         ]
     end
   end

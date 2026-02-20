@@ -68,13 +68,24 @@ defmodule Assistant.Skills.Executor do
 
     case result do
       {:ok, {:ok, %Result{} = skill_result}} ->
-        record_tool_analytics(handler, context, duration_ms, :ok)
+        if skill_result.status == :error do
+          record_tool_analytics(handler, context, duration_ms, :error, skill_result.content)
 
-        Logger.info("Skill executed successfully",
-          handler: inspect(handler),
-          duration_ms: duration_ms,
-          conversation_id: context.conversation_id
-        )
+          Logger.warning("Skill returned error result",
+            handler: inspect(handler),
+            content: String.slice(skill_result.content || "", 0, 200),
+            duration_ms: duration_ms,
+            conversation_id: context.conversation_id
+          )
+        else
+          record_tool_analytics(handler, context, duration_ms, :ok)
+
+          Logger.info("Skill executed successfully",
+            handler: inspect(handler),
+            duration_ms: duration_ms,
+            conversation_id: context.conversation_id
+          )
+        end
 
         {:ok, skill_result}
 

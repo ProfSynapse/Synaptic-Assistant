@@ -60,6 +60,7 @@ config :assistant, Oban,
   plugins: [
     {Oban.Plugins.Cron,
      crontab: [
+       # Purge expired/consumed auth_tokens daily at 03:00 UTC
        {"0 3 * * *", Assistant.Workers.AuthTokenCleanupWorker}
      ]}
   ]

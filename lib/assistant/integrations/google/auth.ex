@@ -133,6 +133,18 @@ defmodule Assistant.Integrations.Google.Auth do
   end
 
   @doc """
+  Check whether Google OAuth2 client credentials are configured.
+
+  Returns `true` if both `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`
+  are set. Required for per-user OAuth2 flow.
+  """
+  @spec oauth_configured?() :: boolean()
+  def oauth_configured? do
+    Application.get_env(:assistant, :google_oauth_client_id) != nil and
+      Application.get_env(:assistant, :google_oauth_client_secret) != nil
+  end
+
+  @doc """
   The Google Chat bot scope (service account only).
 
   Per-user scopes are defined in `Auth.OAuth.user_scopes/0`.

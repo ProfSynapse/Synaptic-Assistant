@@ -163,4 +163,48 @@ defmodule Assistant.Memory.StoreTest do
       assert hd(entries).content == "scoped"
     end
   end
+
+  # ---------------------------------------------------------------
+  # Bug 3 regression: FK violation on source_conversation_id
+  #
+  # When create_memory_entry is called with a source_conversation_id
+  # that doesn't exist in the conversations table, Postgres raises a
+  # FK constraint error. The changeset includes foreign_key_constraint
+  # for :source_conversation_id, so this should return {:error, changeset}
+  # rather than raising.
+  # ---------------------------------------------------------------
+
+  describe "create_memory_entry/1 with invalid source_conversation_id (Bug 3 regression)" do
+    test "returns {:error, changeset} for non-existent source_conversation_id" do
+      bogus_id = Ecto.UUID.generate()
+
+      result =
+        Store.create_memory_entry(%{
+          content: "memory with bad conversation ref",
+          source_conversation_id: bogus_id
+        })
+
+      assert {:error, %Ecto.Changeset{} = changeset} = result
+      assert errors_on(changeset)[:source_conversation_id] != nil
+    end
+
+    test "succeeds when source_conversation_id points to a real conversation" do
+      user = create_test_user()
+      {:ok, conv} = Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      assert {:ok, %MemoryEntry{} = entry} =
+               Store.create_memory_entry(%{
+                 content: "memory linked to real conversation",
+                 source_conversation_id: conv.id,
+                 user_id: user.id
+               })
+
+      assert entry.source_conversation_id == conv.id
+    end
+
+    test "succeeds when source_conversation_id is nil (not linked)" do
+      assert {:ok, %MemoryEntry{}} =
+               Store.create_memory_entry(%{content: "unlinked memory"})
+    end
+  end
 end

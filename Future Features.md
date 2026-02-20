@@ -1,0 +1,4 @@
+- Add an admin level. Admins can provision other users on the same account so there can be shared memory/acces but scoped controls
+- turn into a desktop app version using burrito and tauri
+- add the openrouter oauth button
+- if desktop add local llm acces through ollama/lmstudio

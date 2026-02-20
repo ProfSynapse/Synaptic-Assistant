@@ -1,4 +1,13 @@
 defmodule Assistant.Repo.Migrations.CreateAuthTokens do
+  @moduledoc """
+  Creates the auth_tokens table for magic link token storage.
+
+  Magic link tokens are single-use, time-limited tokens used to initiate
+  OAuth2 flows. The raw token is never stored — only its SHA-256 hash.
+
+  The oban_job_id column links to a parked PendingIntentWorker Oban job
+  that will replay the user's original command after OAuth completes.
+  """
   use Ecto.Migration
 
   def change do
@@ -8,11 +17,9 @@ defmodule Assistant.Repo.Migrations.CreateAuthTokens do
       add :user_id, references(:users, type: :binary_id, on_delete: :delete_all),
         null: false
 
-      add :token_hash, :string, null: false
-      add :purpose, :string, null: false
-      add :code_verifier, :string
-      add :oban_job_id, :integer
-      add :pending_intent, :binary
+      add :token_hash, :text, null: false
+      add :purpose, :text, null: false
+      add :oban_job_id, :bigint
       add :expires_at, :utc_datetime_usec, null: false
       add :used_at, :utc_datetime_usec
 
@@ -20,17 +27,15 @@ defmodule Assistant.Repo.Migrations.CreateAuthTokens do
     end
 
     create constraint(:auth_tokens, :valid_purpose,
-      check: "purpose IN ('oauth_google')"
-    )
+             check: "purpose IN ('oauth_google')"
+           )
 
     create unique_index(:auth_tokens, [:token_hash])
-
     create index(:auth_tokens, [:expires_at])
 
-    # Fast lookup: unused tokens for a user+purpose (magic link validation)
     create index(:auth_tokens, [:user_id, :purpose],
-      name: :auth_tokens_user_purpose_unused,
-      where: "used_at IS NULL"
-    )
+             where: "used_at IS NULL",
+             name: :idx_auth_tokens_user_purpose_unused
+           )
   end
 end
