@@ -8,7 +8,7 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
 - Resume: `claude --resume 174f7e2a-5972-4e16-a3cd-4490ca9de13b`
 - Team: `pact-174f7e2a`
-- Started: 2026-02-21 14:33:41 UTC
+- Started: 2026-02-21 14:52:20 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -77,7 +77,7 @@ Two separate tables: `settings_users` (web dashboard login) and `users` (chat us
 Settings-user-level PKCE OAuth connect flow. Key patterns:
 - **Storage**: `settings_users.openrouter_api_key` (encrypted `Encrypted.Binary`) — NOT `oauth_tokens` (avoids chat user_id dependency)
 - **Flow**: `/settings_users/auth/openrouter` → OpenRouter PKCE consent → `/callback` → POST `https://openrouter.ai/api/v1/auth/keys` → permanent `sk-or-v1-...` key stored
-- **App key required**: `OPENROUTER_APP_API_KEY` env var used as Bearer auth in code exchange — must be set
+- **Zero-config**: No server API key needed — code exchange sends `code_verifier` + `code_challenge_method: "S256"` in body with no Authorization header; works out of the box for self-hosters
 - **No refresh tokens, no revocation endpoint** — disconnect = `delete_openrouter_api_key/1` (DB only)
 - **Per-user key threading**: `Accounts.openrouter_key_for_user(user_id)` bridges `users.id` → `settings_users.openrouter_api_key`; all LLM callers pass `api_key:` opt; falls back to system key when nil (unlike Google which rejects)
 - **Controller**: `OpenRouterOAuthController` — `request/2` + `callback/2` only; disconnect handled by LiveView `phx-click="disconnect_openrouter"`
