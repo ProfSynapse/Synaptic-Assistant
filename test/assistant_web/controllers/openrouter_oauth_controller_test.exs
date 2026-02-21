@@ -1,7 +1,7 @@
 # test/assistant_web/controllers/openrouter_oauth_controller_test.exs
 #
 # Tests for the OpenRouter PKCE OAuth controller.
-# Covers request (initiation), callback (code exchange), and disconnect flows.
+# Covers request (initiation) and callback (code exchange) flows.
 # Uses Bypass to mock OpenRouter's key exchange endpoint.
 #
 # Related files:
@@ -10,7 +10,7 @@
 #   - test/support/conn_case.ex (register_and_log_in_settings_user helper)
 
 defmodule AssistantWeb.OpenRouterOAuthControllerTest do
-  # async: false — modifies global Application env for openrouter_app_api_key.
+  # async: false — modifies global Application env for openrouter_keys_url.
   use AssistantWeb.ConnCase, async: false
 
   alias Assistant.Accounts
@@ -20,16 +20,9 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
   # ---------------------------------------------------------------
 
   setup do
-    original_app_key = Application.get_env(:assistant, :openrouter_app_api_key)
     original_keys_url = Application.get_env(:assistant, :openrouter_keys_url)
 
     on_exit(fn ->
-      if is_nil(original_app_key) do
-        Application.delete_env(:assistant, :openrouter_app_api_key)
-      else
-        Application.put_env(:assistant, :openrouter_app_api_key, original_app_key)
-      end
-
       if is_nil(original_keys_url) do
         Application.delete_env(:assistant, :openrouter_keys_url)
       else
@@ -38,10 +31,6 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
     end)
 
     :ok
-  end
-
-  defp configure_app_key do
-    Application.put_env(:assistant, :openrouter_app_api_key, "test-app-api-key")
   end
 
   defp configure_bypass do
@@ -63,11 +52,9 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
   describe "GET /settings_users/auth/openrouter (request)" do
     setup :register_and_log_in_settings_user
 
-    test "redirects to OpenRouter with PKCE params when authenticated and configured", %{
+    test "redirects to OpenRouter with PKCE params when authenticated", %{
       conn: conn
     } do
-      configure_app_key()
-
       conn = get(conn, ~p"/settings_users/auth/openrouter")
 
       location = redirected_to(conn)
@@ -80,23 +67,10 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
       assert get_session(conn, :openrouter_pkce_verifier) |> is_binary()
       assert get_session(conn, :openrouter_pkce_verifier) != ""
     end
-
-    test "redirects to settings when OPENROUTER_APP_API_KEY not configured", %{conn: conn} do
-      Application.delete_env(:assistant, :openrouter_app_api_key)
-
-      conn = get(conn, ~p"/settings_users/auth/openrouter")
-
-      assert redirected_to(conn) == ~p"/settings"
-
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
-               "OpenRouter integration is not configured."
-    end
   end
 
   describe "GET /settings_users/auth/openrouter (request, unauthenticated)" do
     test "redirects to login when not authenticated", %{conn: conn} do
-      configure_app_key()
-
       conn = get(conn, ~p"/settings_users/auth/openrouter")
 
       assert redirected_to(conn) == ~p"/settings_users/log-in"
@@ -117,13 +91,18 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
       conn: conn,
       settings_user: settings_user
     } do
-      configure_app_key()
       bypass = configure_bypass()
 
       Bypass.expect_once(bypass, "POST", "/api/v1/auth/keys", fn bp_conn ->
         {:ok, body, bp_conn} = Plug.Conn.read_body(bp_conn)
         decoded = Jason.decode!(body)
         assert decoded["code"] == "test-auth-code"
+        assert decoded["code_verifier"] == "test-verifier-value"
+        assert decoded["code_challenge_method"] == "S256"
+
+        # No Authorization header should be present
+        auth_header = Plug.Conn.get_req_header(bp_conn, "authorization")
+        assert auth_header == []
 
         bp_conn
         |> Plug.Conn.put_resp_content_type("application/json")
@@ -153,8 +132,6 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
     setup :register_and_log_in_settings_user
 
     test "redirects to settings when PKCE verifier missing from session", %{conn: conn} do
-      configure_app_key()
-
       # No verifier in session — simulate direct callback hit
       conn = get(conn, ~p"/settings_users/auth/openrouter/callback?code=test-code")
 
@@ -165,7 +142,6 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
     end
 
     test "redirects to settings when code exchange returns non-200", %{conn: conn} do
-      configure_app_key()
       bypass = configure_bypass()
 
       Bypass.expect_once(bypass, "POST", "/api/v1/auth/keys", fn bp_conn ->
@@ -186,7 +162,6 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
     end
 
     test "redirects to settings when code exchange returns unexpected body", %{conn: conn} do
-      configure_app_key()
       bypass = configure_bypass()
 
       Bypass.expect_once(bypass, "POST", "/api/v1/auth/keys", fn bp_conn ->
@@ -207,7 +182,6 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
     end
 
     test "redirects to settings when code exchange HTTP request fails", %{conn: conn} do
-      configure_app_key()
       bypass = configure_bypass()
 
       Bypass.down(bypass)
@@ -253,53 +227,4 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
     end
   end
 
-  # ---------------------------------------------------------------
-  # DELETE /settings_users/auth/openrouter — disconnect/2
-  # ---------------------------------------------------------------
-
-  describe "DELETE /settings_users/auth/openrouter (disconnect)" do
-    setup :register_and_log_in_settings_user
-
-    test "removes API key and redirects to settings", %{
-      conn: conn,
-      settings_user: settings_user
-    } do
-      # Pre-set an API key
-      {:ok, _} = Accounts.save_openrouter_api_key(settings_user, "sk-or-existing-key")
-      assert Accounts.openrouter_connected?(Accounts.get_settings_user!(settings_user.id))
-
-      conn = delete(conn, ~p"/settings_users/auth/openrouter")
-
-      assert redirected_to(conn) == ~p"/settings"
-
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
-               "OpenRouter disconnected."
-
-      # Verify key removed from DB
-      reloaded = Accounts.get_settings_user!(settings_user.id)
-      refute Accounts.openrouter_connected?(reloaded)
-    end
-
-    test "succeeds even when no API key was stored", %{conn: conn, settings_user: settings_user} do
-      refute Accounts.openrouter_connected?(settings_user)
-
-      conn = delete(conn, ~p"/settings_users/auth/openrouter")
-
-      assert redirected_to(conn) == ~p"/settings"
-
-      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
-               "OpenRouter disconnected."
-    end
-  end
-
-  describe "DELETE /settings_users/auth/openrouter (unauthenticated)" do
-    test "redirects to login when not authenticated", %{conn: conn} do
-      conn = delete(conn, ~p"/settings_users/auth/openrouter")
-
-      assert redirected_to(conn) == ~p"/settings_users/log-in"
-
-      assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
-               "You must log in to disconnect OpenRouter."
-    end
-  end
 end

@@ -7,15 +7,15 @@
 #
 # OpenRouter uses a non-standard OAuth flow:
 #   - Authorization: GET https://openrouter.ai/auth with PKCE S256 challenge
-#   - Code exchange: POST https://openrouter.ai/api/v1/auth/keys (returns permanent API key)
-#   - No refresh tokens, no expiry, no revocation endpoint
+#   - Code exchange: POST https://openrouter.ai/api/v1/auth/keys with code_verifier
+#     (no server API key / Bearer token required — PKCE verifier proves identity)
+#   - Returns a permanent API key; no refresh tokens, no expiry, no revocation endpoint
 #   - No OAuth state parameter — PKCE verifier in session serves as CSRF protection
 #
 # Related files:
 #   - lib/assistant/accounts/settings_user.ex (encrypted openrouter_api_key field)
 #   - lib/assistant/accounts.ex (save_openrouter_api_key/2, delete_openrouter_api_key/1)
 #   - lib/assistant_web/router.ex (route definitions)
-#   - config/runtime.exs (OPENROUTER_API_KEY env var)
 
 defmodule AssistantWeb.OpenRouterOAuthController do
   use AssistantWeb, :controller
@@ -35,37 +35,30 @@ defmodule AssistantWeb.OpenRouterOAuthController do
   the session, and redirects the user to OpenRouter's authorization page.
   """
   def request(conn, _params) do
-    with {:ok, settings_user} <- fetch_settings_user(conn),
-         {:ok, _app_key} <- fetch_app_api_key() do
-      code_verifier = generate_code_verifier()
-      code_challenge = generate_code_challenge(code_verifier)
+    case fetch_settings_user(conn) do
+      {:ok, settings_user} ->
+        code_verifier = generate_code_verifier()
+        code_challenge = generate_code_challenge(code_verifier)
 
-      params =
-        URI.encode_query(%{
-          "callback_url" => callback_url(),
-          "code_challenge" => code_challenge,
-          "code_challenge_method" => "S256"
-        })
+        params =
+          URI.encode_query(%{
+            "callback_url" => callback_url(),
+            "code_challenge" => code_challenge,
+            "code_challenge_method" => "S256"
+          })
 
-      Logger.info("OpenRouter OAuth initiated",
-        settings_user_id: settings_user.id
-      )
+        Logger.info("OpenRouter OAuth initiated",
+          settings_user_id: settings_user.id
+        )
 
-      conn
-      |> put_session(@pkce_verifier_session_key, code_verifier)
-      |> redirect(external: "#{@openrouter_auth_url}?#{params}")
-    else
+        conn
+        |> put_session(@pkce_verifier_session_key, code_verifier)
+        |> redirect(external: "#{@openrouter_auth_url}?#{params}")
+
       {:error, :not_authenticated} ->
         conn
         |> put_flash(:error, "You must log in to connect OpenRouter.")
         |> redirect(to: ~p"/settings_users/log-in")
-
-      {:error, :missing_app_api_key} ->
-        Logger.warning("OpenRouter OAuth request failed: OPENROUTER_API_KEY not configured")
-
-        conn
-        |> put_flash(:error, "OpenRouter integration is not configured.")
-        |> redirect(to: ~p"/settings")
     end
   end
 
@@ -77,11 +70,11 @@ defmodule AssistantWeb.OpenRouterOAuthController do
   """
   def callback(conn, %{"code" => code}) do
     # fetch_pkce_verifier confirms the callback is from the same browser session that
-    # initiated the flow (CSRF protection). OpenRouter's API doesn't require the verifier
-    # in the key exchange — PKCE verification happens server-side at OpenRouter.
+    # initiated the flow (CSRF protection). The verifier is also sent to OpenRouter
+    # in the key exchange so they can verify it against the original challenge.
     with {:ok, settings_user} <- fetch_settings_user(conn),
-         {:ok, _code_verifier} <- fetch_pkce_verifier(conn),
-         {:ok, api_key} <- exchange_code_for_key(code),
+         {:ok, code_verifier} <- fetch_pkce_verifier(conn),
+         {:ok, api_key} <- exchange_code_for_key(code, code_verifier),
          {:ok, _settings_user} <- Accounts.save_openrouter_api_key(settings_user, api_key) do
       Logger.info("OpenRouter OAuth connected successfully",
         settings_user_id: settings_user.id
@@ -144,31 +137,22 @@ defmodule AssistantWeb.OpenRouterOAuthController do
     end
   end
 
-  defp fetch_app_api_key do
-    case Application.get_env(:assistant, :openrouter_api_key) do
-      key when is_binary(key) and key != "" ->
+  defp exchange_code_for_key(code, code_verifier) do
+    case Req.post(keys_url(),
+           json: %{
+             "code" => code,
+             "code_verifier" => code_verifier,
+             "code_challenge_method" => "S256"
+           }
+         ) do
+      {:ok, %Req.Response{status: 200, body: %{"key" => key}}} when is_binary(key) ->
         {:ok, key}
 
-      _ ->
-        {:error, :missing_app_api_key}
-    end
-  end
+      {:ok, %Req.Response{status: status, body: body}} ->
+        {:error, {:openrouter_key_exchange_failed, status, body}}
 
-  defp exchange_code_for_key(code) do
-    with {:ok, app_key} <- fetch_app_api_key() do
-      case Req.post(keys_url(),
-             json: %{"code" => code},
-             headers: [{"authorization", "Bearer #{app_key}"}]
-           ) do
-        {:ok, %Req.Response{status: 200, body: %{"key" => key}}} when is_binary(key) ->
-          {:ok, key}
-
-        {:ok, %Req.Response{status: status, body: body}} ->
-          {:error, {:openrouter_key_exchange_failed, status, body}}
-
-        {:error, reason} ->
-          {:error, {:openrouter_key_exchange_http_error, reason}}
-      end
+      {:error, reason} ->
+        {:error, {:openrouter_key_exchange_http_error, reason}}
     end
   end
 
