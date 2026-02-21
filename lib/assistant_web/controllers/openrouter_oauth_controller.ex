@@ -1,13 +1,15 @@
 # lib/assistant_web/controllers/openrouter_oauth_controller.ex
 #
-# Handles the OpenRouter PKCE OAuth connect/disconnect flow for settings_users.
+# Handles the OpenRouter PKCE OAuth connect flow for settings_users.
 # Users initiate the flow from the settings page; on success, an encrypted API key
-# is stored on the settings_user record.
+# is stored on the settings_user record. Disconnect is handled by the LiveView
+# (settings_live.ex "disconnect_openrouter" event).
 #
 # OpenRouter uses a non-standard OAuth flow:
 #   - Authorization: GET https://openrouter.ai/auth with PKCE S256 challenge
 #   - Code exchange: POST https://openrouter.ai/api/v1/auth/keys (returns permanent API key)
 #   - No refresh tokens, no expiry, no revocation endpoint
+#   - No OAuth state parameter — PKCE verifier in session serves as CSRF protection
 #
 # Related files:
 #   - lib/assistant/accounts/settings_user.ex (encrypted openrouter_api_key field)
@@ -74,6 +76,9 @@ defmodule AssistantWeb.OpenRouterOAuthController do
   for a permanent API key, and stores it encrypted on the settings_user.
   """
   def callback(conn, %{"code" => code}) do
+    # fetch_pkce_verifier confirms the callback is from the same browser session that
+    # initiated the flow (CSRF protection). OpenRouter's API doesn't require the verifier
+    # in the key exchange — PKCE verification happens server-side at OpenRouter.
     with {:ok, settings_user} <- fetch_settings_user(conn),
          {:ok, _code_verifier} <- fetch_pkce_verifier(conn),
          {:ok, api_key} <- exchange_code_for_key(code),
@@ -115,35 +120,6 @@ defmodule AssistantWeb.OpenRouterOAuthController do
     |> delete_session(@pkce_verifier_session_key)
     |> put_flash(:error, "OpenRouter connection was cancelled or failed.")
     |> redirect(to: ~p"/settings")
-  end
-
-  @doc """
-  Disconnects OpenRouter by removing the stored API key.
-  """
-  def disconnect(conn, _params) do
-    case fetch_settings_user(conn) do
-      {:ok, settings_user} ->
-        case Accounts.delete_openrouter_api_key(settings_user) do
-          {:ok, _settings_user} ->
-            Logger.info("OpenRouter disconnected",
-              settings_user_id: settings_user.id
-            )
-
-            conn
-            |> put_flash(:info, "OpenRouter disconnected.")
-            |> redirect(to: ~p"/settings")
-
-          {:error, _changeset} ->
-            conn
-            |> put_flash(:error, "Failed to disconnect OpenRouter.")
-            |> redirect(to: ~p"/settings")
-        end
-
-      {:error, :not_authenticated} ->
-        conn
-        |> put_flash(:error, "You must log in to disconnect OpenRouter.")
-        |> redirect(to: ~p"/settings_users/log-in")
-    end
   end
 
   # --- Private helpers ---

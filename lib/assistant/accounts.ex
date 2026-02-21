@@ -430,4 +430,30 @@ defmodule Assistant.Accounts do
   """
   def openrouter_connected?(%SettingsUser{openrouter_api_key: key}) when is_binary(key), do: true
   def openrouter_connected?(_), do: false
+
+  @doc """
+  Looks up the per-user OpenRouter API key via the chat user_id bridge.
+
+  Returns the decrypted API key string, or nil if the user has no linked
+  settings_user or no OpenRouter key stored.
+  """
+  @spec openrouter_key_for_user(String.t()) :: String.t() | nil
+  def openrouter_key_for_user(user_id) when is_binary(user_id) do
+    with {:ok, _} <- Ecto.UUID.cast(user_id) do
+      case Repo.one(
+             from(su in SettingsUser,
+               where: su.user_id == ^user_id,
+               select: su.openrouter_api_key
+             )
+           ) do
+        nil -> nil
+        "" -> nil
+        key when is_binary(key) -> key
+      end
+    else
+      :error -> nil
+    end
+  end
+
+  def openrouter_key_for_user(_), do: nil
 end

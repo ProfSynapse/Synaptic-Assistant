@@ -3,7 +3,8 @@
 # HTTP client for the OpenRouter chat completions API. Handles tool-calling,
 # prompt caching (cache_control breakpoints), streaming (SSE), and audio
 # input (STT via chat completions). Used by the orchestration engine for
-# all LLM interactions.
+# all LLM interactions. Supports per-user API key override (via :api_key opt)
+# with fallback to the system-level key.
 #
 # Related files:
 #   - lib/assistant/behaviours/llm_client.ex (behaviour contract)
@@ -37,6 +38,13 @@ defmodule Assistant.Integrations.OpenRouter do
 
   Tool definitions are sorted alphabetically by function name before each request
   to ensure consistent serialization across agent instances and conversations.
+
+  ## API Key Resolution
+
+  When a per-user API key is provided via the `:api_key` option, it takes
+  precedence over the system-level key. This allows users who have connected
+  their own OpenRouter account (via PKCE OAuth) to use their personal key
+  and billing. If no per-user key is provided, the system key is used.
 
   ## Configuration
 
@@ -87,6 +95,8 @@ defmodule Assistant.Integrations.OpenRouter do
     - `:parallel_tool_calls` — Allow parallel tool calls (default: provider default)
     - `:response_format` — Response format constraint (`%{type: "json_object"}` or
       `%{type: "json_schema", json_schema: %{...}}` for structured outputs)
+    - `:api_key` — Per-user OpenRouter API key. When provided, overrides the
+      system-level key for this request. Falls back to the system key if nil.
 
   ## Examples
 
@@ -103,7 +113,7 @@ defmodule Assistant.Integrations.OpenRouter do
   @impl true
   def chat_completion(messages, opts \\ []) do
     with {:ok, body} <- build_request_body(messages, opts) do
-      case do_request(body) do
+      case do_request(body, Keyword.get(opts, :api_key)) do
         {:ok, %{status: 200, body: response_body}} ->
           parse_completion(response_body)
 
@@ -184,7 +194,7 @@ defmodule Assistant.Integrations.OpenRouter do
       end
 
       http = ConfigLoader.http_config()
-      req = build_req_client(http, :streaming)
+      req = build_req_client(http, :streaming, Keyword.get(opts, :api_key))
 
       case Req.post(req, url: "/chat/completions", json: body, into: stream_handler) do
         {:ok, %{status: 200}} ->
@@ -231,7 +241,7 @@ defmodule Assistant.Integrations.OpenRouter do
   @spec image_generation(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def image_generation(prompt, opts \\ []) when is_binary(prompt) do
     with {:ok, body} <- build_image_request_body(prompt, opts) do
-      case do_request(body) do
+      case do_request(body, Keyword.get(opts, :api_key)) do
         {:ok, %{status: 200, body: response_body}} ->
           parse_image_completion(response_body)
 
@@ -604,23 +614,25 @@ defmodule Assistant.Integrations.OpenRouter do
 
   # --- HTTP Client ---
 
-  defp do_request(body) do
+  defp do_request(body, override_key) do
     http = ConfigLoader.http_config()
-    req = build_req_client(http, :request)
+    req = build_req_client(http, :request, override_key)
     Req.post(req, url: "/chat/completions", json: body)
   end
 
-  defp build_req_client(http, mode) do
+  defp build_req_client(http, mode, override_key) do
     timeout =
       case mode do
         :streaming -> http.streaming_timeout_ms
         :request -> http.request_timeout_ms
       end
 
+    key = override_key || api_key()
+
     Req.new(
       base_url: base_url(),
       headers: [
-        {"authorization", "Bearer #{api_key()}"},
+        {"authorization", "Bearer #{key}"},
         {"content-type", "application/json"}
       ],
       retry: :safe_transient,

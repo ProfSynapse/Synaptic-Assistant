@@ -48,23 +48,26 @@ defmodule Assistant.Orchestrator.LLMHelpers do
   end
 
   @doc """
-  Builds LLM keyword opts with tools and an optional model.
+  Builds LLM keyword opts with tools, an optional model, and optional extras.
 
   If `model` is nil, the `:model` key is omitted from the opts.
+  Extra keyword options (e.g. `api_key: key`) are merged into the result.
 
   ## Parameters
 
     * `tools` - List of tool definitions
     * `model` - Model ID string or nil
+    * `extras` - Additional keyword opts to merge (default: `[]`)
 
   ## Returns
 
     A keyword list suitable for passing to `LLMClient.chat_completion/2`.
   """
-  @spec build_llm_opts(list(), String.t() | nil) :: keyword()
-  def build_llm_opts(tools, model) do
+  @spec build_llm_opts(list(), String.t() | nil, keyword()) :: keyword()
+  def build_llm_opts(tools, model, extras \\ []) do
     opts = [tools: tools]
-    if model, do: Keyword.put(opts, :model, model), else: opts
+    opts = if model, do: Keyword.put(opts, :model, model), else: opts
+    Keyword.merge(opts, extras)
   end
 
   # --- Response Parsing ---

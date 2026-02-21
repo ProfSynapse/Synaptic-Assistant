@@ -10,14 +10,14 @@ defmodule AssistantWeb.Components.GoogleConnectStatus do
 
   def google_connect_status(assigns) do
     ~H"""
-    <div class="sa-google-status">
-      <div :if={@connected} class="sa-google-status-connected">
-        <div class="sa-google-status-info">
-          <span class="sa-google-status-badge sa-google-status-badge--connected">
+    <div class="sa-connect-status">
+      <div :if={@connected} class="sa-connect-status-connected">
+        <div class="sa-connect-status-info">
+          <span class="sa-connect-status-badge sa-connect-status-badge--connected">
             <.icon name="hero-check-circle" class="h-4 w-4" />
             Connected
           </span>
-          <span :if={@email} class="sa-google-status-email">{@email}</span>
+          <span :if={@email} class="sa-connect-status-email">{@email}</span>
         </div>
         <button
           type="button"
@@ -30,8 +30,8 @@ defmodule AssistantWeb.Components.GoogleConnectStatus do
         </button>
       </div>
 
-      <div :if={!@connected} class="sa-google-status-disconnected">
-        <span class="sa-google-status-badge sa-google-status-badge--disconnected">
+      <div :if={!@connected} class="sa-connect-status-disconnected">
+        <span class="sa-connect-status-badge sa-connect-status-badge--disconnected">
           <.icon name="hero-x-circle" class="h-4 w-4" />
           Not connected
         </span>

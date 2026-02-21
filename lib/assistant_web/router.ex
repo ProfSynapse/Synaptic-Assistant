@@ -97,7 +97,6 @@ defmodule AssistantWeb.Router do
 
     get "/settings_users/auth/openrouter", OpenRouterOAuthController, :request
     get "/settings_users/auth/openrouter/callback", OpenRouterOAuthController, :callback
-    delete "/settings_users/auth/openrouter", OpenRouterOAuthController, :disconnect
 
     live_session :current_settings_user,
       on_mount: [{AssistantWeb.SettingsUserAuth, :mount_current_scope}] do
