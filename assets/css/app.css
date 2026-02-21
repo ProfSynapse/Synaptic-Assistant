@@ -840,17 +840,123 @@ a {
 
 .sa-model-defaults-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+  gap: 10px;
 }
 
-.sa-model-defaults-grid .sa-field {
-  margin-bottom: 0;
+.sa-model-default-row {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 16px;
+  align-items: center;
+  border: 1px solid var(--sa-border);
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbfb 100%);
+  padding: 6px 10px;
+}
+
+.sa-model-default-meta {
+  display: flex;
+  align-items: center;
+}
+
+.sa-model-default-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sa-model-default-role {
+  font-weight: 600;
+  color: var(--sa-text);
+}
+
+.sa-model-default-select select.pc-text-input {
+  border: 1px solid #9cb0b8;
+  box-shadow: 0 1px 0 rgba(20, 39, 54, 0.05);
+  background-color: #fff;
+  min-height: 38px;
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+  padding-left: 0.75rem;
+}
+
+.sa-model-default-select select.pc-text-input:hover {
+  border-color: #7f97a0;
+}
+
+.sa-model-default-select select.pc-text-input:focus,
+.sa-model-default-select select.pc-text-input:focus-visible {
+  border-color: var(--sa-aqua);
+  box-shadow: 0 0 0 2px rgba(0, 169, 157, 0.18);
+  outline: none;
 }
 
 .sa-model-defaults-actions {
   display: flex;
   justify-content: flex-start;
+}
+
+.sa-role-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sa-muted);
+  padding: 2px;
+  cursor: help;
+}
+
+.sa-role-tooltip:hover,
+.sa-role-tooltip:focus-visible {
+  color: var(--sa-text);
+  background: #edf4f4;
+  outline: none;
+}
+
+.sa-role-tooltip-bubble {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  min-width: 220px;
+  max-width: 280px;
+  border-radius: 8px;
+  border: 1px solid #d6e1e1;
+  background: #0f1720;
+  color: #f8fbff;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  z-index: 20;
+}
+
+.sa-role-tooltip:hover .sa-role-tooltip-bubble,
+.sa-role-tooltip:focus-visible .sa-role-tooltip-bubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (max-width: 900px) {
+  .sa-model-default-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .sa-role-tooltip-bubble {
+    left: 0;
+    top: calc(100% + 6px);
+    transform: none;
+    max-width: min(85vw, 280px);
+  }
 }
 
 /* Transcript */

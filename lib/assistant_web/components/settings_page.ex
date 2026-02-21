@@ -8,8 +8,7 @@ defmodule AssistantWeb.Components.SettingsPage do
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
 
   import AssistantWeb.Components.DriveSettings, only: [drive_settings: 1]
-  import AssistantWeb.Components.GoogleConnectStatus, only: [google_connect_status: 1]
-  import AssistantWeb.Components.OpenRouterConnectStatus, only: [openrouter_connect_status: 1]
+  import AssistantWeb.Components.ConnectorCard, only: [connector_card: 1]
 
   def settings_page(assigns) do
     ~H"""
@@ -124,7 +123,17 @@ defmodule AssistantWeb.Components.SettingsPage do
             <h2>OpenRouter</h2>
           </div>
           <p class="sa-muted">Connect your OpenRouter account to use your personal API key for model access.</p>
-          <.openrouter_connect_status connected={@openrouter_connected} />
+          <div class="sa-card-grid">
+            <.connector_card
+              id="openrouter"
+              name="OpenRouter"
+              icon_path="/images/apps/openrouter.svg"
+              connected={@openrouter_connected}
+              on_connect="connect_openrouter"
+              on_disconnect="disconnect_openrouter"
+              disconnect_confirm="Disconnect OpenRouter? The assistant will use the system-level API key instead."
+            />
+          </div>
         </div>
 
         <div :if={@section == "models"} class="sa-card">
@@ -138,15 +147,34 @@ defmodule AssistantWeb.Components.SettingsPage do
             class="sa-model-defaults-form"
           >
             <div class="sa-model-defaults-grid">
-              <.input
-                :for={role <- @model_default_roles}
-                type="select"
-                name={"defaults[#{role}]"}
-                label={role_label(role)}
-                options={@model_options}
-                value={Map.get(@model_defaults, role)}
-                prompt="Select model"
-              />
+              <div :for={role <- @model_default_roles} class="sa-model-default-row">
+                <div class="sa-model-default-meta">
+                  <div class="sa-model-default-title">
+                    <span class="sa-model-default-role">{role.label}</span>
+                    <button
+                      type="button"
+                      class="sa-role-tooltip"
+                      aria-label={"About #{role.label}"}
+                      title={role.tooltip}
+                    >
+                      <.icon name="hero-information-circle" class="h-4 w-4" />
+                      <span class="sa-role-tooltip-bubble">{role.tooltip}</span>
+                    </button>
+                  </div>
+                </div>
+                <div class="sa-model-default-select">
+                  <.field
+                    type="select"
+                    name={"defaults[#{role.key}]"}
+                    label={"Default model for #{role.label}"}
+                    label_class="sr-only"
+                    no_margin={true}
+                    options={@model_options}
+                    selected={Map.get(@model_defaults, Atom.to_string(role.key))}
+                    prompt="Select model"
+                  />
+                </div>
+              </div>
             </div>
             <div class="sa-model-defaults-actions">
               <button type="submit" class="sa-btn">Save Defaults</button>
@@ -541,20 +569,17 @@ defmodule AssistantWeb.Components.SettingsPage do
           <p>Only approved apps from the platform catalog can be connected.</p>
 
           <div class="sa-card-grid">
-            <article :for={app <- @app_catalog} class="sa-card">
-              <div class="sa-app-title">
-                <img src={app.icon_path} alt={app.name} class="sa-app-icon" />
-                <h3>{app.name}</h3>
-              </div>
-              <p>{app.summary}</p>
-              <p class="sa-muted">Scopes: {app.scopes}</p>
-              <.google_connect_status
-                :if={app.id == "google_workspace"}
-                connected={@google_connected}
-                email={@google_email}
-              />
-
-            </article>
+            <.connector_card
+              :for={app <- @app_catalog}
+              id={app.id}
+              name={app.name}
+              icon_path={app.icon_path}
+              connected={app.id == "google_workspace" and @google_connected}
+              on_connect={if app.id == "google_workspace", do: "connect_google", else: ""}
+              on_disconnect={if app.id == "google_workspace", do: "disconnect_google", else: ""}
+              disconnect_confirm="Disconnect Google Workspace?"
+              disabled={app.id != "google_workspace"}
+            />
           </div>
 
           <.drive_settings
@@ -575,14 +600,16 @@ defmodule AssistantWeb.Components.SettingsPage do
           <.modal :if={@apps_modal_open} id="apps-modal" title="Add App" max_width="lg" on_cancel={JS.push("close_add_app_modal")}>
             <div class="sa-card-grid">
               <article :for={app <- @app_catalog} class="sa-card">
-                <div class="sa-app-title">
-                  <img src={app.icon_path} alt={app.name} class="sa-app-icon" />
-                  <h4>{app.name}</h4>
+                <div class="sa-row" style="margin-bottom: 1rem;">
+                  <div class="sa-app-title" style="margin-bottom: 0;">
+                    <img src={app.icon_path} alt={app.name} class="sa-app-icon" />
+                    <h4 style="margin: 0;">{app.name}</h4>
+                  </div>
                 </div>
-                <p>{app.scopes}</p>
                 <button
                   type="button"
                   class="sa-btn secondary"
+                  style="width: 100%; justify-content: center;"
                   phx-click="add_catalog_app"
                   phx-value-id={app.id}
                 >
@@ -863,12 +890,4 @@ defmodule AssistantWeb.Components.SettingsPage do
   end
 
   defp profile_first_name(_), do: "there"
-
-  defp role_label(role_key) do
-    role_key
-    |> to_string()
-    |> String.replace("_", " ")
-    |> String.split()
-    |> Enum.map_join(" ", &String.capitalize/1)
-  end
 end

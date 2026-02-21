@@ -175,11 +175,19 @@ defmodule AssistantWeb.SettingsLive do
 
               {:error, :rate_limited} ->
                 {:noreply,
-                 put_flash(socket, :error, "Too many authorization attempts. Please wait a few minutes.")}
+                 put_flash(
+                   socket,
+                   :error,
+                   "Too many authorization attempts. Please wait a few minutes."
+                 )}
 
               {:error, _reason} ->
                 {:noreply,
-                 put_flash(socket, :error, "Failed to start Google authorization. Please try again.")}
+                 put_flash(
+                   socket,
+                   :error,
+                   "Failed to start Google authorization. Please try again."
+                 )}
             end
 
           {:error, reason} ->
@@ -187,7 +195,9 @@ defmodule AssistantWeb.SettingsLive do
             Logger.error("connect_google: ensure_linked_user failed", reason: inspect(reason))
 
             {:noreply,
-             put_flash(socket, :error,
+             put_flash(
+               socket,
+               :error,
                "Failed to prepare your account for Google authorization. Please try again."
              )}
         end
@@ -228,6 +238,10 @@ defmodule AssistantWeb.SettingsLive do
        |> assign(:openrouter_connected, false)
        |> put_flash(:info, "OpenRouter disconnected.")}
     end)
+  end
+
+  def handle_event("connect_openrouter", _params, socket) do
+    {:noreply, redirect(socket, to: "/settings_users/auth/openrouter")}
   end
 
   def handle_event("refresh_drives", _params, socket) do
@@ -368,7 +382,11 @@ defmodule AssistantWeb.SettingsLive do
   end
 
   def handle_event("save_model_defaults", %{"defaults" => params}, socket) do
-    case ModelDefaults.save_defaults(params) do
+    merged_defaults =
+      ModelDefaults.list_defaults()
+      |> Map.merge(params)
+
+    case ModelDefaults.save_defaults(merged_defaults) do
       :ok ->
         {:noreply,
          socket
@@ -505,8 +523,8 @@ defmodule AssistantWeb.SettingsLive do
 
     current_defaults =
       Enum.reduce(roles, %{}, fn role, acc ->
-        key = Atom.to_string(role)
-        value = Map.get(explicit_defaults, key) || resolved_default_model_id(role)
+        key = Atom.to_string(role.key)
+        value = Map.get(explicit_defaults, key) || resolved_default_model_id(role.key)
         Map.put(acc, key, value || "")
       end)
 
@@ -516,7 +534,7 @@ defmodule AssistantWeb.SettingsLive do
     |> assign(:models, models)
     |> assign(:model_options, options)
     |> assign(:model_defaults, current_defaults)
-    |> assign(:model_default_roles, Enum.map(roles, &Atom.to_string/1))
+    |> assign(:model_default_roles, roles)
     |> assign(:model_defaults_form, to_form(current_defaults, as: :defaults))
   end
 
@@ -878,14 +896,28 @@ defmodule AssistantWeb.SettingsLive do
   end
 
   defp model_roles do
-    try do
-      ConfigLoader.defaults()
-      |> Map.keys()
-      |> Enum.sort()
-    rescue
-      _ ->
-        [:orchestrator, :sub_agent, :compaction, :sentinel]
-    end
+    [
+      %{
+        key: :orchestrator,
+        label: "Orchestrator",
+        tooltip: "Top-level coordinator for each user request."
+      },
+      %{
+        key: :sub_agent,
+        label: "Subagents",
+        tooltip: "Worker agents dispatched by the orchestrator."
+      },
+      %{
+        key: :sentinel,
+        label: "Sentinel",
+        tooltip: "Guardrail model used for policy and risk checks."
+      },
+      %{
+        key: :compaction,
+        label: "Memory",
+        tooltip: "Internally mapped to the compaction model role."
+      }
+    ]
   end
 
   defp resolved_default_model_id(role) do
