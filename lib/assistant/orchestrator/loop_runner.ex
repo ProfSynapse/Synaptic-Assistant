@@ -78,7 +78,9 @@ defmodule Assistant.Orchestrator.LoopRunner do
         override -> override
       end
 
-    llm_opts = LLMHelpers.build_llm_opts(tools, model)
+    user_id = loop_state[:user_id] || "unknown"
+    api_key = resolve_openrouter_key(user_id)
+    llm_opts = LLMHelpers.build_llm_opts(tools, model, api_key: api_key)
 
     case @llm_client.chat_completion(messages, llm_opts) do
       {:ok, response} ->
@@ -254,6 +256,9 @@ defmodule Assistant.Orchestrator.LoopRunner do
       }
     }
   end
+
+  defp resolve_openrouter_key("unknown"), do: nil
+  defp resolve_openrouter_key(user_id), do: Assistant.Accounts.openrouter_key_for_user(user_id)
 
   defp record_llm_analytics(loop_state, response, model, status, reason \\ nil) do
     usage = if is_map(response), do: response[:usage] || %{}, else: %{}

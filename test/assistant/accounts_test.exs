@@ -441,6 +441,69 @@ defmodule Assistant.AccountsTest do
     end
   end
 
+  ## OpenRouter
+
+  describe "save_openrouter_api_key/2" do
+    setup do
+      %{settings_user: settings_user_fixture()}
+    end
+
+    test "stores encrypted API key", %{settings_user: settings_user} do
+      assert {:ok, updated} = Accounts.save_openrouter_api_key(settings_user, "sk-or-test-key")
+      assert updated.openrouter_api_key == "sk-or-test-key"
+
+      # Verify persisted to DB
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert reloaded.openrouter_api_key == "sk-or-test-key"
+    end
+
+    test "overwrites existing key", %{settings_user: settings_user} do
+      {:ok, _} = Accounts.save_openrouter_api_key(settings_user, "sk-or-first-key")
+      {:ok, updated} = Accounts.save_openrouter_api_key(settings_user, "sk-or-second-key")
+      assert updated.openrouter_api_key == "sk-or-second-key"
+
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert reloaded.openrouter_api_key == "sk-or-second-key"
+    end
+  end
+
+  describe "delete_openrouter_api_key/1" do
+    setup do
+      %{settings_user: settings_user_fixture()}
+    end
+
+    test "removes stored key", %{settings_user: settings_user} do
+      {:ok, settings_user} = Accounts.save_openrouter_api_key(settings_user, "sk-or-to-delete")
+      assert settings_user.openrouter_api_key == "sk-or-to-delete"
+
+      {:ok, updated} = Accounts.delete_openrouter_api_key(settings_user)
+      assert is_nil(updated.openrouter_api_key)
+
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert is_nil(reloaded.openrouter_api_key)
+    end
+
+    test "succeeds when no key stored", %{settings_user: settings_user} do
+      assert is_nil(settings_user.openrouter_api_key)
+      assert {:ok, updated} = Accounts.delete_openrouter_api_key(settings_user)
+      assert is_nil(updated.openrouter_api_key)
+    end
+  end
+
+  describe "openrouter_connected?/1" do
+    test "returns true when key exists" do
+      assert Accounts.openrouter_connected?(%SettingsUser{openrouter_api_key: "sk-or-key"})
+    end
+
+    test "returns false when key is nil" do
+      refute Accounts.openrouter_connected?(%SettingsUser{openrouter_api_key: nil})
+    end
+
+    test "returns false for non-SettingsUser" do
+      refute Accounts.openrouter_connected?(nil)
+    end
+  end
+
   describe "inspect/2 for the SettingsUser module" do
     test "does not include password" do
       refute inspect(%SettingsUser{password: "123456"}) =~ "password: \"123456\""

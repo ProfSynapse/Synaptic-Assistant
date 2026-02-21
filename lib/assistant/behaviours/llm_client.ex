@@ -114,6 +114,7 @@ defmodule Assistant.Behaviours.LLMClient do
       - `:tool_choice` — Tool selection strategy ("auto", "none", "required")
       - `:temperature` — Sampling temperature (0.0-2.0)
       - `:max_tokens` — Maximum completion tokens
+      - `:api_key` — Per-user API key override (falls back to system key if nil)
 
   ## Returns
 

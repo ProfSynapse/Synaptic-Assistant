@@ -95,6 +95,9 @@ defmodule AssistantWeb.Router do
     get "/settings_users/auth/google", SettingsUserOAuthController, :request
     get "/settings_users/auth/google/callback", SettingsUserOAuthController, :callback
 
+    get "/settings_users/auth/openrouter", OpenRouterOAuthController, :request
+    get "/settings_users/auth/openrouter/callback", OpenRouterOAuthController, :callback
+
     live_session :current_settings_user,
       on_mount: [{AssistantWeb.SettingsUserAuth, :mount_current_scope}] do
       live "/settings_users/register", SettingsUserLive.Registration, :new

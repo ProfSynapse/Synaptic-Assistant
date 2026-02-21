@@ -415,7 +415,7 @@ defmodule Assistant.Memory.Agent do
   # --- LLM Loop (runs in Task) ---
 
   defp run_loop(context, agent_state, executor_session, gen_state, parent) do
-    model_opts = build_model_opts(context)
+    model_opts = build_model_opts(context, gen_state.user_id)
     model = Keyword.get(model_opts, :model)
 
     case @llm_client.chat_completion(context.messages, model_opts) do
@@ -939,10 +939,14 @@ defmodule Assistant.Memory.Agent do
     }
   end
 
-  defp build_model_opts(context) do
+  defp build_model_opts(context, user_id) do
     model = LLMHelpers.resolve_model(:sub_agent)
-    LLMHelpers.build_llm_opts(context.tools, model)
+    api_key = resolve_openrouter_key(user_id)
+    LLMHelpers.build_llm_opts(context.tools, model, api_key: api_key)
   end
+
+  defp resolve_openrouter_key("unknown"), do: nil
+  defp resolve_openrouter_key(uid), do: Assistant.Accounts.openrouter_key_for_user(uid)
 
   defp build_resume_content(update) do
     parts = []

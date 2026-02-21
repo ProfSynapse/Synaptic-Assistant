@@ -37,6 +37,8 @@ defmodule Assistant.Skills.Images.Generate do
     size = flags["size"]
     aspect_ratio = flags["aspect_ratio"] || flags["aspect"]
 
+    api_key = resolve_openrouter_key(context.user_id)
+
     with :ok <- validate_prompt(prompt),
          {:ok, image_count} <- parse_image_count(flags["n"]),
          {:ok, output_dir} <- ensure_output_dir(context.workspace_path),
@@ -47,7 +49,8 @@ defmodule Assistant.Skills.Images.Generate do
              model,
              image_count,
              size,
-             aspect_ratio
+             aspect_ratio,
+             api_key
            ) do
       build_success_result(response, model, output_dir)
     else
@@ -105,9 +108,9 @@ defmodule Assistant.Skills.Images.Generate do
     end
   end
 
-  defp request_image_generation(openrouter, prompt, model, image_count, size, aspect_ratio) do
+  defp request_image_generation(openrouter, prompt, model, image_count, size, aspect_ratio, api_key) do
     opts =
-      [model: model, n: image_count]
+      [model: model, n: image_count, api_key: api_key]
       |> maybe_put_opt(:size, size)
       |> maybe_put_opt(:aspect_ratio, aspect_ratio)
 
@@ -316,4 +319,9 @@ defmodule Assistant.Skills.Images.Generate do
 
   defp format_error(reason) when is_binary(reason), do: reason
   defp format_error(reason), do: inspect(reason)
+
+  defp resolve_openrouter_key(user_id) when is_binary(user_id),
+    do: Assistant.Accounts.openrouter_key_for_user(user_id)
+
+  defp resolve_openrouter_key(_), do: nil
 end

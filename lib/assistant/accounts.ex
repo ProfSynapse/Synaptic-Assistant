@@ -404,4 +404,56 @@ defmodule Assistant.Accounts do
   end
 
   defp maybe_put_display_name(attrs, _settings_user, _name), do: attrs
+
+  ## OpenRouter
+
+  @doc """
+  Stores an OpenRouter API key (encrypted) for the given settings_user.
+  """
+  def save_openrouter_api_key(%SettingsUser{} = settings_user, api_key) when is_binary(api_key) do
+    settings_user
+    |> SettingsUser.openrouter_api_key_changeset(api_key)
+    |> Repo.update()
+  end
+
+  @doc """
+  Removes the OpenRouter API key for the given settings_user.
+  """
+  def delete_openrouter_api_key(%SettingsUser{} = settings_user) do
+    settings_user
+    |> SettingsUser.openrouter_api_key_changeset(nil)
+    |> Repo.update()
+  end
+
+  @doc """
+  Returns true if the settings_user has an OpenRouter API key stored.
+  """
+  def openrouter_connected?(%SettingsUser{openrouter_api_key: key}) when is_binary(key), do: true
+  def openrouter_connected?(_), do: false
+
+  @doc """
+  Looks up the per-user OpenRouter API key via the chat user_id bridge.
+
+  Returns the decrypted API key string, or nil if the user has no linked
+  settings_user or no OpenRouter key stored.
+  """
+  @spec openrouter_key_for_user(String.t()) :: String.t() | nil
+  def openrouter_key_for_user(user_id) when is_binary(user_id) do
+    with {:ok, _} <- Ecto.UUID.cast(user_id) do
+      case Repo.one(
+             from(su in SettingsUser,
+               where: su.user_id == ^user_id,
+               select: su.openrouter_api_key
+             )
+           ) do
+        nil -> nil
+        "" -> nil
+        key when is_binary(key) -> key
+      end
+    else
+      :error -> nil
+    end
+  end
+
+  def openrouter_key_for_user(_), do: nil
 end

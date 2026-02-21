@@ -436,7 +436,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   # --- LLM Loop (runs in Task) ---
 
   defp run_loop(context, agent_state, dispatch_params, engine_state, genserver_pid) do
-    model_opts = build_model_opts(dispatch_params, context)
+    model_opts = build_model_opts(dispatch_params, context, engine_state)
     model = Keyword.get(model_opts, :model)
 
     case @llm_client.chat_completion(context.messages, model_opts) do
@@ -1394,14 +1394,19 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp resolve_google_token(_user_id, _skills), do: nil
 
-  defp build_model_opts(dispatch_params, context) do
+  defp resolve_openrouter_key("unknown"), do: nil
+  defp resolve_openrouter_key(user_id), do: Assistant.Accounts.openrouter_key_for_user(user_id)
+
+  defp build_model_opts(dispatch_params, context, engine_state) do
     model =
       case dispatch_params[:model_override] do
         nil -> LLMHelpers.resolve_model(:sub_agent)
         override -> override
       end
 
-    LLMHelpers.build_llm_opts(context.tools, model)
+    user_id = engine_state[:user_id] || "unknown"
+    api_key = resolve_openrouter_key(user_id)
+    LLMHelpers.build_llm_opts(context.tools, model, api_key: api_key)
   end
 
   # --- Registry ---

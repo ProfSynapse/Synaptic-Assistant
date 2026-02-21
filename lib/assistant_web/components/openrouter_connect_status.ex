@@ -1,4 +1,4 @@
-defmodule AssistantWeb.Components.GoogleConnectStatus do
+defmodule AssistantWeb.Components.OpenRouterConnectStatus do
   @moduledoc false
 
   use Phoenix.Component
@@ -6,9 +6,8 @@ defmodule AssistantWeb.Components.GoogleConnectStatus do
   import AssistantWeb.CoreComponents, only: [icon: 1]
 
   attr :connected, :boolean, required: true
-  attr :email, :string, default: nil
 
-  def google_connect_status(assigns) do
+  def openrouter_connect_status(assigns) do
     ~H"""
     <div class="sa-connect-status">
       <div :if={@connected} class="sa-connect-status-connected">
@@ -17,13 +16,12 @@ defmodule AssistantWeb.Components.GoogleConnectStatus do
             <.icon name="hero-check-circle" class="h-4 w-4" />
             Connected
           </span>
-          <span :if={@email} class="sa-connect-status-email">{@email}</span>
         </div>
         <button
           type="button"
           class="sa-btn secondary sa-btn--danger-text"
-          phx-click="disconnect_google"
-          data-confirm="Disconnect Google Workspace? The assistant will lose access to Gmail, Calendar, and Drive for this account."
+          phx-click="disconnect_openrouter"
+          data-confirm="Disconnect OpenRouter? The assistant will use the system-level API key instead."
         >
           <.icon name="hero-arrow-right-on-rectangle" class="h-4 w-4" />
           Disconnect
@@ -36,11 +34,11 @@ defmodule AssistantWeb.Components.GoogleConnectStatus do
           Not connected
         </span>
         <.link
-          href="/auth/google/start?from=settings"
+          href="/settings_users/auth/openrouter"
           class="sa-btn"
         >
           <.icon name="hero-link" class="h-4 w-4" />
-          Connect Google Workspace
+          Connect OpenRouter
         </.link>
       </div>
     </div>

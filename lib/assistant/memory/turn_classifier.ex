@@ -130,11 +130,14 @@ defmodule Assistant.Memory.TurnClassifier do
 
     Logger.debug("Turn classification using model", model: model, conversation_id: conversation_id)
 
+    api_key = resolve_openrouter_key(user_id)
+
     case @llm_client.chat_completion(messages,
            model: model,
            temperature: 0.0,
            max_tokens: 500,
-           response_format: @classification_response_format
+           response_format: @classification_response_format,
+           api_key: api_key
          ) do
       {:ok, %{content: content}} ->
         handle_classification(content, conversation_id, user_id, user_message, assistant_response)
@@ -257,4 +260,9 @@ defmodule Assistant.Memory.TurnClassifier do
   end
 
   defp truncate(nil, _max_length), do: ""
+
+  defp resolve_openrouter_key(user_id) when is_binary(user_id),
+    do: Assistant.Accounts.openrouter_key_for_user(user_id)
+
+  defp resolve_openrouter_key(_), do: nil
 end
