@@ -12,6 +12,7 @@ defmodule Assistant.Accounts.SettingsUser do
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
+    field :openrouter_api_key, Assistant.Encrypted.Binary
 
     belongs_to :user, Assistant.Schemas.User
 
@@ -138,6 +139,16 @@ defmodule Assistant.Accounts.SettingsUser do
   def confirm_changeset(settings_user) do
     now = DateTime.utc_now(:second)
     change(settings_user, confirmed_at: now)
+  end
+
+  @doc """
+  A changeset for updating the OpenRouter API key.
+
+  Accepts a binary key or nil (to disconnect).
+  """
+  def openrouter_api_key_changeset(settings_user, api_key) do
+    settings_user
+    |> change(%{openrouter_api_key: api_key})
   end
 
   @doc """

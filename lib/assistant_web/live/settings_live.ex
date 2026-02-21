@@ -22,6 +22,7 @@ defmodule AssistantWeb.SettingsLive do
 
   import AssistantWeb.Components.DriveSettings, only: [drive_settings: 1]
   import AssistantWeb.Components.GoogleConnectStatus, only: [google_connect_status: 1]
+  import AssistantWeb.Components.OpenRouterConnectStatus, only: [openrouter_connect_status: 1]
 
   @sections ~w(profile models analytics memory apps workflows skills help)
 
@@ -32,6 +33,14 @@ defmodule AssistantWeb.SettingsLive do
       icon_path: "/images/apps/google.svg",
       scopes: "Gmail, Calendar, Drive",
       summary: "Connect approved Google tools for email, calendars, and docs."
+    },
+    %{
+      id: "openrouter",
+      name: "OpenRouter",
+      icon_path: "/images/apps/openrouter.svg",
+      scopes: "All models",
+      summary:
+        "Route AI requests through your OpenRouter account with access to hundreds of models."
     },
     %{
       id: "hubspot",
@@ -157,6 +166,7 @@ defmodule AssistantWeb.SettingsLive do
      |> assign(:drives_loading, false)
      |> assign(:google_connected, false)
      |> assign(:google_email, nil)
+     |> assign(:openrouter_connected, false)
      |> assign(:skills_permissions, [])
      |> assign(:help_articles, @help_articles)
      |> assign(:help_topic, nil)
@@ -281,6 +291,21 @@ defmodule AssistantWeb.SettingsLive do
 
       _settings_user ->
         {:noreply, put_flash(socket, :error, "No linked user account.")}
+    end
+  end
+
+  def handle_event("disconnect_openrouter", _params, socket) do
+    case current_settings_user(socket) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "You must be logged in.")}
+
+      settings_user ->
+        Accounts.delete_openrouter_api_key(settings_user)
+
+        {:noreply,
+         socket
+         |> assign(:openrouter_connected, false)
+         |> put_flash(:info, "OpenRouter disconnected.")}
     end
   end
 
@@ -555,7 +580,7 @@ defmodule AssistantWeb.SettingsLive do
   defp load_section_data(socket, "analytics"), do: load_analytics(socket)
   defp load_section_data(socket, "memory"), do: socket |> load_transcripts() |> load_memories()
   defp load_section_data(socket, "apps"),
-    do: socket |> load_google_status() |> load_connected_drives()
+    do: socket |> load_google_status() |> load_openrouter_status() |> load_connected_drives()
   defp load_section_data(socket, "skills"), do: load_skill_permissions(socket)
   defp load_section_data(socket, _section), do: socket
 
@@ -675,6 +700,18 @@ defmodule AssistantWeb.SettingsLive do
 
       _ ->
         socket
+    end
+  rescue
+    _ -> socket
+  end
+
+  defp load_openrouter_status(socket) do
+    case current_settings_user(socket) do
+      %{openrouter_api_key: key} when not is_nil(key) and key != "" ->
+        assign(socket, :openrouter_connected, true)
+
+      _ ->
+        assign(socket, :openrouter_connected, false)
     end
   rescue
     _ -> socket
@@ -1584,6 +1621,10 @@ defmodule AssistantWeb.SettingsLive do
                   :if={app.id == "google_workspace"}
                   connected={@google_connected}
                   email={@google_email}
+                />
+                <.openrouter_connect_status
+                  :if={app.id == "openrouter"}
+                  connected={@openrouter_connected}
                 />
               </article>
             </div>
