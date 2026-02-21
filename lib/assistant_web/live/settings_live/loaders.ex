@@ -63,12 +63,20 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       end)
 
     options = model_options_with_unavailable_defaults(models, current_defaults)
+    provider_options = active_model_provider_options(models)
+    query = socket.assigns[:active_model_query] || ""
+    provider = normalize_active_model_provider(socket.assigns[:active_model_provider], provider_options)
+    filtered_models = filter_active_models(models, query, provider)
 
     socket
     |> assign(:openrouter_connected, openrouter_connected)
     |> assign(:openai_connected, openai_connected)
     |> assign(:catalog_model_ids, catalog_ids)
-    |> assign(:models, models)
+    |> assign(:active_model_all_models, models)
+    |> assign(:models, filtered_models)
+    |> assign(:active_model_provider, provider)
+    |> assign(:active_model_provider_options, provider_options)
+    |> assign(:active_model_filter_form, to_form(%{"q" => query, "provider" => provider}, as: :active_models))
     |> assign(:model_options, options)
     |> assign(:model_defaults, current_defaults)
     |> assign(:model_default_roles, roles)
@@ -508,4 +516,52 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     |> Enum.uniq_by(&elem(&1, 1))
     |> Enum.sort_by(fn {label, _id} -> String.downcase(label) end)
   end
+
+  def filter_active_models(models, query, provider) do
+    normalized_query = query |> to_string() |> String.trim() |> String.downcase()
+    normalized_provider = provider |> to_string() |> String.trim() |> String.downcase()
+
+    Enum.filter(models, fn model ->
+      provider_match? =
+        normalized_provider in ["", "all"] ||
+          model_provider(model.id) == normalized_provider
+
+      search_match? =
+        normalized_query == "" ||
+          String.contains?(String.downcase(to_string(model.name || "")), normalized_query) ||
+          String.contains?(String.downcase(to_string(model.id || "")), normalized_query) ||
+          String.contains?(String.downcase(model_provider(model.id)), normalized_query)
+
+      provider_match? and search_match?
+    end)
+  end
+
+  defp active_model_provider_options(models) do
+    providers =
+      models
+      |> Enum.map(&model_provider(&1.id))
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    [{"All providers", "all"} | Enum.map(providers, &{String.upcase(&1), &1})]
+  end
+
+  defp normalize_active_model_provider(provider, options) do
+    normalized = provider |> to_string() |> String.trim() |> String.downcase()
+    allowed = options |> Enum.map(&elem(&1, 1)) |> MapSet.new()
+
+    if MapSet.member?(allowed, normalized), do: normalized, else: "all"
+  end
+
+  defp model_provider(id) when is_binary(id) do
+    id
+    |> String.split("/", parts: 2)
+    |> case do
+      [provider, _rest] -> provider
+      _ -> ""
+    end
+  end
+
+  defp model_provider(_), do: ""
 end

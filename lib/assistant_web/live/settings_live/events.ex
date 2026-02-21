@@ -416,6 +416,26 @@ defmodule AssistantWeb.SettingsLive.Events do
      |> apply_model_library_filter()}
   end
 
+  def handle_event("filter_active_models", %{"active_models" => params}, socket) do
+    query = params |> Map.get("q", "") |> to_string() |> String.trim()
+    provider = params |> Map.get("provider", "all") |> to_string() |> String.trim() |> String.downcase()
+
+    provider_options = socket.assigns[:active_model_provider_options] || [{"All providers", "all"}]
+    allowed_providers = provider_options |> Enum.map(&elem(&1, 1)) |> MapSet.new()
+    normalized_provider = if MapSet.member?(allowed_providers, provider), do: provider, else: "all"
+    all_models = socket.assigns[:active_model_all_models] || []
+
+    {:noreply,
+     socket
+     |> assign(:active_model_query, query)
+     |> assign(:active_model_provider, normalized_provider)
+     |> assign(
+       :active_model_filter_form,
+       to_form(%{"q" => query, "provider" => normalized_provider}, as: :active_models)
+     )
+     |> assign(:models, Loaders.filter_active_models(all_models, query, normalized_provider))}
+  end
+
   def handle_event("refresh_model_library", _params, socket) do
     {:noreply, load_model_library(socket)}
   end

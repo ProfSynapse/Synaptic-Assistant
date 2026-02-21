@@ -603,6 +603,45 @@ a {
   gap: 24px;
 }
 
+/* Settings form readability */
+.sa-content .pc-label {
+  color: #2a4258;
+  font-weight: 600;
+}
+
+.sa-content :is(input.pc-text-input, select.pc-text-input) {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid #94aab4;
+  background: #ffffff;
+  color: #1f3548;
+  font-size: 1rem;
+  line-height: 1.35;
+  padding-left: 0.95rem;
+  padding-right: 0.95rem;
+  box-shadow: 0 1px 0 rgba(20, 39, 54, 0.05);
+}
+
+.sa-content select.pc-text-input {
+  padding-right: 2.5rem;
+}
+
+.sa-content :is(input.pc-text-input, select.pc-text-input)::placeholder {
+  color: #6d8090;
+  opacity: 1;
+}
+
+.sa-content :is(input.pc-text-input, select.pc-text-input):hover {
+  border-color: #7e97a2;
+}
+
+.sa-content :is(input.pc-text-input, select.pc-text-input):focus,
+.sa-content :is(input.pc-text-input, select.pc-text-input):focus-visible {
+  border-color: var(--sa-aqua);
+  box-shadow: 0 0 0 2px rgba(0, 169, 157, 0.18);
+  outline: none;
+}
+
 .sa-page-header {
   display: grid;
   gap: 10px;
@@ -1453,6 +1492,57 @@ a {
   vertical-align: top;
 }
 
+.sa-model-list-toolbar {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 260px);
+  align-items: end;
+}
+
+.sa-model-list-toolbar .pc-form-field-wrapper {
+  margin-bottom: 0;
+}
+
+.sa-model-table-shell {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sa-model-table {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.sa-model-table th,
+.sa-model-table td {
+  padding: 12px 14px;
+}
+
+.sa-model-table th:last-child,
+.sa-model-table td:last-child {
+  width: 64px;
+  text-align: center;
+}
+
+.sa-model-table td code {
+  white-space: normal;
+  word-break: break-word;
+}
+
+.sa-table-zebra tbody tr:nth-child(odd) {
+  background: #fbfefe;
+}
+
+.sa-table-zebra tbody tr:nth-child(even) {
+  background: #f4f9f9;
+}
+
+.sa-table-zebra tbody tr:hover {
+  background: #eaf4f4;
+}
+
 .sa-click-row {
   cursor: pointer;
 }
@@ -1493,6 +1583,11 @@ a {
 
   .sa-memory-filter-card {
     position: static;
+  }
+
+  .sa-model-list-toolbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .sa-knowledge-graph-canvas {
