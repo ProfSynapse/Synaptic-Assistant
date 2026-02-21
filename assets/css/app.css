@@ -771,6 +771,19 @@ a {
   height: 16px;
 }
 
+.sa-icon-btn.danger {
+  border-color: var(--color-danger-300);
+  background: var(--color-danger-50);
+  color: var(--color-danger-700);
+}
+
+.sa-icon-btn.danger:hover,
+.sa-icon-btn.danger:focus-visible {
+  border-color: var(--color-danger-500);
+  background: var(--color-danger-100);
+  color: var(--color-danger-800);
+}
+
 .sa-sidebar-toggle {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 255, 255, 0.22);
@@ -930,7 +943,7 @@ a {
   color: var(--sa-text);
 }
 
-.sa-model-default-select select.pc-text-input {
+.sa-model-default-select :is(select.pc-text-input, input.pc-text-input) {
   border: 1px solid #9cb0b8;
   box-shadow: 0 1px 0 rgba(20, 39, 54, 0.05);
   background-color: #fff;
@@ -940,15 +953,57 @@ a {
   padding-left: 0.75rem;
 }
 
-.sa-model-default-select select.pc-text-input:hover {
+.sa-model-default-select :is(select.pc-text-input, input.pc-text-input):hover {
   border-color: #7f97a0;
 }
 
-.sa-model-default-select select.pc-text-input:focus,
-.sa-model-default-select select.pc-text-input:focus-visible {
+.sa-model-default-select :is(select.pc-text-input, input.pc-text-input):focus,
+.sa-model-default-select :is(select.pc-text-input, input.pc-text-input):focus-visible {
   border-color: var(--sa-aqua);
   box-shadow: 0 0 0 2px rgba(0, 169, 157, 0.18);
   outline: none;
+}
+
+.sa-model-default-select .pc-date-input-wrapper {
+  position: relative;
+  border: 1px solid #9cb0b8;
+  border-radius: 10px;
+  box-shadow: 0 1px 0 rgba(20, 39, 54, 0.05);
+  background: #fff;
+  min-height: 38px;
+  overflow: hidden;
+}
+
+.sa-model-default-select .pc-date-input {
+  border: 0;
+  box-shadow: none;
+  border-radius: 10px;
+  min-height: 38px;
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+  padding-left: 0.75rem;
+  padding-right: 2.4rem;
+}
+
+.sa-model-default-select .pc-date-input-wrapper:hover {
+  border-color: #7f97a0;
+}
+
+.sa-model-default-select .pc-date-input-wrapper:focus-within {
+  border-color: var(--sa-aqua);
+  box-shadow: 0 0 0 2px rgba(0, 169, 157, 0.18);
+}
+
+.sa-model-default-select .pc-date-input:focus,
+.sa-model-default-select .pc-date-input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+.sa-model-default-select .pc-date-input-icon {
+  margin-right: 0.65rem;
+  background: transparent;
 }
 
 .sa-model-defaults-actions {
@@ -1189,6 +1244,13 @@ a {
 
 .sa-tool-permissions {
   margin-top: 8px;
+}
+
+.sa-tool-domains {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
 }
 
 .sa-tool-grid {

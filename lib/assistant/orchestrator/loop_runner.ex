@@ -37,17 +37,12 @@ defmodule Assistant.Orchestrator.LoopRunner do
   """
 
   alias Assistant.Analytics
+  alias Assistant.Integrations.LLMRouter
   alias Assistant.Orchestrator.{Context, GoogleContext, LLMHelpers}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
   alias Assistant.Skills.Result, as: SkillResult
 
   require Logger
-
-  @llm_client Application.compile_env(
-                :assistant,
-                :llm_client,
-                Assistant.Integrations.OpenRouter
-              )
 
   @max_orchestrator_iterations 10
 
@@ -79,10 +74,9 @@ defmodule Assistant.Orchestrator.LoopRunner do
       end
 
     user_id = loop_state[:user_id] || "unknown"
-    api_key = resolve_openrouter_key(user_id)
-    llm_opts = LLMHelpers.build_llm_opts(tools, model, api_key: api_key)
+    llm_opts = LLMHelpers.build_llm_opts(tools, model)
 
-    case @llm_client.chat_completion(messages, llm_opts) do
+    case LLMRouter.chat_completion(messages, llm_opts, user_id) do
       {:ok, response} ->
         record_llm_analytics(loop_state, response, model, :ok)
         process_response(response, loop_state)
@@ -256,9 +250,6 @@ defmodule Assistant.Orchestrator.LoopRunner do
       }
     }
   end
-
-  defp resolve_openrouter_key("unknown"), do: nil
-  defp resolve_openrouter_key(user_id), do: Assistant.Accounts.openrouter_key_for_user(user_id)
 
   defp record_llm_analytics(loop_state, response, model, status, reason \\ nil) do
     usage = if is_map(response), do: response[:usage] || %{}, else: %{}

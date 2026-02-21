@@ -76,6 +76,54 @@ if api_key = System.get_env("OPENROUTER_API_KEY") do
   config :assistant, :openrouter_api_key, api_key
 end
 
+# OpenAI — optional direct provider path for per-user model routing.
+if api_key = System.get_env("OPENAI_API_KEY") do
+  config :assistant, :openai_api_key, api_key
+end
+
+# OpenAI OAuth client configuration (for account connect flow)
+if client_id = System.get_env("OPENAI_OAUTH_CLIENT_ID") do
+  config :assistant, :openai_oauth_client_id, client_id
+end
+
+if client_secret = System.get_env("OPENAI_OAUTH_CLIENT_SECRET") do
+  config :assistant, :openai_oauth_client_secret, client_secret
+end
+
+if authorize_url = System.get_env("OPENAI_OAUTH_AUTHORIZE_URL") do
+  config :assistant, :openai_oauth_authorize_url, authorize_url
+end
+
+if token_url = System.get_env("OPENAI_OAUTH_TOKEN_URL") do
+  config :assistant, :openai_oauth_token_url, token_url
+end
+
+if scope = System.get_env("OPENAI_OAUTH_SCOPE") do
+  config :assistant, :openai_oauth_scope, scope
+end
+
+if codex_compat = System.get_env("OPENAI_OAUTH_CODEX_COMPAT") do
+  config :assistant,
+         :openai_oauth_codex_compat,
+         codex_compat in ["1", "true", "TRUE", "yes", "YES"]
+end
+
+if originator = System.get_env("OPENAI_OAUTH_ORIGINATOR") do
+  config :assistant, :openai_oauth_originator, originator
+end
+
+if redirect_uri = System.get_env("OPENAI_OAUTH_REDIRECT_URI") do
+  config :assistant, :openai_oauth_redirect_uri, redirect_uri
+end
+
+if oauth_flow = System.get_env("OPENAI_OAUTH_FLOW") do
+  config :assistant, :openai_oauth_flow, oauth_flow
+end
+
+if oauth_issuer = System.get_env("OPENAI_OAUTH_ISSUER") do
+  config :assistant, :openai_oauth_issuer, oauth_issuer
+end
+
 # Google service account credentials (inline JSON string or file path to JSON key).
 # Now used ONLY for Google Chat bot operations (chat.bot scope).
 # Per-user Gmail/Drive/Calendar access uses OAuth2 client credentials below.

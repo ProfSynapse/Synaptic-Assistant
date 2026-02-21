@@ -72,6 +72,20 @@
 
   const Hooks = {}
 
+  Hooks.AccordionControl = {
+    mounted() {
+      this.handleEvent("accordion:open", ({ id }) => {
+        const el = document.getElementById(id)
+        if (el) el.open = true
+      })
+      
+      this.handleEvent("accordion:close", ({ id }) => {
+        const el = document.getElementById(id)
+        if (el) el.open = false
+      })
+    }
+  }
+
   Hooks.KnowledgeGraph = {
     mounted() {
       this.canvasEl = this.el.querySelector("[data-graph-canvas]") || this.el
@@ -462,15 +476,16 @@
     },
   }
 
-  // Google OAuth popup handler: opens the OAuth flow in a popup window,
+  // OAuth popup handler: opens the OAuth flow in a popup window,
   // polls for popup close, and reloads the page to refresh connection status.
   window.addEventListener("phx:open_oauth_popup", (event) => {
     const url = event.detail && event.detail.url
+    const popupName = (event.detail && event.detail.name) || "oauth_popup"
     if (!url) return
 
     const popup = window.open(
       url,
-      "google_oauth",
+      popupName,
       "width=600,height=700,scrollbars=yes",
     )
 

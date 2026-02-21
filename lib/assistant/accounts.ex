@@ -439,10 +439,10 @@ defmodule Assistant.Accounts do
   """
   @spec openrouter_key_for_user(String.t()) :: String.t() | nil
   def openrouter_key_for_user(user_id) when is_binary(user_id) do
-    with {:ok, _} <- Ecto.UUID.cast(user_id) do
+    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id) do
       case Repo.one(
              from(su in SettingsUser,
-               where: su.user_id == ^user_id,
+               where: su.user_id == ^cast_user_id,
                select: su.openrouter_api_key
              )
            ) do
@@ -456,4 +456,122 @@ defmodule Assistant.Accounts do
   end
 
   def openrouter_key_for_user(_), do: nil
+
+  ## OpenAI
+
+  @doc """
+  Stores an OpenAI API key (encrypted) for the given settings_user.
+  """
+  def save_openai_api_key(%SettingsUser{} = settings_user, api_key) when is_binary(api_key) do
+    settings_user
+    |> SettingsUser.openai_api_key_changeset(api_key)
+    |> Repo.update()
+  end
+
+  @doc """
+  Stores OpenAI OAuth credentials for the given settings_user.
+  """
+  @spec save_openai_oauth_credentials(%SettingsUser{}, map()) ::
+          {:ok, %SettingsUser{}} | {:error, Ecto.Changeset.t()}
+  def save_openai_oauth_credentials(%SettingsUser{} = settings_user, attrs) when is_map(attrs) do
+    settings_user
+    |> SettingsUser.openai_oauth_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Stores OpenAI OAuth credentials by linked chat `user_id`.
+
+  Returns `{:error, :not_found}` if no settings_user is linked to the given user_id.
+  """
+  @spec save_openai_oauth_credentials_for_user(String.t(), map()) ::
+          {:ok, %SettingsUser{}} | {:error, Ecto.Changeset.t() | :not_found}
+  def save_openai_oauth_credentials_for_user(user_id, attrs)
+      when is_binary(user_id) and is_map(attrs) do
+    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id),
+         %SettingsUser{} = settings_user <- Repo.get_by(SettingsUser, user_id: cast_user_id) do
+      save_openai_oauth_credentials(settings_user, attrs)
+    else
+      :error -> {:error, :not_found}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  def save_openai_oauth_credentials_for_user(_, _), do: {:error, :not_found}
+
+  @doc """
+  Removes the OpenAI API key for the given settings_user.
+  """
+  def delete_openai_api_key(%SettingsUser{} = settings_user) do
+    settings_user
+    |> SettingsUser.openai_api_key_changeset(nil)
+    |> Repo.update()
+  end
+
+  @doc """
+  Returns true if the settings_user has an OpenAI API key stored.
+  """
+  def openai_connected?(%SettingsUser{openai_api_key: key}) when is_binary(key), do: true
+  def openai_connected?(_), do: false
+
+  @doc """
+  Looks up the per-user OpenAI API key via the chat user_id bridge.
+
+  Returns the decrypted API key string, or nil if the user has no linked
+  settings_user or no OpenAI key stored.
+  """
+  @spec openai_key_for_user(String.t()) :: String.t() | nil
+  def openai_key_for_user(user_id) when is_binary(user_id) do
+    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id) do
+      case Repo.one(
+             from(su in SettingsUser,
+               where: su.user_id == ^cast_user_id,
+               select: su.openai_api_key
+             )
+           ) do
+        nil -> nil
+        "" -> nil
+        key when is_binary(key) -> key
+      end
+    else
+      :error -> nil
+    end
+  end
+
+  def openai_key_for_user(_), do: nil
+
+  @doc """
+  Looks up full OpenAI credentials via the chat user_id bridge.
+
+  Returns:
+    - `:auth_type` — `"api_key"` or `"oauth"` when known
+    - `:access_token` — key or OAuth access token
+    - `:refresh_token` — OAuth refresh token (oauth mode only)
+    - `:account_id` — ChatGPT account/org id (oauth mode only)
+    - `:expires_at` — UTC expiry timestamp when available
+  """
+  @spec openai_credentials_for_user(String.t()) :: map() | nil
+  def openai_credentials_for_user(user_id) when is_binary(user_id) do
+    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id),
+         %{} = row <-
+           Repo.one(
+             from(su in SettingsUser,
+               where: su.user_id == ^cast_user_id,
+               select: %{
+                 auth_type: su.openai_auth_type,
+                 access_token: su.openai_api_key,
+                 refresh_token: su.openai_refresh_token,
+                 account_id: su.openai_account_id,
+                 expires_at: su.openai_expires_at
+               }
+             )
+           ),
+         true <- is_binary(row.access_token) and row.access_token != "" do
+      row
+    else
+      _ -> nil
+    end
+  end
+
+  def openai_credentials_for_user(_), do: nil
 end

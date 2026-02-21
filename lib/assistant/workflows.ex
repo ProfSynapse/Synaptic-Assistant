@@ -295,6 +295,7 @@ defmodule Assistant.Workflows do
 
   defp schedule_from_cron(nil) do
     %{
+      has_schedule: false,
       recurrence: "daily",
       time: "09:00",
       day_of_week: "1",
@@ -307,6 +308,7 @@ defmodule Assistant.Workflows do
     case String.split(cron, " ", parts: 5) do
       [minute, hour, "*", "*", "*"] ->
         %{
+          has_schedule: true,
           recurrence: "daily",
           time: format_time_24(hour, minute),
           day_of_week: "1",
@@ -316,6 +318,7 @@ defmodule Assistant.Workflows do
 
       [minute, hour, "*", "*", day] ->
         %{
+          has_schedule: true,
           recurrence: "weekly",
           time: format_time_24(hour, minute),
           day_of_week: day,
@@ -325,6 +328,7 @@ defmodule Assistant.Workflows do
 
       [minute, hour, dom, "*", "*"] ->
         %{
+          has_schedule: true,
           recurrence: "monthly",
           time: format_time_24(hour, minute),
           day_of_week: "1",
@@ -334,6 +338,7 @@ defmodule Assistant.Workflows do
 
       _ ->
         %{
+          has_schedule: true,
           recurrence: "custom",
           time: "09:00",
           day_of_week: "1",
@@ -344,33 +349,39 @@ defmodule Assistant.Workflows do
   end
 
   defp cron_from_schedule(params) do
-    recurrence = Map.get(params, "recurrence", "daily")
-    time = Map.get(params, "time", "09:00")
-    {hour, minute} = parse_time(time)
+    has_schedule = Map.get(params, "has_schedule") == "true"
 
-    case recurrence do
-      "daily" ->
-        {:ok, "#{minute} #{hour} * * *"}
+    if not has_schedule do
+      {:ok, nil}
+    else
+      recurrence = Map.get(params, "recurrence", "daily")
+      time = Map.get(params, "time", "09:00")
+      {hour, minute} = parse_time(time)
 
-      "weekly" ->
-        day = Map.get(params, "day_of_week", "1")
-        {:ok, "#{minute} #{hour} * * #{day}"}
+      case recurrence do
+        "daily" ->
+          {:ok, "#{minute} #{hour} * * *"}
 
-      "monthly" ->
-        day = Map.get(params, "day_of_month", "1")
-        {:ok, "#{minute} #{hour} #{day} * *"}
+        "weekly" ->
+          day = Map.get(params, "day_of_week", "1")
+          {:ok, "#{minute} #{hour} * * #{day}"}
 
-      "custom" ->
-        custom = Map.get(params, "custom_cron", "")
+        "monthly" ->
+          day = Map.get(params, "day_of_month", "1")
+          {:ok, "#{minute} #{hour} #{day} * *"}
 
-        if custom == "" do
-          {:error, :missing_custom_cron}
-        else
-          {:ok, custom}
-        end
+        "custom" ->
+          custom = Map.get(params, "custom_cron", "")
 
-      _ ->
-        {:ok, "#{minute} #{hour} * * *"}
+          if custom == "" do
+            {:error, :missing_custom_cron}
+          else
+            {:ok, custom}
+          end
+
+        _ ->
+          {:ok, "#{minute} #{hour} * * *"}
+      end
     end
   end
 
@@ -393,6 +404,8 @@ defmodule Assistant.Workflows do
     m = String.pad_leading(to_string(minute), 2, "0")
     "#{h}:#{m}"
   end
+
+  defp humanize_schedule(%{has_schedule: false}), do: "Unscheduled"
 
   defp humanize_schedule(%{recurrence: "daily", time: time}) do
     "Daily at #{format_time_12(time)}"

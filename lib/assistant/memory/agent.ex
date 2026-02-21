@@ -82,18 +82,13 @@ defmodule Assistant.Memory.Agent do
 
   alias Assistant.Analytics
   alias Assistant.Config.PromptLoader
+  alias Assistant.Integrations.LLMRouter
   alias Assistant.Memory.SkillExecutor
   alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Registry, Result}
 
   require Logger
-
-  @llm_client Application.compile_env(
-                :assistant,
-                :llm_client,
-                Assistant.Integrations.OpenRouter
-              )
 
   @memory_domain "memory"
   @default_max_tool_calls 15
@@ -418,7 +413,7 @@ defmodule Assistant.Memory.Agent do
     model_opts = build_model_opts(context, gen_state.user_id)
     model = Keyword.get(model_opts, :model)
 
-    case @llm_client.chat_completion(context.messages, model_opts) do
+    case LLMRouter.chat_completion(context.messages, model_opts, gen_state.user_id) do
       {:ok, response} ->
         record_llm_analytics(gen_state, response, model, :ok)
 
@@ -939,14 +934,10 @@ defmodule Assistant.Memory.Agent do
     }
   end
 
-  defp build_model_opts(context, user_id) do
+  defp build_model_opts(context, _user_id) do
     model = LLMHelpers.resolve_model(:sub_agent)
-    api_key = resolve_openrouter_key(user_id)
-    LLMHelpers.build_llm_opts(context.tools, model, api_key: api_key)
+    LLMHelpers.build_llm_opts(context.tools, model)
   end
-
-  defp resolve_openrouter_key("unknown"), do: nil
-  defp resolve_openrouter_key(uid), do: Assistant.Accounts.openrouter_key_for_user(uid)
 
   defp build_resume_content(update) do
     parts = []

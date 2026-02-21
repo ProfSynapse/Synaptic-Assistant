@@ -7,6 +7,8 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.Auth.TokenStore
   alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.ConnectedDrives
+  alias Assistant.Integrations.OpenAI
+  alias Assistant.Integrations.OpenRouter
   alias Assistant.MemoryExplorer
   alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
@@ -40,7 +42,16 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   end
 
   def load_models(socket) do
-    models = ModelCatalog.list_models()
+    {openrouter_key, openai_key, openai_auth_type} = provider_keys(socket)
+    openrouter_connected = present?(openrouter_key)
+    openai_connected = present?(openai_key)
+    catalog_ids = ModelCatalog.catalog_model_ids()
+
+    models =
+      ModelCatalog.list_models()
+      |> filter_models_for_connected_providers(openrouter_connected, openai_connected)
+      |> filter_models_by_provider_availability(openrouter_key, openai_key, openai_auth_type)
+
     roles = model_roles()
     explicit_defaults = ModelDefaults.list_defaults()
 
@@ -51,9 +62,12 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         Map.put(acc, key, value || "")
       end)
 
-    options = Enum.map(models, fn model -> {model.name, model.id} end)
+    options = model_options_with_unavailable_defaults(models, current_defaults)
 
     socket
+    |> assign(:openrouter_connected, openrouter_connected)
+    |> assign(:openai_connected, openai_connected)
+    |> assign(:catalog_model_ids, catalog_ids)
     |> assign(:models, models)
     |> assign(:model_options, options)
     |> assign(:model_defaults, current_defaults)
@@ -202,6 +216,18 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     _ -> socket
   end
 
+  def load_openai_status(socket) do
+    case Context.current_settings_user(socket) do
+      %{openai_api_key: key} when not is_nil(key) and key != "" ->
+        assign(socket, :openai_connected, true)
+
+      _ ->
+        assign(socket, :openai_connected, false)
+    end
+  rescue
+    _ -> socket
+  end
+
   def load_connected_drives(socket) do
     case Context.current_user_id(socket) do
       nil ->
@@ -309,6 +335,146 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     end
   end
 
+  defp provider_keys(socket) do
+    case Context.current_settings_user(socket) do
+      %{
+        openrouter_api_key: openrouter_key,
+        openai_api_key: openai_key,
+        openai_auth_type: openai_auth_type
+      } ->
+        {openrouter_key, openai_key, openai_auth_type}
+
+      _ ->
+        {nil, nil, nil}
+    end
+  end
+
+  defp present?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present?(_), do: false
+
+  defp filter_models_for_connected_providers(models, true, _openai_connected), do: models
+
+  defp filter_models_for_connected_providers(models, false, true) do
+    Enum.filter(models, fn model -> openai_prefixed_model?(model.id) end)
+  end
+
+  defp filter_models_for_connected_providers(models, false, false), do: models
+
+  defp filter_models_by_provider_availability(
+         models,
+         openrouter_key,
+         openai_key,
+         openai_auth_type
+       ) do
+    openrouter_available =
+      if present?(openrouter_key) do
+        case safe_list_models(OpenRouter, openrouter_key) do
+          {:ok, ids} -> MapSet.new(ids)
+          {:error, _} -> nil
+        end
+      else
+        nil
+      end
+
+    openai_available =
+      if present?(openai_key) do
+        if openai_auth_type == "oauth" do
+          OpenAI.codex_model_ids() |> Enum.map(&"openai/#{&1}") |> MapSet.new()
+        else
+          case safe_list_models(OpenAI, openai_key) do
+            {:ok, ids} -> MapSet.new(Enum.map(ids, &"openai/#{&1}"))
+            {:error, _} -> nil
+          end
+        end
+      else
+        nil
+      end
+
+    models =
+      maybe_append_openai_oauth_models(models, openai_available, openai_auth_type)
+
+    Enum.filter(models, fn model ->
+      cond do
+        openai_prefixed_model?(model.id) ->
+          has_openai = is_struct(openai_available, MapSet)
+          has_openrouter = is_struct(openrouter_available, MapSet)
+
+          if has_openai or has_openrouter do
+            (has_openai and MapSet.member?(openai_available, model.id)) or
+              (has_openrouter and MapSet.member?(openrouter_available, model.id))
+          else
+            true
+          end
+
+        is_struct(openrouter_available, MapSet) ->
+          MapSet.member?(openrouter_available, model.id)
+
+        true ->
+          true
+      end
+    end)
+    |> Enum.sort_by(&String.downcase(to_string(&1.name || &1.id)))
+  end
+
+  defp openai_prefixed_model?(id) when is_binary(id), do: String.starts_with?(id, "openai/")
+  defp openai_prefixed_model?(_), do: false
+
+  defp maybe_append_openai_oauth_models(models, openai_available, "oauth")
+       when is_struct(openai_available, MapSet) do
+    existing_ids =
+      models
+      |> Enum.map(& &1.id)
+      |> MapSet.new()
+
+    missing_models =
+      openai_available
+      |> MapSet.difference(existing_ids)
+      |> Enum.map(&oauth_openai_model_entry/1)
+
+    models ++ missing_models
+  end
+
+  defp maybe_append_openai_oauth_models(models, _openai_available, _openai_auth_type), do: models
+
+  defp oauth_openai_model_entry("openai/" <> model_suffix) do
+    %{
+      id: "openai/" <> model_suffix,
+      name: "OpenAI " <> humanize_model_id(model_suffix),
+      input_cost: "n/a",
+      output_cost: "n/a",
+      max_context_tokens: "n/a"
+    }
+  end
+
+  defp oauth_openai_model_entry(model_id) do
+    %{
+      id: model_id,
+      name: humanize_model_id(model_id),
+      input_cost: "n/a",
+      output_cost: "n/a",
+      max_context_tokens: "n/a"
+    }
+  end
+
+  defp humanize_model_id(value) when is_binary(value) do
+    value
+    |> String.split("/")
+    |> List.last()
+    |> to_string()
+    |> String.replace("-", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+    |> String.trim()
+  end
+
+  defp humanize_model_id(_), do: "Model"
+
+  defp safe_list_models(module, api_key) do
+    module.list_models(api_key)
+  rescue
+    _ -> {:error, :provider_unavailable}
+  end
+
   defp merged_query(left, right) do
     values =
       [left, right]
@@ -318,5 +484,28 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       |> Enum.uniq()
 
     Enum.join(values, " ")
+  end
+
+  defp model_options_with_unavailable_defaults(models, current_defaults) do
+    base_options =
+      models
+      |> Enum.map(fn model -> {model.name, model.id} end)
+
+    available_ids =
+      models
+      |> Enum.map(& &1.id)
+      |> MapSet.new()
+
+    unavailable_default_options =
+      current_defaults
+      |> Map.values()
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.uniq()
+      |> Enum.reject(&MapSet.member?(available_ids, &1))
+      |> Enum.map(fn id -> {"#{humanize_model_id(id)} (default unavailable)", id} end)
+
+    (base_options ++ unavailable_default_options)
+    |> Enum.uniq_by(&elem(&1, 1))
+    |> Enum.sort_by(fn {label, _id} -> String.downcase(label) end)
   end
 end

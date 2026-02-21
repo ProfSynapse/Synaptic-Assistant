@@ -220,6 +220,97 @@ defmodule Assistant.Integrations.OpenRouter do
   end
 
   @doc """
+  Validates an OpenRouter API key by calling the key metadata endpoint.
+  """
+  @spec validate_api_key(String.t()) :: :ok | {:error, term()}
+  def validate_api_key(api_key) when is_binary(api_key) and api_key != "" do
+    http = ConfigLoader.http_config()
+    req = build_req_client(http, :request, api_key)
+
+    case Req.get(req, url: "/key") do
+      {:ok, %{status: 200}} ->
+        :ok
+
+      {:ok, %{status: status, body: body}} when status >= 400 ->
+        {:error, {:api_error, status, get_in(body, ["error", "message"])}}
+
+      {:error, reason} ->
+        {:error, {:request_failed, reason}}
+    end
+  end
+
+  def validate_api_key(_), do: {:error, :invalid_api_key}
+
+  @doc """
+  Lists OpenRouter model IDs visible to the provided API key.
+  """
+  @spec list_models(String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def list_models(api_key) when is_binary(api_key) and api_key != "" do
+    http = ConfigLoader.http_config()
+    req = build_req_client(http, :request, api_key)
+
+    case Req.get(req, url: "/models/user") do
+      {:ok, %{status: 200, body: %{"data" => data}}} when is_list(data) ->
+        model_ids =
+          data
+          |> Enum.map(&Map.get(&1, "id"))
+          |> Enum.filter(&is_binary/1)
+
+        {:ok, model_ids}
+
+      {:ok, %{status: status, body: body}} when status >= 400 ->
+        {:error, {:api_error, status, get_in(body, ["error", "message"])}}
+
+      {:error, reason} ->
+        {:error, {:request_failed, reason}}
+
+      _ ->
+        {:error, :unexpected_response}
+    end
+  end
+
+  def list_models(_), do: {:error, :invalid_api_key}
+
+  @doc """
+  Lists detailed OpenRouter model metadata for model catalog browsing.
+
+  Returns normalized maps with:
+    - `:id`
+    - `:name`
+    - `:input_cost`
+    - `:output_cost`
+    - `:max_context_tokens`
+  """
+  @spec list_models_detailed(String.t()) :: {:ok, [map()]} | {:error, term()}
+  def list_models_detailed(api_key) when is_binary(api_key) and api_key != "" do
+    http = ConfigLoader.http_config()
+    req = build_req_client(http, :request, api_key)
+
+    case Req.get(req, url: "/models/user") do
+      {:ok, %{status: 200, body: %{"data" => data}}} when is_list(data) ->
+        models =
+          data
+          |> Enum.map(&normalize_model_details/1)
+          |> Enum.reject(&is_nil/1)
+          |> Enum.uniq_by(& &1.id)
+          |> Enum.sort_by(&String.downcase(&1.name || &1.id))
+
+        {:ok, models}
+
+      {:ok, %{status: status, body: body}} when status >= 400 ->
+        {:error, {:api_error, status, get_in(body, ["error", "message"])}}
+
+      {:error, reason} ->
+        {:error, {:request_failed, reason}}
+
+      _ ->
+        {:error, :unexpected_response}
+    end
+  end
+
+  def list_models_detailed(_), do: {:error, :invalid_api_key}
+
+  @doc """
   Generate images using OpenRouter's chat completions image modality.
 
   Sends a user prompt with `modalities: ["image", "text"]` and optional
@@ -537,6 +628,61 @@ defmodule Assistant.Integrations.OpenRouter do
   end
 
   defp parse_usage(_), do: empty_usage()
+
+  defp normalize_model_details(model) when is_map(model) do
+    id = Map.get(model, "id")
+
+    if is_binary(id) and id != "" do
+      input_cost =
+        model
+        |> get_in(["pricing", "prompt"])
+        |> format_price_per_million()
+
+      output_cost =
+        model
+        |> get_in(["pricing", "completion"])
+        |> format_price_per_million()
+
+      %{
+        id: id,
+        name: to_string(Map.get(model, "name") || id),
+        input_cost: input_cost,
+        output_cost: output_cost,
+        max_context_tokens: format_context_tokens(Map.get(model, "context_length"))
+      }
+    end
+  end
+
+  defp normalize_model_details(_), do: nil
+
+  defp format_context_tokens(value) when is_integer(value) and value > 0,
+    do: Integer.to_string(value)
+
+  defp format_context_tokens(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {tokens, _} when tokens > 0 -> Integer.to_string(tokens)
+      _ -> "n/a"
+    end
+  end
+
+  defp format_context_tokens(_), do: "n/a"
+
+  defp format_price_per_million(value) when is_binary(value) do
+    case Float.parse(value) do
+      {price_per_token, _} when price_per_token >= 0 ->
+        price_per_million = price_per_token * 1_000_000
+        "$#{:erlang.float_to_binary(price_per_million, decimals: 2)} / 1M tokens"
+
+      _ ->
+        "n/a"
+    end
+  end
+
+  defp format_price_per_million(value) when is_number(value) and value >= 0 do
+    format_price_per_million(to_string(value))
+  end
+
+  defp format_price_per_million(_), do: "n/a"
 
   # --- SSE Stream Handling ---
 

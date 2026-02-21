@@ -27,7 +27,7 @@ defmodule Assistant.Integrations.Registry do
   """
 
   alias Assistant.Integrations.Google.{Calendar, Drive, Gmail}
-  alias Assistant.Integrations.OpenRouter
+  alias Assistant.Integrations.{OpenAI, OpenRouter}
 
   @doc """
   Returns the default integrations map for skill contexts.
@@ -37,6 +37,7 @@ defmodule Assistant.Integrations.Registry do
     - `:drive` → `Assistant.Integrations.Google.Drive`
     - `:gmail` → `Assistant.Integrations.Google.Gmail`
     - `:calendar` → `Assistant.Integrations.Google.Calendar`
+    - `:openai` → `Assistant.Integrations.OpenAI`
     - `:openrouter` → `Assistant.Integrations.OpenRouter`
   """
   @spec default_integrations() :: Assistant.Skills.Context.integrations()
@@ -45,6 +46,7 @@ defmodule Assistant.Integrations.Registry do
       drive: Drive,
       gmail: Gmail,
       calendar: Calendar,
+      openai: OpenAI,
       openrouter: OpenRouter
     }
   end

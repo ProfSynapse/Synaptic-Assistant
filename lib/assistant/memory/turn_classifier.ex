@@ -35,12 +35,7 @@ defmodule Assistant.Memory.TurnClassifier do
   require Logger
 
   alias Assistant.Config.Loader, as: ConfigLoader
-
-  @llm_client Application.compile_env(
-                :assistant,
-                :llm_client,
-                Assistant.Integrations.OpenRouter
-              )
+  alias Assistant.Integrations.LLMRouter
 
   @classification_prompt """
   Classify this conversation exchange.
@@ -133,15 +128,14 @@ defmodule Assistant.Memory.TurnClassifier do
       conversation_id: conversation_id
     )
 
-    api_key = resolve_openrouter_key(user_id)
+    opts = [
+      model: model,
+      temperature: 0.0,
+      max_tokens: 500,
+      response_format: @classification_response_format
+    ]
 
-    case @llm_client.chat_completion(messages,
-           model: model,
-           temperature: 0.0,
-           max_tokens: 500,
-           response_format: @classification_response_format,
-           api_key: api_key
-         ) do
+    case LLMRouter.chat_completion(messages, opts, user_id) do
       {:ok, %{content: content}} ->
         handle_classification(content, conversation_id, user_id, user_message, assistant_response)
 
@@ -266,9 +260,4 @@ defmodule Assistant.Memory.TurnClassifier do
   end
 
   defp truncate(nil, _max_length), do: ""
-
-  defp resolve_openrouter_key(user_id) when is_binary(user_id),
-    do: Assistant.Accounts.openrouter_key_for_user(user_id)
-
-  defp resolve_openrouter_key(_), do: nil
 end

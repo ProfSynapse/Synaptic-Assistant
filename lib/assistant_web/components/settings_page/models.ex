@@ -5,26 +5,117 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
 
   alias Phoenix.LiveView.JS
 
-  import AssistantWeb.Components.ConnectorCard, only: [connector_card: 1]
-
   def models_section(assigns) do
     ~H"""
     <div>
       <div class="sa-card">
-        <div class="sa-row">
-          <h2>OpenRouter</h2>
+        <div class="sa-row" style="align-items: baseline;">
+          <h2>Model Providers</h2>
         </div>
-        <p class="sa-muted">Connect your OpenRouter account to use your personal API key for model access.</p>
+        <p class="sa-muted">
+          Connect providers to make their models available for role defaults and active model selection.
+        </p>
         <div class="sa-card-grid">
-          <.connector_card
-            id="openrouter"
-            name="OpenRouter"
-            icon_path="/images/apps/openrouter.svg"
-            connected={@openrouter_connected}
-            on_connect="connect_openrouter"
-            on_disconnect="disconnect_openrouter"
-            disconnect_confirm="Disconnect OpenRouter? The assistant will use the system-level API key instead."
-          />
+          <article class="sa-card">
+            <div class="sa-row">
+              <div class="sa-app-title" style="margin-bottom: 0; flex: 1;">
+                <img src="/images/apps/openrouter.svg" alt="OpenRouter" class="sa-app-icon" />
+                <h3>OpenRouter</h3>
+              </div>
+              <div class="sa-row" style="gap: 0.5rem;">
+                <button
+                  type="button"
+                  class="sa-icon-btn"
+                  phx-click="toggle_openrouter_key_form"
+                  aria-label="Use OpenRouter API key"
+                  aria-expanded={to_string(@openrouter_key_form_open)}
+                  title="Use API key"
+                >
+                  <.icon name="hero-key" class="h-4 w-4" />
+                </button>
+                <button
+                  :if={!@openrouter_connected}
+                  type="button"
+                  class="sa-btn"
+                  phx-click="connect_openrouter"
+                >
+                  Connect
+                </button>
+                <button
+                  :if={@openrouter_connected}
+                  type="button"
+                  class="sa-btn secondary"
+                  phx-click="disconnect_openrouter"
+                  data-confirm="Disconnect OpenRouter? The assistant will use the system-level API key instead."
+                >
+                  Disconnect
+                </button>
+              </div>
+            </div>
+            <p class="sa-muted" style="margin-top: 0.5rem;">
+              Status:
+              <span :if={@openrouter_connected}>Connected</span>
+              <span :if={!@openrouter_connected}>Not connected</span>
+            </p>
+            <div :if={@openrouter_key_form_open} style="margin-top: 0.75rem;">
+              <.form for={@openrouter_key_form} id="openrouter-key-form" phx-submit="save_openrouter_api_key">
+                <.input
+                  type="password"
+                  field={@openrouter_key_form[:api_key]}
+                  label="OpenRouter API key"
+                  required
+                />
+                <button type="submit" class="sa-btn secondary">Validate & Connect</button>
+              </.form>
+            </div>
+          </article>
+
+          <article class="sa-card">
+            <div class="sa-row">
+              <div class="sa-app-title" style="margin-bottom: 0; flex: 1;">
+                <img src="/images/apps/openai.svg" alt="OpenAI" class="sa-app-icon" />
+                <h3>OpenAI</h3>
+              </div>
+              <div class="sa-row" style="gap: 0.5rem;">
+                <button
+                  type="button"
+                  class="sa-icon-btn"
+                  phx-click="toggle_openai_key_form"
+                  aria-label="Use OpenAI API key"
+                  aria-expanded={to_string(@openai_key_form_open)}
+                  title="Use API key"
+                >
+                  <.icon name="hero-key" class="h-4 w-4" />
+                </button>
+                <button :if={!@openai_connected} type="button" class="sa-btn" phx-click="connect_openai">
+                  Connect
+                </button>
+                <button
+                  :if={@openai_connected}
+                  type="button"
+                  class="sa-btn secondary"
+                  phx-click="disconnect_openai"
+                  data-confirm="Disconnect OpenAI?"
+                >
+                  Disconnect
+                </button>
+              </div>
+            </div>
+            <p class="sa-muted" style="margin-top: 0.5rem;">
+              Status:
+              <span :if={@openai_connected}>Connected</span>
+              <span :if={!@openai_connected}>Not connected</span>
+            </p>
+            <p class="sa-muted" style="margin-top: 0.25rem;">
+              Connect starts ChatGPT OAuth (Codex-compatible). Use the key icon to manually add your OpenAI API key.
+            </p>
+            <div :if={@openai_key_form_open} style="margin-top: 0.75rem;">
+              <.form for={@openai_key_form} id="openai-key-form" phx-submit="save_openai_api_key">
+                <.input type="password" field={@openai_key_form[:api_key]} label="OpenAI API key" required />
+                <button type="submit" class="sa-btn secondary">Validate & Connect</button>
+              </.form>
+            </div>
+          </article>
         </div>
       </div>
 
@@ -90,22 +181,33 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
           <thead>
             <tr>
               <th>Model Name</th>
+              <th>Model ID</th>
               <th>Input Cost</th>
               <th>Output Cost</th>
               <th>Max Tokens</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
-            <tr
-              :for={model <- @models}
-              class="sa-click-row"
-              phx-click="open_model_modal"
-              phx-value-id={model.id}
-            >
+            <tr :for={model <- @models}>
               <td>{model.name}</td>
+              <td><code>{model.id}</code></td>
               <td>{model.input_cost}</td>
               <td>{model.output_cost}</td>
               <td>{model.max_context_tokens}</td>
+              <td>
+                <button
+                  type="button"
+                  class="sa-icon-btn danger"
+                  phx-click="remove_model_from_catalog"
+                  phx-value-id={model.id}
+                  data-confirm={"Remove #{model.name} from your catalog?"}
+                  aria-label={"Remove #{model.name}"}
+                  title={"Remove #{model.name}"}
+                >
+                  <.icon name="hero-x-mark" class="h-4 w-4" />
+                </button>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -113,35 +215,83 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
         <.modal
           :if={@model_modal_open}
           id="model-modal"
-          title="Model Details"
-          max_width="md"
+          title="Add OpenRouter Models"
+          max_width="xl"
           on_cancel={JS.push("close_model_modal")}
         >
-          <.form for={@model_form} id="model-form" phx-submit="save_model">
-            <.input name="model[id]" label="Model ID" value={@model_form.params["id"]} />
-            <.input name="model[name]" label="Display Name" value={@model_form.params["name"]} />
+          <.form for={@model_library_form} id="model-library-form" phx-change="search_model_library">
             <.input
-              name="model[input_cost]"
-              label="Input Cost"
-              value={@model_form.params["input_cost"]}
+              type="text"
+              field={@model_library_form[:q]}
+              label="Search OpenRouter models"
+              placeholder="Search by model name or id (for example gpt-oss, claude, gemini...)"
             />
-            <.input
-              name="model[output_cost]"
-              label="Output Cost"
-              value={@model_form.params["output_cost"]}
-            />
-            <.input
-              name="model[max_context_tokens]"
-              label="Max Tokens"
-              value={@model_form.params["max_context_tokens"]}
-            />
-            <div class="sa-row">
-              <button type="button" class="sa-btn secondary" phx-click="close_model_modal">
-                Cancel
-              </button>
-              <button type="submit" class="sa-btn">Save Model</button>
-            </div>
           </.form>
+
+          <div :if={@model_library_error} class="sa-empty" style="margin-top: 0.75rem;">
+            {@model_library_error}
+          </div>
+
+          <div :if={@model_library_models == [] and !@model_library_error} class="sa-empty" style="margin-top: 0.75rem;">
+            No models match your search.
+          </div>
+
+          <table :if={@model_library_models != []} class="sa-table" style="margin-top: 0.75rem;">
+            <thead>
+              <tr>
+                <th>Model Name</th>
+                <th>Model ID</th>
+                <th>Input Cost</th>
+                <th>Output Cost</th>
+                <th>Max Tokens</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={model <- @model_library_models}>
+                <td>{model.name}</td>
+                <td><code>{model.id}</code></td>
+                <td>{model.input_cost}</td>
+                <td>{model.output_cost}</td>
+                <td>{model.max_context_tokens}</td>
+                <td>
+                  <button
+                    :if={!MapSet.member?(@catalog_model_ids, model.id)}
+                    type="button"
+                    class="sa-btn"
+                    phx-click="add_model_from_library"
+                    phx-value-id={model.id}
+                    phx-value-name={model.name}
+                    phx-value-input_cost={model.input_cost}
+                    phx-value-output_cost={model.output_cost}
+                    phx-value-max_context_tokens={model.max_context_tokens}
+                  >
+                    Add
+                  </button>
+                  <button
+                    :if={MapSet.member?(@catalog_model_ids, model.id)}
+                    type="button"
+                    class="sa-icon-btn danger"
+                    phx-click="remove_model_from_catalog"
+                    phx-value-id={model.id}
+                    aria-label={"Remove #{model.name}"}
+                    title={"Remove #{model.name}"}
+                  >
+                    <.icon name="hero-x-mark" class="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="sa-row" style="margin-top: 0.75rem;">
+            <button type="button" class="sa-btn secondary" phx-click="refresh_model_library">
+              Refresh
+            </button>
+            <button type="button" class="sa-btn secondary" phx-click="close_model_modal">
+              Done
+            </button>
+          </div>
         </.modal>
       </div>
     </div>

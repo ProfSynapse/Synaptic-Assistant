@@ -65,6 +65,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   alias Assistant.Auth.MagicLink
   alias Assistant.Config.{Loader, PromptLoader}
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
+  alias Assistant.Integrations.LLMRouter
   alias Assistant.Orchestrator.{GoogleContext, LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Executor, Registry, Result}
@@ -73,12 +74,6 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   # Google skill domains that require a per-user OAuth2 token.
   @google_skill_domains ~w(email calendar files)
-
-  @llm_client Application.compile_env(
-                :assistant,
-                :llm_client,
-                Assistant.Integrations.OpenRouter
-              )
 
   @default_max_tool_calls 5
   @default_timeout_ms 30_000
@@ -438,8 +433,9 @@ defmodule Assistant.Orchestrator.SubAgent do
   defp run_loop(context, agent_state, dispatch_params, engine_state, genserver_pid) do
     model_opts = build_model_opts(dispatch_params, context, engine_state)
     model = Keyword.get(model_opts, :model)
+    user_id = engine_state[:user_id] || "unknown"
 
-    case @llm_client.chat_completion(context.messages, model_opts) do
+    case LLMRouter.chat_completion(context.messages, model_opts, user_id) do
       {:ok, response} ->
         record_llm_analytics(engine_state, response, model, :ok)
 
@@ -1394,19 +1390,14 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp resolve_google_token(_user_id, _skills), do: nil
 
-  defp resolve_openrouter_key("unknown"), do: nil
-  defp resolve_openrouter_key(user_id), do: Assistant.Accounts.openrouter_key_for_user(user_id)
-
-  defp build_model_opts(dispatch_params, context, engine_state) do
+  defp build_model_opts(dispatch_params, context, _engine_state) do
     model =
       case dispatch_params[:model_override] do
         nil -> LLMHelpers.resolve_model(:sub_agent)
         override -> override
       end
 
-    user_id = engine_state[:user_id] || "unknown"
-    api_key = resolve_openrouter_key(user_id)
-    LLMHelpers.build_llm_opts(context.tools, model, api_key: api_key)
+    LLMHelpers.build_llm_opts(context.tools, model)
   end
 
   # --- Registry ---

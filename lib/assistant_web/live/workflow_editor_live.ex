@@ -88,10 +88,65 @@ defmodule AssistantWeb.WorkflowEditorLive do
     end
   end
 
+  def handle_event(
+        "toggle_domain",
+        %{"domain" => domain, "currently_checked" => currently_checked},
+        socket
+      ) do
+    currently_checked? = currently_checked == "true"
+    workflow = socket.assigns.workflow
+
+    tools_in_domain =
+      Enum.filter(socket.assigns.tools, &(&1.domain == domain)) |> Enum.map(& &1.id)
+
+    new_allowed_tools =
+      if currently_checked? do
+        workflow.allowed_tools -- tools_in_domain
+      else
+        Enum.uniq(workflow.allowed_tools ++ tools_in_domain)
+      end
+
+    params = %{
+      "description" => workflow.description,
+      "channel" => workflow.channel,
+      "allowed_tools" => new_allowed_tools,
+      "has_schedule" => to_string(workflow.schedule.has_schedule),
+      "recurrence" => workflow.schedule.recurrence,
+      "time" => workflow.schedule.time,
+      "day_of_week" => workflow.schedule.day_of_week,
+      "day_of_month" => workflow.schedule.day_of_month,
+      "custom_cron" => workflow.schedule.custom_cron
+    }
+
+    case Workflows.update_metadata(workflow.name, params) do
+      {:ok, updated_workflow} ->
+        # If we are turning it ON (currently_checked? is false), we want to close the accordion
+        # If we are turning it OFF (currently_checked? is true), we want to open the accordion
+        domain_id = String.replace(domain, " ", "-") |> String.downcase()
+
+        socket =
+          if currently_checked? do
+            push_event(socket, "accordion:open", %{id: "domain-accordion-#{domain_id}"})
+          else
+            push_event(socket, "accordion:close", %{id: "domain-accordion-#{domain_id}"})
+          end
+
+        {:noreply, assign(socket, :workflow, updated_workflow)}
+
+      {:error, _} ->
+        {:noreply, socket}
+    end
+  end
+
   defp notify_autosave(socket, state, message) do
     push_event(socket, "autosave:status", %{state: state, message: message})
   end
 
+  defp all_tools_in_domain_checked?(tools, allowed_tools) do
+    Enum.all?(tools, &(&1.id in allowed_tools))
+  end
+
+  defp has_schedule(assigns), do: assigns.workflow.schedule.has_schedule
   defp recurrence(assigns), do: assigns.workflow.schedule.recurrence
   defp schedule_time(assigns), do: assigns.workflow.schedule.time
   defp day_of_week(assigns), do: assigns.workflow.schedule.day_of_week
@@ -107,7 +162,7 @@ defmodule AssistantWeb.WorkflowEditorLive do
       </section>
 
       <section :if={not is_nil(@workflow)} class="sa-content sa-editor-page">
-        <header class="sa-row">
+        <header class="sa-page-header" style="display: flex; justify-content: space-between; align-items: center;">
           <h1>Workflow Editor</h1>
           <div class="sa-row">
             <.link navigate={~p"/settings/workflows"} class="sa-btn secondary">Back to Workflows</.link>
@@ -123,23 +178,47 @@ defmodule AssistantWeb.WorkflowEditorLive do
         >
           <.input name="workflow[description]" label="Description" value={@workflow.description} />
 
-          <div class="sa-schedule-row">
-            <.input
-              type="select"
-              name="workflow[recurrence]"
-              label="Schedule"
-              options={@recurrence_options}
-              value={recurrence(assigns)}
-            />
-            <.input name="workflow[time]" type="time" label="Time" value={schedule_time(assigns)} />
-            <.input
-              :if={recurrence(assigns) == "weekly"}
-              type="select"
-              name="workflow[day_of_week]"
-              label="Day"
-              options={@weekday_options}
-              value={day_of_week(assigns)}
-            />
+          <div class="sa-schedule-toggle" style="margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+            <label class="sa-switch">
+              <input
+                type="hidden"
+                name="workflow[has_schedule]"
+                value="false"
+              />
+              <input
+                type="checkbox"
+                name="workflow[has_schedule]"
+                value="true"
+                checked={has_schedule(assigns)}
+                class="sa-switch-input"
+              />
+              <span class="sa-switch-slider"></span>
+            </label>
+            <span class="sa-toggle-text" style="font-weight: 500; color: var(--sa-text-main);">Enable Schedule</span>
+          </div>
+
+          <div :if={has_schedule(assigns)} class="sa-schedule-row">
+            <div class="sa-model-default-select">
+              <.input
+                type="select"
+                name="workflow[recurrence]"
+                label="Schedule"
+                options={@recurrence_options}
+                value={recurrence(assigns)}
+              />
+            </div>
+            <div class="sa-model-default-select">
+              <.input name="workflow[time]" type="time" label="Time" value={schedule_time(assigns)} />
+            </div>
+            <div :if={recurrence(assigns) == "weekly"} class="sa-model-default-select">
+              <.input
+                type="select"
+                name="workflow[day_of_week]"
+                label="Day"
+                options={@weekday_options}
+                value={day_of_week(assigns)}
+              />
+            </div>
             <.input
               :if={recurrence(assigns) == "monthly"}
               type="text"
@@ -161,16 +240,41 @@ defmodule AssistantWeb.WorkflowEditorLive do
           <section class="sa-tool-permissions">
             <h2>Tools</h2>
             <p>Select the tools this workflow is allowed to use.</p>
-            <div class="sa-tool-grid">
-              <label :for={tool <- @tools} class="sa-tool-item">
-                <input
-                  type="checkbox"
-                  name="workflow[allowed_tools][]"
-                  value={tool.id}
-                  checked={tool.id in @workflow.allowed_tools}
-                />
-                <span>{tool.label}</span>
-              </label>
+            <div class="sa-tool-domains" phx-hook="AccordionControl" id="tool-domains-container">
+              <details :for={{domain, tools} <- Enum.group_by(@tools, & &1.domain) |> Enum.sort_by(fn {d, _} -> d end)} 
+                       class="sa-accordion"
+                       open={not all_tools_in_domain_checked?(tools, @workflow.allowed_tools)}
+                       id={"domain-accordion-#{String.replace(domain, " ", "-") |> String.downcase()}"}>
+                <summary>
+                  <span style="flex: 1;">{domain}</span>
+                  <div style="display: flex; align-items: center; gap: 16px; margin-right: 16px;">
+                    <label class="sa-switch" onclick="event.stopPropagation();">
+                      <input
+                        type="checkbox"
+                        class="sa-switch-input"
+                        checked={all_tools_in_domain_checked?(tools, @workflow.allowed_tools)}
+                        phx-click="toggle_domain"
+                        phx-value-domain={domain}
+                        phx-value-currently_checked={to_string(all_tools_in_domain_checked?(tools, @workflow.allowed_tools))}
+                      />
+                      <span class="sa-switch-slider"></span>
+                    </label>
+                  </div>
+                </summary>
+                <div class="sa-accordion-body">
+                  <div class="sa-tool-grid">
+                    <label :for={tool <- tools} class="sa-tool-item">
+                      <input
+                        type="checkbox"
+                        name="workflow[allowed_tools][]"
+                        value={tool.id}
+                        checked={tool.id in @workflow.allowed_tools}
+                      />
+                      <span>{tool.label}</span>
+                    </label>
+                  </div>
+                </div>
+              </details>
             </div>
           </section>
         </.form>

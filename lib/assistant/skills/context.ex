@@ -50,6 +50,7 @@ defmodule Assistant.Skills.Context do
           optional(:gmail) => module(),
           optional(:calendar) => module(),
           optional(:hubspot) => module(),
+          optional(:openai) => module(),
           optional(:openrouter) => module()
         }
 

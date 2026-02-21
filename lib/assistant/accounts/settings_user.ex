@@ -13,6 +13,11 @@ defmodule Assistant.Accounts.SettingsUser do
     field :confirmed_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
     field :openrouter_api_key, Assistant.Encrypted.Binary
+    field :openai_api_key, Assistant.Encrypted.Binary
+    field :openai_refresh_token, Assistant.Encrypted.Binary
+    field :openai_account_id, :string
+    field :openai_expires_at, :utc_datetime
+    field :openai_auth_type, :string
 
     belongs_to :user, Assistant.Schemas.User
 
@@ -149,6 +154,41 @@ defmodule Assistant.Accounts.SettingsUser do
   def openrouter_api_key_changeset(settings_user, api_key) do
     settings_user
     |> change(%{openrouter_api_key: api_key})
+  end
+
+  @doc """
+  A changeset for updating the OpenAI API key.
+
+  Accepts a binary key or nil (to disconnect).
+  """
+  def openai_api_key_changeset(settings_user, api_key) do
+    auth_type = if is_binary(api_key) and api_key != "", do: "api_key", else: nil
+
+    settings_user
+    |> change(%{
+      openai_api_key: api_key,
+      openai_refresh_token: nil,
+      openai_account_id: nil,
+      openai_expires_at: nil,
+      openai_auth_type: auth_type
+    })
+  end
+
+  @doc """
+  A changeset for updating OpenAI OAuth credentials.
+
+  Expects `:access_token` and may include `:refresh_token`, `:account_id`,
+  and `:expires_at`.
+  """
+  def openai_oauth_changeset(settings_user, attrs) when is_map(attrs) do
+    settings_user
+    |> change(%{
+      openai_api_key: Map.get(attrs, :access_token),
+      openai_refresh_token: Map.get(attrs, :refresh_token),
+      openai_account_id: Map.get(attrs, :account_id),
+      openai_expires_at: Map.get(attrs, :expires_at),
+      openai_auth_type: "oauth"
+    })
   end
 
   @doc """

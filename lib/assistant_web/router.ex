@@ -71,6 +71,11 @@ defmodule AssistantWeb.Router do
   scope "/", AssistantWeb do
     pipe_through [:browser, :require_authenticated_settings_user]
 
+    get "/settings_users/auth/openai", OpenAIOAuthController, :request
+    get "/settings_users/auth/openai/callback", OpenAIOAuthController, :callback
+    get "/auth/callback", OpenAIOAuthController, :callback
+    get "/settings_users/auth/openai/device/poll", OpenAIOAuthController, :device_poll
+
     live_session :require_authenticated_settings_user,
       on_mount: [{AssistantWeb.SettingsUserAuth, :require_authenticated}] do
       live "/", SettingsLive, :profile

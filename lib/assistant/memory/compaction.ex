@@ -40,7 +40,7 @@ defmodule Assistant.Memory.Compaction do
 
   alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.Config.PromptLoader
-  alias Assistant.Integrations.OpenRouter
+  alias Assistant.Integrations.LLMRouter
   alias Assistant.Memory.Store
 
   @default_token_budget 2048
@@ -74,7 +74,7 @@ defmodule Assistant.Memory.Compaction do
          {:ok, model} <- resolve_compaction_model(),
          {:ok, system_prompt} <- render_system_prompt(token_budget),
          {:ok, user_prompt} <- build_user_prompt(conversation, messages),
-         {:ok, summary_text} <- call_llm(model, system_prompt, user_prompt) do
+         {:ok, summary_text} <- call_llm(model, system_prompt, user_prompt, conversation.user_id) do
       last_message = List.last(messages)
 
       Store.update_summary(conversation_id, summary_text, model.id,
@@ -261,7 +261,7 @@ defmodule Assistant.Memory.Compaction do
   # LLM call
   # ---------------------------------------------------------------------------
 
-  defp call_llm(model, system_prompt, user_prompt) do
+  defp call_llm(model, system_prompt, user_prompt, user_id) do
     messages = [
       %{role: "system", content: system_prompt},
       %{role: "user", content: user_prompt}
@@ -273,7 +273,7 @@ defmodule Assistant.Memory.Compaction do
       max_tokens: @default_token_budget + 512
     ]
 
-    case OpenRouter.chat_completion(messages, opts) do
+    case LLMRouter.chat_completion(messages, opts, user_id) do
       {:ok, response} ->
         case response.content do
           nil ->

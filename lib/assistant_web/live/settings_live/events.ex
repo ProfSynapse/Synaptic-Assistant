@@ -10,8 +10,10 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.Auth.OAuth
   alias Assistant.Auth.TokenStore
   alias Assistant.ConnectedDrives
+  alias Assistant.Integrations.OpenAI
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.Google.Drive, as: GoogleDrive
+  alias Assistant.Integrations.OpenRouter
   alias Assistant.MemoryExplorer
   alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
@@ -173,12 +175,110 @@ defmodule AssistantWeb.SettingsLive.Events do
       {:noreply,
        socket
        |> assign(:openrouter_connected, false)
+       |> assign(:openrouter_key_form_open, false)
+       |> assign(:openrouter_key_form, api_key_form(:openrouter_key))
        |> put_flash(:info, "OpenRouter disconnected.")}
     end)
   end
 
   def handle_event("connect_openrouter", _params, socket) do
     {:noreply, redirect(socket, to: "/settings_users/auth/openrouter")}
+  end
+
+  def handle_event("toggle_openrouter_key_form", _params, socket) do
+    {:noreply,
+     assign(socket, :openrouter_key_form_open, !socket.assigns.openrouter_key_form_open)}
+  end
+
+  def handle_event(
+        "save_openrouter_api_key",
+        %{"openrouter_key" => %{"api_key" => api_key}},
+        socket
+      ) do
+    normalized_key = api_key |> to_string() |> String.trim()
+
+    cond do
+      normalized_key == "" ->
+        {:noreply, put_flash(socket, :error, "Enter an OpenRouter API key.")}
+
+      true ->
+        Context.with_settings_user(socket, fn settings_user ->
+          case OpenRouter.validate_api_key(normalized_key) do
+            :ok ->
+              case Accounts.save_openrouter_api_key(settings_user, normalized_key) do
+                {:ok, _} ->
+                  {:noreply,
+                   socket
+                   |> assign(:openrouter_connected, true)
+                   |> assign(:openrouter_key_form_open, false)
+                   |> assign(:openrouter_key_form, api_key_form(:openrouter_key))
+                   |> put_flash(:info, "OpenRouter connected and validated.")}
+
+                {:error, _changeset} ->
+                  {:noreply, put_flash(socket, :error, "Failed to save your OpenRouter key.")}
+              end
+
+            {:error, _reason} ->
+              {:noreply, put_flash(socket, :error, "OpenRouter key validation failed.")}
+          end
+        end)
+    end
+  end
+
+  def handle_event("connect_openai", _params, socket) do
+    {:noreply,
+     push_event(socket, "open_oauth_popup", %{
+       url: "/settings_users/auth/openai?popup=1&flow=device",
+       name: "openai_oauth"
+     })}
+  end
+
+  def handle_event("disconnect_openai", _params, socket) do
+    Context.with_settings_user(socket, fn settings_user ->
+      Accounts.delete_openai_api_key(settings_user)
+
+      {:noreply,
+       socket
+       |> assign(:openai_connected, false)
+       |> assign(:openai_key_form_open, false)
+       |> assign(:openai_key_form, api_key_form(:openai_key))
+       |> put_flash(:info, "OpenAI disconnected.")}
+    end)
+  end
+
+  def handle_event("toggle_openai_key_form", _params, socket) do
+    {:noreply, assign(socket, :openai_key_form_open, !socket.assigns.openai_key_form_open)}
+  end
+
+  def handle_event("save_openai_api_key", %{"openai_key" => %{"api_key" => api_key}}, socket) do
+    normalized_key = api_key |> to_string() |> String.trim()
+
+    cond do
+      normalized_key == "" ->
+        {:noreply, put_flash(socket, :error, "Enter an OpenAI API key.")}
+
+      true ->
+        Context.with_settings_user(socket, fn settings_user ->
+          case OpenAI.validate_api_key(normalized_key) do
+            :ok ->
+              case Accounts.save_openai_api_key(settings_user, normalized_key) do
+                {:ok, _} ->
+                  {:noreply,
+                   socket
+                   |> assign(:openai_connected, true)
+                   |> assign(:openai_key_form_open, false)
+                   |> assign(:openai_key_form, api_key_form(:openai_key))
+                   |> put_flash(:info, "OpenAI connected and validated.")}
+
+                {:error, _changeset} ->
+                  {:noreply, put_flash(socket, :error, "Failed to save your OpenAI key.")}
+              end
+
+            {:error, _reason} ->
+              {:noreply, put_flash(socket, :error, "OpenAI key validation failed.")}
+          end
+        end)
+    end
   end
 
   def handle_event("refresh_drives", _params, socket) do
@@ -283,29 +383,45 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("open_model_modal", params, socket) do
-    model_id = Map.get(params, "id")
+    query =
+      params
+      |> Map.get("query", socket.assigns[:model_library_query] || "")
+      |> to_string()
+      |> String.trim()
 
-    model =
-      case model_id do
-        id when id in [nil, ""] ->
-          Data.blank_model_form()
+    socket =
+      socket
+      |> assign(:model_modal_open, true)
+      |> assign(:model_library_query, query)
+      |> assign(:model_library_form, to_form(%{"q" => query}, as: :model_library))
+      |> load_model_library()
 
-        id ->
-          Loaders.model_to_form_data(id)
-      end
-
-    {:noreply,
-     socket
-     |> assign(:model_modal_open, true)
-     |> assign(:model_form, to_form(model, as: :model))}
+    {:noreply, socket}
   end
 
   def handle_event("close_model_modal", _params, socket) do
-    {:noreply, assign(socket, :model_modal_open, false)}
+    {:noreply,
+     socket
+     |> assign(:model_modal_open, false)
+     |> assign(:model_library_error, nil)}
+  end
+
+  def handle_event("search_model_library", %{"model_library" => %{"q" => query}}, socket) do
+    normalized_query = query |> to_string() |> String.trim()
+
+    {:noreply,
+     socket
+     |> assign(:model_library_query, normalized_query)
+     |> assign(:model_library_form, to_form(%{"q" => normalized_query}, as: :model_library))
+     |> apply_model_library_filter()}
+  end
+
+  def handle_event("refresh_model_library", _params, socket) do
+    {:noreply, load_model_library(socket)}
   end
 
   def handle_event("save_model", %{"model" => params}, socket) do
-    case ModelCatalog.upsert_model(params) do
+    case ModelCatalog.add_model(params) do
       {:ok, _model} ->
         {:noreply,
          socket
@@ -315,6 +431,42 @@ defmodule AssistantWeb.SettingsLive.Events do
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Failed to save model: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("add_model_from_library", params, socket) do
+    attrs = %{
+      "id" => Map.get(params, "id", ""),
+      "name" => Map.get(params, "name", ""),
+      "input_cost" => Map.get(params, "input_cost", "n/a"),
+      "output_cost" => Map.get(params, "output_cost", "n/a"),
+      "max_context_tokens" => Map.get(params, "max_context_tokens", "n/a")
+    }
+
+    case ModelCatalog.add_model(attrs) do
+      {:ok, _model} ->
+        {:noreply,
+         socket
+         |> Loaders.load_models()
+         |> maybe_reload_model_library()
+         |> put_flash(:info, "Model added to your catalog")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to add model: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("remove_model_from_catalog", %{"id" => model_id}, socket) do
+    case ModelCatalog.remove_model(model_id) do
+      :ok ->
+        {:noreply,
+         socket
+         |> Loaders.load_models()
+         |> maybe_reload_model_library()
+         |> put_flash(:info, "Model removed from your catalog")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to remove model: #{inspect(reason)}")}
     end
   end
 
@@ -583,5 +735,81 @@ defmodule AssistantWeb.SettingsLive.Events do
       end)
 
     Enum.reverse(list)
+  end
+
+  defp api_key_form(form_name) do
+    to_form(%{"api_key" => ""}, as: form_name)
+  end
+
+  defp load_model_library(socket) do
+    query = socket.assigns[:model_library_query] || ""
+
+    case openrouter_key_for_library(socket) do
+      nil ->
+        socket
+        |> assign(:model_library_all_models, [])
+        |> assign(:model_library_models, [])
+        |> assign(
+          :model_library_error,
+          "Connect OpenRouter (or configure OPENROUTER_API_KEY) to browse available models."
+        )
+
+      api_key ->
+        case OpenRouter.list_models_detailed(api_key) do
+          {:ok, models} ->
+            socket
+            |> assign(:model_library_all_models, models)
+            |> assign(:model_library_models, filter_library_models(models, query))
+            |> assign(:model_library_error, nil)
+
+          {:error, _reason} ->
+            socket
+            |> assign(:model_library_all_models, [])
+            |> assign(:model_library_models, [])
+            |> assign(
+              :model_library_error,
+              "Could not load OpenRouter models right now. Try again in a moment."
+            )
+        end
+    end
+  end
+
+  defp openrouter_key_for_library(socket) do
+    case Context.current_settings_user(socket) do
+      %{openrouter_api_key: key} when is_binary(key) and key != "" ->
+        key
+
+      _ ->
+        case Application.get_env(:assistant, :openrouter_api_key) do
+          key when is_binary(key) and key != "" -> key
+          _ -> nil
+        end
+    end
+  end
+
+  defp filter_library_models(models, query) do
+    normalized = query |> to_string() |> String.trim() |> String.downcase()
+
+    models
+    |> Enum.filter(fn model ->
+      normalized == "" ||
+        String.contains?(String.downcase(to_string(model.name)), normalized) ||
+        String.contains?(String.downcase(to_string(model.id)), normalized)
+    end)
+    |> Enum.take(300)
+  end
+
+  defp apply_model_library_filter(socket) do
+    query = socket.assigns[:model_library_query] || ""
+    models = socket.assigns[:model_library_all_models] || []
+    assign(socket, :model_library_models, filter_library_models(models, query))
+  end
+
+  defp maybe_reload_model_library(socket) do
+    if socket.assigns[:model_modal_open] do
+      load_model_library(socket)
+    else
+      socket
+    end
   end
 end

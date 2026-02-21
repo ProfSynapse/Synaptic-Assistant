@@ -6,8 +6,8 @@ defmodule AssistantWeb.Components.SettingsPage.Workflows do
   def workflows_section(assigns) do
     ~H"""
     <section class="sa-card">
-      <div class="sa-row">
-        <h2>Workflow Cards</h2>
+      <div class="sa-row" style="justify-content: space-between; margin-bottom: 16px;">
+        <h2 style="font-size: 1.25rem; font-weight: 600; color: var(--sa-text-main); margin: 0;">Workflow Cards</h2>
         <button class="sa-btn" type="button" phx-click="new_workflow">
           <.icon name="hero-plus" class="h-4 w-4" /> New Workflow
         </button>

@@ -21,6 +21,7 @@ defmodule Assistant.Skills.Images.Generate do
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Config.Loader, as: ConfigLoader
+  alias Assistant.Integrations.LLMRouter
   alias Assistant.Integrations.OpenRouter
   alias Assistant.Skills.Result
 
@@ -50,7 +51,8 @@ defmodule Assistant.Skills.Images.Generate do
              image_count,
              size,
              aspect_ratio,
-             api_key
+             api_key,
+             context.user_id
            ) do
       build_success_result(response, model, output_dir)
     else
@@ -109,20 +111,21 @@ defmodule Assistant.Skills.Images.Generate do
   end
 
   defp request_image_generation(
-         openrouter,
+         _openrouter,
          prompt,
          model,
          image_count,
          size,
          aspect_ratio,
-         api_key
+         api_key,
+         user_id
        ) do
     opts =
       [model: model, n: image_count, api_key: api_key]
       |> maybe_put_opt(:size, size)
       |> maybe_put_opt(:aspect_ratio, aspect_ratio)
 
-    case openrouter.image_generation(prompt, opts) do
+    case LLMRouter.image_generation(prompt, opts, user_id) do
       {:ok, response} ->
         {:ok, response}
 
