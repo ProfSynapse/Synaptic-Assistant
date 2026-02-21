@@ -180,7 +180,7 @@ defmodule AssistantWeb.OpenRouterOAuthController do
 
   defp exchange_code_for_key(code) do
     with {:ok, app_key} <- fetch_app_api_key() do
-      case Req.post(@openrouter_keys_url,
+      case Req.post(keys_url(),
              json: %{"code" => code},
              headers: [{"authorization", "Bearer #{app_key}"}]
            ) do
@@ -194,6 +194,10 @@ defmodule AssistantWeb.OpenRouterOAuthController do
           {:error, {:openrouter_key_exchange_http_error, reason}}
       end
     end
+  end
+
+  defp keys_url do
+    Application.get_env(:assistant, :openrouter_keys_url, @openrouter_keys_url)
   end
 
   defp callback_url, do: url(~p"/settings_users/auth/openrouter/callback")
