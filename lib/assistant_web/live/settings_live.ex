@@ -35,14 +35,6 @@ defmodule AssistantWeb.SettingsLive do
       summary: "Connect approved Google tools for email, calendars, and docs."
     },
     %{
-      id: "openrouter",
-      name: "OpenRouter",
-      icon_path: "/images/apps/openrouter.svg",
-      scopes: "All models",
-      summary:
-        "Route AI requests through your OpenRouter account with access to hundreds of models."
-    },
-    %{
       id: "hubspot",
       name: "HubSpot",
       icon_path: "/images/apps/hubspot.svg",
@@ -1204,6 +1196,14 @@ defmodule AssistantWeb.SettingsLive do
           </section>
 
           <div :if={@section == "models"} class="sa-card">
+            <div class="sa-row">
+              <h2>OpenRouter</h2>
+            </div>
+            <p class="sa-muted">Connect your OpenRouter account to use your personal API key for model access.</p>
+            <.openrouter_connect_status connected={@openrouter_connected} />
+          </div>
+
+          <div :if={@section == "models"} class="sa-card">
             <h2>Role Defaults</h2>
             <p class="sa-muted">Choose the default model used for each system role.</p>
 
@@ -1622,10 +1622,7 @@ defmodule AssistantWeb.SettingsLive do
                   connected={@google_connected}
                   email={@google_email}
                 />
-                <.openrouter_connect_status
-                  :if={app.id == "openrouter"}
-                  connected={@openrouter_connected}
-                />
+
               </article>
             </div>
 
