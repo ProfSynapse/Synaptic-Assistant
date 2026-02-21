@@ -253,11 +253,20 @@ defmodule Assistant.Config.Loader do
   end
 
   defp interpolate_env_vars(raw) do
+    # Matches ${VAR_NAME} (required) and ${VAR_NAME:-default} (optional with default).
+    # ${VAR:-} resolves to "" when unset; ${VAR:-fallback} resolves to "fallback" when unset.
     result =
-      Regex.replace(~r/\$\{([A-Z_][A-Z0-9_]*)\}/, raw, fn _match, var_name ->
+      Regex.replace(~r/\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}/, raw, fn full_match, var_name, default_part ->
         case System.get_env(var_name) do
-          nil -> throw({:missing_env_var, var_name})
-          value -> value
+          nil ->
+            if String.contains?(full_match, ":-") do
+              default_part
+            else
+              throw({:missing_env_var, var_name})
+            end
+
+          value ->
+            value
         end
       end)
 

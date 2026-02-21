@@ -1,0 +1,11 @@
+{
+  "name": "synaptic-assistant",
+  "version": "0.1.0",
+  "description": "Skills-First AI Assistant",
+  "scripts": {
+    "dev": "export $(grep -v '^#' .env | xargs) 2>/dev/null; mix dev",
+    "start": "mix phx.server",
+    "setup": "mix setup",
+    "test": "mix test"
+  }
+}

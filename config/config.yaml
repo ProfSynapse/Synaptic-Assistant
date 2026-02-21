@@ -4,7 +4,7 @@
 # and HTTP client parameters. Loaded at boot by Assistant.Config.Loader and
 # hot-reloaded on file change.
 #
-# Env var interpolation: Use ${ENV_VAR} for sensitive values (resolved at load time).
+# Env var interpolation: Use $\{VAR_NAME\} for sensitive values (resolved at load time).
 # Unresolved env vars raise at boot; missing optional vars resolve to null.
 
 # ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ limits:
 # voice_settings are optional overrides; ElevenLabs uses voice defaults if omitted.
 
 voice:
-  voice_id: "${ELEVENLABS_VOICE_ID}"
+  voice_id: "${ELEVENLABS_VOICE_ID:-}"
   tts_model: "eleven_flash_v2_5"
   optimize_streaming_latency: 3
   output_format: "mp3_44100_128"

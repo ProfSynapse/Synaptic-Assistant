@@ -115,7 +115,8 @@ defmodule Assistant.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      precommit: ["format", "test"]
+      precommit: ["format", "test"],
+      dev: ["setup", "phx.server"]
     ]
   end
 end
