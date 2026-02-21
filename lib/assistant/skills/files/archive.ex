@@ -40,8 +40,7 @@ defmodule Assistant.Skills.Files.Archive do
             {:ok,
              %Result{
                status: :error,
-               content:
-                 "Google authentication required. Please connect your Google account."
+               content: "Google authentication required. Please connect your Google account."
              }}
 
           token ->
@@ -95,7 +94,9 @@ defmodule Assistant.Skills.Files.Archive do
 
     scopes =
       case enabled_drives do
-        [] -> [[]]
+        [] ->
+          [[]]
+
         drives ->
           case Scoping.build_query_params(drives) do
             {:ok, param_sets} -> param_sets

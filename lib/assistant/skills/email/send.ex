@@ -36,8 +36,7 @@ defmodule Assistant.Skills.Email.Send do
             {:ok,
              %Result{
                status: :error,
-               content:
-                 "Google authentication required. Please connect your Google account."
+               content: "Google authentication required. Please connect your Google account."
              }}
 
           token ->

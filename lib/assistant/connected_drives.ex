@@ -12,7 +12,7 @@ defmodule Assistant.ConnectedDrives do
   def list_for_user(user_id) do
     ConnectedDrive
     |> where(user_id: ^user_id)
-    |> order_by([d], [asc: d.drive_type, asc: d.drive_name])
+    |> order_by([d], asc: d.drive_type, asc: d.drive_name)
     |> Repo.all()
   end
 
@@ -56,11 +56,15 @@ defmodule Assistant.ConnectedDrives do
   end
 
   @doc "Idempotently ensure the personal 'My Drive' entry exists for a user."
-  @spec ensure_personal_drive(String.t()) :: {:ok, ConnectedDrive.t()} | {:error, Ecto.Changeset.t()}
+  @spec ensure_personal_drive(String.t()) ::
+          {:ok, ConnectedDrive.t()} | {:error, Ecto.Changeset.t()}
   def ensure_personal_drive(user_id) do
     connect(user_id, %{drive_id: nil, drive_name: "My Drive", drive_type: "personal"})
   end
 
-  defp conflict_target(%{drive_type: "personal"}), do: {:unsafe_fragment, "(user_id) WHERE drive_id IS NULL"}
-  defp conflict_target(_), do: {:unsafe_fragment, "(user_id, drive_id) WHERE drive_id IS NOT NULL"}
+  defp conflict_target(%{drive_type: "personal"}),
+    do: {:unsafe_fragment, "(user_id) WHERE drive_id IS NULL"}
+
+  defp conflict_target(_),
+    do: {:unsafe_fragment, "(user_id, drive_id) WHERE drive_id IS NOT NULL"}
 end

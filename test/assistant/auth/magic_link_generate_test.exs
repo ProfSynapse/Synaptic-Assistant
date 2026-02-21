@@ -101,8 +101,12 @@ defmodule Assistant.Auth.MagicLinkGenerateTest do
     end
 
     test "stores pending_intent encrypted in auth_token", %{user: user} do
-      intent = %{"message" => "search my drive", "channel" => "google_chat",
-                  "conversation_id" => "conv-123"}
+      intent = %{
+        "message" => "search my drive",
+        "channel" => "google_chat",
+        "conversation_id" => "conv-123"
+      }
+
       {:ok, result} = MagicLink.generate(user.id, "google_chat", intent)
 
       auth_token = Repo.get!(AuthToken, result.auth_token_id)

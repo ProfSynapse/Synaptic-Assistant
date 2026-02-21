@@ -98,8 +98,15 @@ defmodule Assistant.Auth.TokenStore do
     |> Repo.insert(
       on_conflict:
         {:replace,
-         [:refresh_token, :access_token, :token_expires_at, :provider_email, :provider_uid,
-          :scopes, :updated_at]},
+         [
+           :refresh_token,
+           :access_token,
+           :token_expires_at,
+           :provider_email,
+           :provider_uid,
+           :scopes,
+           :updated_at
+         ]},
       conflict_target: [:user_id, :provider],
       returning: true
     )

@@ -256,7 +256,9 @@ defmodule Assistant.Config.Loader do
     # Matches ${VAR_NAME} (required) and ${VAR_NAME:-default} (optional with default).
     # ${VAR:-} resolves to "" when unset; ${VAR:-fallback} resolves to "fallback" when unset.
     result =
-      Regex.replace(~r/\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}/, raw, fn full_match, var_name, default_part ->
+      Regex.replace(~r/\$\{([A-Z_][A-Z0-9_]*)(?::-(.*?))?\}/, raw, fn full_match,
+                                                                      var_name,
+                                                                      default_part ->
         case System.get_env(var_name) do
           nil ->
             if String.contains?(full_match, ":-") do

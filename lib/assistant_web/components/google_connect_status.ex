@@ -35,13 +35,14 @@ defmodule AssistantWeb.Components.GoogleConnectStatus do
           <.icon name="hero-x-circle" class="h-4 w-4" />
           Not connected
         </span>
-        <.link
-          href="/auth/google/start?from=settings"
+        <button
+          type="button"
           class="sa-btn"
+          phx-click="connect_google"
         >
           <.icon name="hero-link" class="h-4 w-4" />
           Connect Google Workspace
-        </.link>
+        </button>
       </div>
     </div>
     """

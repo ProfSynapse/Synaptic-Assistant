@@ -6,6 +6,26 @@
 
 import Config
 
+# Load .env file in dev so `mix phx.server` works without manual exports.
+# Existing shell env vars take precedence over .env values.
+if config_env() == :dev && File.exists?(".env") do
+  ".env"
+  |> File.read!()
+  |> String.split("\n")
+  |> Enum.each(fn line ->
+    line = String.trim(line)
+
+    with false <- line == "",
+         false <- String.starts_with?(line, "#"),
+         [key, value] <- String.split(line, "=", parts: 2),
+         key = String.trim(key),
+         true <- key != "",
+         nil <- System.get_env(key) do
+      System.put_env(key, value |> String.trim() |> String.trim("\"") |> String.trim("'"))
+    end
+  end)
+end
+
 # Start server if PHX_SERVER is set (used by releases)
 if System.get_env("PHX_SERVER") do
   config :assistant, AssistantWeb.Endpoint, server: true
@@ -140,8 +160,7 @@ else
       ciphers: [
         default: {
           Cloak.Ciphers.AES.GCM,
-          tag: "AES.GCM.V1",
-          key: Base.decode64!(encryption_key)
+          tag: "AES.GCM.V1", key: Base.decode64!(encryption_key)
         }
       ]
   end

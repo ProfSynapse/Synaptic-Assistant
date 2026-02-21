@@ -457,7 +457,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
          %{
            id: "sentinel-test",
            model: "test-model",
-           content: "```json\n#{Jason.encode!(%{"decision" => "reject", "reason" => "Not aligned"})}\n```",
+           content:
+             "```json\n#{Jason.encode!(%{"decision" => "reject", "reason" => "Not aligned"})}\n```",
            tool_calls: [],
            finish_reason: "stop",
            usage: %{prompt_tokens: 50, completion_tokens: 20, total_tokens: 70}

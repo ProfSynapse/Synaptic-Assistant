@@ -7,6 +7,10 @@ defmodule AssistantWeb.Endpoint do
     signing_salt: "k8f8QzA2"
   ]
 
+  if code_reloading? do
+    socket "/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket
+  end
+
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]

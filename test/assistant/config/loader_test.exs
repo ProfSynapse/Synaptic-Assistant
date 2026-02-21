@@ -155,9 +155,15 @@ defmodule Assistant.Config.LoaderTest do
 
   describe "model_for/2" do
     setup %{config_path: path} do
-      {:ok, pid} = Loader.start_link(path: path)
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
-      :ok
+      case Loader.start_link(path: path) do
+        {:ok, pid} ->
+          on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+          :ok
+
+        {:error, {:already_started, pid}} ->
+          on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+          :ok
+      end
     end
 
     test "resolves model by role default" do
@@ -508,7 +514,12 @@ defmodule Assistant.Config.LoaderTest do
     end
 
     test "keeps previous config on invalid reload", %{config_path: path} do
-      {:ok, pid} = Loader.start_link(path: path)
+      pid =
+        case Loader.start_link(path: path) do
+          {:ok, p} -> p
+          {:error, {:already_started, p}} -> p
+        end
+
       assert length(Loader.all_models()) == 2
 
       # Overwrite with invalid YAML

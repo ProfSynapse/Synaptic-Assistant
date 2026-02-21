@@ -101,7 +101,12 @@ defmodule Assistant.Orchestrator.EngineTranscriptTest do
           role: "assistant",
           content: nil,
           tool_calls: [
-            %{function: %{name: "use_skill", arguments: ~s({"skill":"tasks.create","title":"Deploy v2"})}}
+            %{
+              function: %{
+                name: "use_skill",
+                arguments: ~s({"skill":"tasks.create","title":"Deploy v2"})
+              }
+            }
           ]
         },
         %{role: "tool", content: "Task created: Deploy v2 (id: abc-123)"},

@@ -360,12 +360,20 @@ defmodule Assistant.Orchestrator.SubAgentTest do
 
       # Case 2: no parent_conversation_id → fall back to conversation_id
       engine_state_no_parent = %{conversation_id: sub_id, user_id: "user-1"}
-      root2 = engine_state_no_parent[:parent_conversation_id] || engine_state_no_parent[:conversation_id] || "unknown"
+
+      root2 =
+        engine_state_no_parent[:parent_conversation_id] ||
+          engine_state_no_parent[:conversation_id] || "unknown"
+
       assert root2 == sub_id
 
       # Case 3: neither present → "unknown"
       engine_state_empty = %{user_id: "user-1"}
-      root3 = engine_state_empty[:parent_conversation_id] || engine_state_empty[:conversation_id] || "unknown"
+
+      root3 =
+        engine_state_empty[:parent_conversation_id] || engine_state_empty[:conversation_id] ||
+          "unknown"
+
       assert root3 == "unknown"
     end
   end

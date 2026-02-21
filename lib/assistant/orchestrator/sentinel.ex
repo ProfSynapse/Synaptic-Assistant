@@ -168,7 +168,8 @@ defmodule Assistant.Orchestrator.Sentinel do
         # Reasoning models (e.g. gpt-5-mini) may consume all tokens on
         # reasoning, returning nil content. Log the finish_reason for
         # diagnosis — "length" confirms token exhaustion.
-        Logger.warning("Sentinel received nil content from LLM (reasoning model token exhaustion?)",
+        Logger.warning(
+          "Sentinel received nil content from LLM (reasoning model token exhaustion?)",
           agent_id: proposed_action[:agent_id],
           skill_name: proposed_action[:skill_name],
           model: model,

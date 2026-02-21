@@ -251,9 +251,35 @@
     },
   }
 
+  // Google OAuth popup handler: opens the OAuth flow in a popup window,
+  // polls for popup close, and reloads the page to refresh connection status.
+  window.addEventListener("phx:open_oauth_popup", (event) => {
+    const url = event.detail && event.detail.url
+    if (!url) return
+
+    const popup = window.open(
+      url,
+      "google_oauth",
+      "width=600,height=700,scrollbars=yes",
+    )
+
+    if (!popup) {
+      // Popup was blocked — fall back to a direct navigation.
+      window.location.href = url
+      return
+    }
+
+    const pollInterval = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(pollInterval)
+        window.location.reload()
+      }
+    }, 500)
+  })
+
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")
   const LiveSocket =
-    window.LiveSocket || window.Phoenix?.LiveView?.LiveSocket || window.Phoenix?.LiveSocket
+    window.LiveSocket || window.LiveView?.LiveSocket || window.Phoenix?.LiveView?.LiveSocket || window.Phoenix?.LiveSocket
   const Socket = window.Phoenix?.Socket
 
   if (LiveSocket && Socket) {

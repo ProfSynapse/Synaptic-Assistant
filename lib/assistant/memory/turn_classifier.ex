@@ -128,7 +128,10 @@ defmodule Assistant.Memory.TurnClassifier do
       %{role: "user", content: prompt}
     ]
 
-    Logger.debug("Turn classification using model", model: model, conversation_id: conversation_id)
+    Logger.debug("Turn classification using model",
+      model: model,
+      conversation_id: conversation_id
+    )
 
     api_key = resolve_openrouter_key(user_id)
 
@@ -247,7 +250,10 @@ defmodule Assistant.Memory.TurnClassifier do
     end
   rescue
     _error ->
-      Logger.warning("ConfigLoader unavailable for classification model, using hardcoded fallback")
+      Logger.warning(
+        "ConfigLoader unavailable for classification model, using hardcoded fallback"
+      )
+
       @hardcoded_fallback_model
   end
 

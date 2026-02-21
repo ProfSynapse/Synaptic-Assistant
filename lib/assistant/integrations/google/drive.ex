@@ -211,7 +211,8 @@ defmodule Assistant.Integrations.Google.Drive do
     - `{:ok, %{id, name}}` on success
     - `{:error, term()}` on failure
   """
-  @spec create_file(String.t(), String.t(), binary(), keyword()) :: {:ok, map()} | {:error, term()}
+  @spec create_file(String.t(), String.t(), binary(), keyword()) ::
+          {:ok, map()} | {:error, term()}
   def create_file(access_token, name, content, opts \\ []) do
     conn = Connection.new(access_token)
     mime_type = Keyword.get(opts, :mime_type, "text/plain")

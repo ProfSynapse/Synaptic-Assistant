@@ -14,8 +14,7 @@ defmodule Assistant.Repo.Migrations.CreateOauthTokens do
     create table(:oauth_tokens, primary_key: false) do
       add :id, :binary_id, primary_key: true
 
-      add :user_id, references(:users, type: :binary_id, on_delete: :delete_all),
-        null: false
+      add :user_id, references(:users, type: :binary_id, on_delete: :delete_all), null: false
 
       add :provider, :text, null: false
       add :provider_uid, :text
@@ -28,9 +27,7 @@ defmodule Assistant.Repo.Migrations.CreateOauthTokens do
       timestamps(type: :utc_datetime_usec)
     end
 
-    create constraint(:oauth_tokens, :valid_provider,
-             check: "provider IN ('google')"
-           )
+    create constraint(:oauth_tokens, :valid_provider, check: "provider IN ('google')")
 
     create unique_index(:oauth_tokens, [:user_id, :provider])
     create index(:oauth_tokens, [:provider])

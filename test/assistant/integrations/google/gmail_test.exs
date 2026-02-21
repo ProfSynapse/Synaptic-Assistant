@@ -29,23 +29,49 @@ defmodule Assistant.Integrations.Google.GmailTest do
   describe "send_message/5 header injection prevention" do
     test "rejects \\r\\n in to field" do
       result =
-        Gmail.send_message(@dummy_token, "evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
+        Gmail.send_message(
+          @dummy_token,
+          "evil@example.com\r\nBcc: victim@example.com",
+          "Subject",
+          "Body"
+        )
 
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\n in to field" do
-      result = Gmail.send_message(@dummy_token, "evil@example.com\nBcc: victim@example.com", "Subject", "Body")
+      result =
+        Gmail.send_message(
+          @dummy_token,
+          "evil@example.com\nBcc: victim@example.com",
+          "Subject",
+          "Body"
+        )
+
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\r\\n in subject field" do
-      result = Gmail.send_message(@dummy_token, "to@example.com", "Hello\r\nBcc: victim@example.com", "Body")
+      result =
+        Gmail.send_message(
+          @dummy_token,
+          "to@example.com",
+          "Hello\r\nBcc: victim@example.com",
+          "Body"
+        )
+
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\n in subject field" do
-      result = Gmail.send_message(@dummy_token, "to@example.com", "Hello\nBcc: victim@example.com", "Body")
+      result =
+        Gmail.send_message(
+          @dummy_token,
+          "to@example.com",
+          "Hello\nBcc: victim@example.com",
+          "Body"
+        )
+
       assert {:error, :header_injection} = result
     end
 
@@ -59,7 +85,14 @@ defmodule Assistant.Integrations.Google.GmailTest do
     end
 
     test "rejects bare \\r in to field" do
-      result = Gmail.send_message(@dummy_token, "evil@example.com\rBcc: victim@example.com", "Subject", "Body")
+      result =
+        Gmail.send_message(
+          @dummy_token,
+          "evil@example.com\rBcc: victim@example.com",
+          "Subject",
+          "Body"
+        )
+
       assert {:error, :header_injection} = result
     end
   end
@@ -67,13 +100,25 @@ defmodule Assistant.Integrations.Google.GmailTest do
   describe "create_draft/5 header injection prevention" do
     test "rejects \\r\\n in to field" do
       result =
-        Gmail.create_draft(@dummy_token, "evil@example.com\r\nBcc: victim@example.com", "Subject", "Body")
+        Gmail.create_draft(
+          @dummy_token,
+          "evil@example.com\r\nBcc: victim@example.com",
+          "Subject",
+          "Body"
+        )
 
       assert {:error, :header_injection} = result
     end
 
     test "rejects \\r\\n in subject field" do
-      result = Gmail.create_draft(@dummy_token, "to@example.com", "Hello\r\nBcc: victim@example.com", "Body")
+      result =
+        Gmail.create_draft(
+          @dummy_token,
+          "to@example.com",
+          "Hello\r\nBcc: victim@example.com",
+          "Body"
+        )
+
       assert {:error, :header_injection} = result
     end
 

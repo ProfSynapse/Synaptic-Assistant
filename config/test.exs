@@ -34,9 +34,8 @@ config :assistant, Assistant.Vault,
   ciphers: [
     default: {
       Cloak.Ciphers.AES.GCM,
-      tag: "AES.GCM.V1",
       # 32-byte test-only key
-      key: Base.decode64!("dCtzMVByc1hTZ3RwNGNSRVlDemVxUCtiaGs2UGxGY1k=")
+      tag: "AES.GCM.V1", key: Base.decode64!("dCtzMVByc1hTZ3RwNGNSRVlDemVxUCtiaGs2UGxGY1k=")
     }
   ]
 

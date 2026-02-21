@@ -27,7 +27,10 @@ defmodule AssistantWeb.CoreComponents do
     """
   end
 
-  attr :target, :string, required: true, doc: "ID of the contenteditable element this toolbar controls"
+  attr :target, :string,
+    required: true,
+    doc: "ID of the contenteditable element this toolbar controls"
+
   attr :label, :string, default: "Text formatting", doc: "Accessible label for the toolbar"
 
   def editor_toolbar(assigns) do

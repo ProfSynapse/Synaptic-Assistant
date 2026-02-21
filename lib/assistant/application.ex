@@ -12,6 +12,8 @@ defmodule Assistant.Application do
   @impl true
   def start(_type, _args) do
     # Google OAuth2 (conditional — only when credentials are configured)
+    # Google Chat bot service account (conditional — only when credentials are configured).
+    # Used ONLY for chat.bot scope. Per-user OAuth2 is stateless (no supervised process).
     children =
       [
         # Config loader (must be first — other children depend on ETS config)
@@ -28,8 +30,6 @@ defmodule Assistant.Application do
         {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Assistant.PubSub}
       ] ++
-        # Google Chat bot service account (conditional — only when credentials are configured).
-        # Used ONLY for chat.bot scope. Per-user OAuth2 is stateless (no supervised process).
         maybe_goth() ++
         [
           # Cron scheduler (before Oban — scheduled jobs may enqueue Oban work)
@@ -92,9 +92,7 @@ defmodule Assistant.Application do
         scopes = Assistant.Integrations.Google.Auth.scopes()
 
         [
-          {Goth,
-           name: Assistant.Goth,
-           source: {:service_account, credentials, [scopes: scopes]}}
+          {Goth, name: Assistant.Goth, source: {:service_account, credentials, [scopes: scopes]}}
         ]
     end
   end

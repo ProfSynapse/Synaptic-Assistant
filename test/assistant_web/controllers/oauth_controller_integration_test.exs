@@ -68,8 +68,10 @@ defmodule AssistantWeb.OAuthControllerIntegrationTest do
       user_id: user_id,
       token_hash: token_hash,
       purpose: "oauth_google",
-      code_verifier: Keyword.get(opts, :code_verifier, "test-verifier-#{System.unique_integer([:positive])}"),
-      pending_intent: Keyword.get(opts, :pending_intent, %{"message" => "test command", "channel" => "test"}),
+      code_verifier:
+        Keyword.get(opts, :code_verifier, "test-verifier-#{System.unique_integer([:positive])}"),
+      pending_intent:
+        Keyword.get(opts, :pending_intent, %{"message" => "test command", "channel" => "test"}),
       expires_at: expires_at
     })
     |> Assistant.Repo.insert!()
@@ -82,7 +84,10 @@ defmodule AssistantWeb.OAuthControllerIntegrationTest do
   # ---------------------------------------------------------------
 
   describe "GET /auth/google/callback — HMAC state roundtrip" do
-    test "rejects callback where state token_hash points to nonexistent auth_token", %{conn: conn, user: user} do
+    test "rejects callback where state token_hash points to nonexistent auth_token", %{
+      conn: conn,
+      user: user
+    } do
       # Generate a real state with HMAC, but for a token_hash that won't match any auth_token
       {:ok, url, _pkce} = OAuth.authorize_url(user.id, "google_chat", "nonexistent-hash")
 
@@ -96,7 +101,10 @@ defmodule AssistantWeb.OAuthControllerIntegrationTest do
       assert conn.resp_body =~ "Authorization session not found"
     end
 
-    test "rejects callback with valid state but exchange_code fails (no real Google)", %{conn: conn, user: user} do
+    test "rejects callback with valid state but exchange_code fails (no real Google)", %{
+      conn: conn,
+      user: user
+    } do
       raw_token = "integ-test-token-#{System.unique_integer([:positive])}"
       _auth_token = insert_auth_token(user.id, raw_token)
       token_hash = MagicLink.hash_token(raw_token)
@@ -108,7 +116,8 @@ defmodule AssistantWeb.OAuthControllerIntegrationTest do
       state = query["state"]
 
       # This will hit the real Google token endpoint and fail (expected)
-      conn = get(conn, "/auth/google/callback?code=fake-auth-code&state=#{URI.encode_www_form(state)}")
+      conn =
+        get(conn, "/auth/google/callback?code=fake-auth-code&state=#{URI.encode_www_form(state)}")
 
       assert conn.status == 500
       assert conn.resp_body =~ "Failed" or conn.resp_body =~ "error"

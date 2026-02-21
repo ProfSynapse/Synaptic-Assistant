@@ -103,7 +103,8 @@ defmodule Assistant.Integration.Skills.EmailTest do
       result = run_skill_integration(mission, @email_skills, :email)
 
       case result do
-        {:ok, %{skill: skill, result: skill_result}} when skill in ["email.list", "email.search"] ->
+        {:ok, %{skill: skill, result: skill_result}}
+        when skill in ["email.list", "email.search"] ->
           # Accept both email.list and email.search since the LLM may treat
           # "list recent emails" as equivalent to searching the inbox.
           # May return :error if LLM maps args differently than handler expects.

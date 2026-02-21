@@ -37,8 +37,7 @@ defmodule Assistant.Skills.Files.Read do
             {:ok,
              %Result{
                status: :error,
-               content:
-                 "Google authentication required. Please connect your Google account."
+               content: "Google authentication required. Please connect your Google account."
              }}
 
           token ->

@@ -204,7 +204,9 @@ defmodule Assistant.Integrations.Google.Auth do
         expires_at = DateTime.add(DateTime.utc_now(), 3500, :second)
 
         case TokenStore.update_access_token(user_id, access_token, expires_at) do
-          {:ok, _} -> :ok
+          {:ok, _} ->
+            :ok
+
           {:error, reason} ->
             Logger.warning("Failed to cache refreshed token",
               user_id: user_id,

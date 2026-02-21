@@ -14,8 +14,7 @@ defmodule Assistant.Repo.Migrations.CreateAuthTokens do
     create table(:auth_tokens, primary_key: false) do
       add :id, :binary_id, primary_key: true
 
-      add :user_id, references(:users, type: :binary_id, on_delete: :delete_all),
-        null: false
+      add :user_id, references(:users, type: :binary_id, on_delete: :delete_all), null: false
 
       add :token_hash, :text, null: false
       add :purpose, :text, null: false
@@ -26,9 +25,7 @@ defmodule Assistant.Repo.Migrations.CreateAuthTokens do
       timestamps(type: :utc_datetime_usec, updated_at: false)
     end
 
-    create constraint(:auth_tokens, :valid_purpose,
-             check: "purpose IN ('oauth_google')"
-           )
+    create constraint(:auth_tokens, :valid_purpose, check: "purpose IN ('oauth_google')")
 
     create unique_index(:auth_tokens, [:token_hash])
     create index(:auth_tokens, [:expires_at])

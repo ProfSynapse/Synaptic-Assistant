@@ -58,8 +58,10 @@ defmodule AssistantWeb.OAuthControllerCallbackTest do
       user_id: user_id,
       token_hash: token_hash,
       purpose: "oauth_google",
-      code_verifier: Keyword.get(opts, :code_verifier, "test-verifier-#{System.unique_integer([:positive])}"),
-      pending_intent: Keyword.get(opts, :pending_intent, %{"message" => "test command", "channel" => "test"}),
+      code_verifier:
+        Keyword.get(opts, :code_verifier, "test-verifier-#{System.unique_integer([:positive])}"),
+      pending_intent:
+        Keyword.get(opts, :pending_intent, %{"message" => "test command", "channel" => "test"}),
       expires_at: expires_at,
       used_at: used_at
     })
@@ -169,7 +171,9 @@ defmodule AssistantWeb.OAuthControllerCallbackTest do
       # Test the controller's html_escape via a token with crafted email
       # The success_html function escapes the email
       malicious = "<script>alert('xss')</script>"
-      escaped = malicious
+
+      escaped =
+        malicious
         |> String.replace("&", "&amp;")
         |> String.replace("<", "&lt;")
         |> String.replace(">", "&gt;")

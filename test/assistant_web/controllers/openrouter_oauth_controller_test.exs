@@ -226,5 +226,4 @@ defmodule AssistantWeb.OpenRouterOAuthControllerTest do
                "You must log in to connect OpenRouter."
     end
   end
-
 end

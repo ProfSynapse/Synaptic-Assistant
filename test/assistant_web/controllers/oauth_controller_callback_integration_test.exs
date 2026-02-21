@@ -59,8 +59,10 @@ defmodule AssistantWeb.OAuthControllerCallbackIntegrationTest do
       user_id: user_id,
       token_hash: token_hash,
       purpose: "oauth_google",
-      code_verifier: Keyword.get(opts, :code_verifier, "test-verifier-#{System.unique_integer([:positive])}"),
-      pending_intent: Keyword.get(opts, :pending_intent, %{"message" => "test command", "channel" => "test"}),
+      code_verifier:
+        Keyword.get(opts, :code_verifier, "test-verifier-#{System.unique_integer([:positive])}"),
+      pending_intent:
+        Keyword.get(opts, :pending_intent, %{"message" => "test command", "channel" => "test"}),
       expires_at: DateTime.add(DateTime.utc_now(), 600, :second),
       used_at: Keyword.get(opts, :used_at, nil)
     })
@@ -88,7 +90,8 @@ defmodule AssistantWeb.OAuthControllerCallbackIntegrationTest do
 
       # The callback will: verify state (OK) → lookup auth_token (OK) →
       # exchange_code (FAIL — hits hardcoded Google URL, no real server)
-      conn = get(conn, "/auth/google/callback?code=fake-auth-code&state=#{URI.encode_www_form(state)}")
+      conn =
+        get(conn, "/auth/google/callback?code=fake-auth-code&state=#{URI.encode_www_form(state)}")
 
       # exchange_code failure results in 500
       assert conn.status == 500

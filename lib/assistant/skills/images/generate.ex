@@ -108,7 +108,15 @@ defmodule Assistant.Skills.Images.Generate do
     end
   end
 
-  defp request_image_generation(openrouter, prompt, model, image_count, size, aspect_ratio, api_key) do
+  defp request_image_generation(
+         openrouter,
+         prompt,
+         model,
+         image_count,
+         size,
+         aspect_ratio,
+         api_key
+       ) do
     opts =
       [model: model, n: image_count, api_key: api_key]
       |> maybe_put_opt(:size, size)

@@ -70,7 +70,15 @@
       "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-id mix test:*)",
       "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-id CLOAK_ENCRYPTION_KEY=\"d+s1PrsXSgtp4cREYCzeqP+bhk6PlFcY2RhspbKrEJA=\" mix test:*)",
       "Bash(lsof:*)",
-      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test mix compile:*)"
+      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test mix compile:*)",
+      "Bash(set:*)",
+      "Bash(ENV_VAR=placeholder ELEVENLABS_VOICE_ID=test-voice-id CLOAK_ENCRYPTION_KEY=\"Q5UmN+2rIM+Fpep+9KYgyKHKNMLuj9vwL2plpp+ADko=\" mix test:*)",
+      "Bash(tail:*)",
+      "Bash(grep failure\\\\|error\\\\|test.*exs::*)",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(grep GOOGLE env vars:*)",
+      "Bash(pkill:*)",
+      "Bash(MIX_ENV=dev mix:*)"
     ]
   }
 }

@@ -87,7 +87,12 @@ defmodule AssistantWeb.OAuthController do
 
       {:error, :expired} ->
         Logger.warning("OAuth start: token expired")
-        error_response(conn, 400, "This authorization link has expired. Please request a new one.")
+
+        error_response(
+          conn,
+          400,
+          "This authorization link has expired. Please request a new one."
+        )
 
       {:error, :already_used} ->
         Logger.warning("OAuth start: token already used")
@@ -138,9 +143,14 @@ defmodule AssistantWeb.OAuthController do
       # Enqueue replay of the user's original command if a pending intent exists
       maybe_enqueue_replay(auth_token)
 
+      html_body =
+        if state_data.channel == "settings",
+          do: popup_close_html(claims["email"]),
+          else: success_html(claims["email"])
+
       conn
       |> put_status(200)
-      |> html(success_html(claims["email"]))
+      |> html(html_body)
     else
       {:error, :invalid_state} ->
         Logger.warning("OAuth callback: invalid state parameter")
@@ -353,7 +363,9 @@ defmodule AssistantWeb.OAuthController do
 
   # Include mode in worker args if present in the pending intent.
   # Defaults to nil (worker falls back to :multi_agent).
-  defp maybe_put_mode(args, %{"mode" => mode}) when is_binary(mode), do: Map.put(args, :mode, mode)
+  defp maybe_put_mode(args, %{"mode" => mode}) when is_binary(mode),
+    do: Map.put(args, :mode, mode)
+
   defp maybe_put_mode(args, _intent), do: args
 
   defp error_response(conn, status, message) do
@@ -366,6 +378,42 @@ defmodule AssistantWeb.OAuthController do
   # Inline HTML for the OAuth result pages. These are simple one-off pages
   # that the user sees briefly in their browser after the OAuth flow.
   # They don't warrant full Phoenix templates/layouts.
+
+  defp popup_close_html(email) do
+    ~s"""
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Google Account Connected</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+               display: flex; justify-content: center; align-items: center; min-height: 100vh;
+               margin: 0; background: #f8f9fa; color: #333; }
+        .card { background: white; border-radius: 12px; padding: 2rem; max-width: 400px;
+                text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .icon { font-size: 3rem; margin-bottom: 1rem; }
+        h1 { font-size: 1.25rem; margin: 0 0 0.5rem; }
+        p { color: #666; margin: 0; font-size: 0.9rem; }
+        .email { font-weight: 600; color: #333; }
+      </style>
+    </head>
+    <body>
+      <div class="card">
+        <div class="icon">&#10004;&#65039;</div>
+        <h1>Google Account Connected</h1>
+        <p>Signed in as <span class="email">#{html_escape(email || "your Google account")}</span>.</p>
+        <p style="margin-top: 1rem;">This window will close automatically...</p>
+      </div>
+      <script>
+        // Brief delay so the user sees the success message before the popup closes.
+        setTimeout(function() { window.close(); }, 1500);
+      </script>
+    </body>
+    </html>
+    """
+  end
 
   defp success_html(email) do
     ~s"""

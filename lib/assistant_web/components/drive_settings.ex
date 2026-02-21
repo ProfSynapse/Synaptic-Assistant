@@ -12,7 +12,9 @@ defmodule AssistantWeb.Components.DriveSettings do
 
   def drive_settings(assigns) do
     personal_connected = has_personal_drive?(assigns.connected_drives)
-    available_not_connected = filter_unconnected(assigns.available_drives, assigns.connected_drives)
+
+    available_not_connected =
+      filter_unconnected(assigns.available_drives, assigns.connected_drives)
 
     assigns =
       assigns

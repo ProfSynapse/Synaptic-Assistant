@@ -31,7 +31,8 @@ defmodule Assistant.ModelCatalog do
               id: model.id,
               name: existing.name || model.name,
               input_cost: existing.input_cost || model.input_cost,
-              output_cost: existing.output_cost || model.output_cost
+              output_cost: existing.output_cost || model.output_cost,
+              max_context_tokens: existing.max_context_tokens || model.max_context_tokens
             }
           end
         )
@@ -58,6 +59,7 @@ defmodule Assistant.ModelCatalog do
     name = attrs["name"] |> to_string() |> String.trim()
     input_cost = attrs["input_cost"] |> to_string() |> String.trim()
     output_cost = attrs["output_cost"] |> to_string() |> String.trim()
+    max_context_tokens = attrs["max_context_tokens"] |> to_string() |> String.trim()
 
     cond do
       model_id == "" ->
@@ -72,12 +74,16 @@ defmodule Assistant.ModelCatalog do
       output_cost == "" ->
         {:error, :missing_output_cost}
 
+      max_context_tokens == "" ->
+        {:error, :missing_max_context_tokens}
+
       true ->
         persist_model(%{
           id: model_id,
           name: name,
           input_cost: input_cost,
-          output_cost: output_cost
+          output_cost: output_cost,
+          max_context_tokens: max_context_tokens
         })
     end
   end
@@ -99,7 +105,8 @@ defmodule Assistant.ModelCatalog do
       id: model.id,
       name: model_name(model.id),
       input_cost: input_cost,
-      output_cost: output_cost
+      output_cost: output_cost,
+      max_context_tokens: model.max_context_tokens || "n/a"
     }
   end
 
@@ -145,7 +152,8 @@ defmodule Assistant.ModelCatalog do
              id: id,
              name: to_string(model["name"] || id),
              input_cost: to_string(model["input_cost"] || "n/a"),
-             output_cost: to_string(model["output_cost"] || "n/a")
+             output_cost: to_string(model["output_cost"] || "n/a"),
+             max_context_tokens: to_string(model["max_context_tokens"] || "n/a")
            }}
         end)
       else

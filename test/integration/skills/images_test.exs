@@ -26,7 +26,9 @@ defmodule Assistant.Integration.Skills.ImagesTest do
     clear_mock_calls()
 
     # Create a temp workspace for image files (images.generate writes to disk)
-    tmp_dir = Path.join(System.tmp_dir!(), "integration_images_#{:erlang.unique_integer([:positive])}")
+    tmp_dir =
+      Path.join(System.tmp_dir!(), "integration_images_#{:erlang.unique_integer([:positive])}")
+
     File.mkdir_p!(tmp_dir)
     on_exit(fn -> File.rm_rf!(tmp_dir) end)
 
