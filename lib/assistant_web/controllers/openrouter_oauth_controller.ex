@@ -15,7 +15,7 @@
 #   - lib/assistant/accounts/settings_user.ex (encrypted openrouter_api_key field)
 #   - lib/assistant/accounts.ex (save_openrouter_api_key/2, delete_openrouter_api_key/1)
 #   - lib/assistant_web/router.ex (route definitions)
-#   - config/runtime.exs (OPENROUTER_APP_API_KEY env var)
+#   - config/runtime.exs (OPENROUTER_API_KEY env var)
 
 defmodule AssistantWeb.OpenRouterOAuthController do
   use AssistantWeb, :controller
@@ -61,7 +61,7 @@ defmodule AssistantWeb.OpenRouterOAuthController do
         |> redirect(to: ~p"/settings_users/log-in")
 
       {:error, :missing_app_api_key} ->
-        Logger.warning("OpenRouter OAuth request failed: OPENROUTER_APP_API_KEY not configured")
+        Logger.warning("OpenRouter OAuth request failed: OPENROUTER_API_KEY not configured")
 
         conn
         |> put_flash(:error, "OpenRouter integration is not configured.")
@@ -145,7 +145,7 @@ defmodule AssistantWeb.OpenRouterOAuthController do
   end
 
   defp fetch_app_api_key do
-    case Application.get_env(:assistant, :openrouter_app_api_key) do
+    case Application.get_env(:assistant, :openrouter_api_key) do
       key when is_binary(key) and key != "" ->
         {:ok, key}
 

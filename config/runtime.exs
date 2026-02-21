@@ -56,13 +56,6 @@ if api_key = System.get_env("OPENROUTER_API_KEY") do
   config :assistant, :openrouter_api_key, api_key
 end
 
-# OpenRouter App API Key — used by the OAuth PKCE flow to exchange authorization
-# codes for per-user API keys. Obtain from https://openrouter.ai/settings/keys.
-# This is the app-level key (NOT a per-user key).
-if app_key = System.get_env("OPENROUTER_APP_API_KEY") do
-  config :assistant, :openrouter_app_api_key, app_key
-end
-
 # Google service account credentials (inline JSON string or file path to JSON key).
 # Now used ONLY for Google Chat bot operations (chat.bot scope).
 # Per-user Gmail/Drive/Calendar access uses OAuth2 client credentials below.
