@@ -44,7 +44,7 @@ defmodule AssistantWeb.Components.ConnectorCard do
         </div>
       </div>
       
-      <div :if={!@connected} style="margin-top: 1rem;">
+      <div :if={!@connected}>
         <button :if={@on_connect != ""} type="button" class="sa-btn" style="width: 100%; justify-content: center;" phx-click={@on_connect} disabled={@disabled}>
           Connect
         </button>
@@ -52,7 +52,7 @@ defmodule AssistantWeb.Components.ConnectorCard do
           Connect
         </button>
       </div>
-      <div :if={@connected} style="margin-top: 1rem;">
+      <div :if={@connected}>
         <button type="button" class="sa-btn secondary" style="width: 100%; justify-content: center;" phx-click={@on_disconnect} data-confirm={@disconnect_confirm}>
           Disconnect
         </button>
