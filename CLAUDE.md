@@ -6,9 +6,9 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume 50ba7086-b2ce-4063-a7d9-f9685c033d4f`
-- Team: `pact-50ba7086`
-- Started: 2026-02-20 17:34:09 UTC
+- Resume: `claude --resume 174f7e2a-5972-4e16-a3cd-4490ca9de13b`
+- Team: `pact-174f7e2a`
+- Started: 2026-02-21 14:33:41 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -73,8 +73,19 @@ Two separate tables: `settings_users` (web dashboard login) and `users` (chat us
 - Auto-linked in `OAuthController` callback via email match: `maybe_link_settings_user/2`
 - **Always use `settings_user.user_id`** (not `settings_user.id`) when calling TokenStore, ConnectedDrives
 
+### OpenRouter OAuth Architecture (PR #19)
+Settings-user-level PKCE OAuth connect flow. Key patterns:
+- **Storage**: `settings_users.openrouter_api_key` (encrypted `Encrypted.Binary`) — NOT `oauth_tokens` (avoids chat user_id dependency)
+- **Flow**: `/settings_users/auth/openrouter` → OpenRouter PKCE consent → `/callback` → POST `https://openrouter.ai/api/v1/auth/keys` → permanent `sk-or-v1-...` key stored
+- **App key required**: `OPENROUTER_APP_API_KEY` env var used as Bearer auth in code exchange — must be set
+- **No refresh tokens, no revocation endpoint** — disconnect = `delete_openrouter_api_key/1` (DB only)
+- **Per-user key threading**: `Accounts.openrouter_key_for_user(user_id)` bridges `users.id` → `settings_users.openrouter_api_key`; all LLM callers pass `api_key:` opt; falls back to system key when nil (unlike Google which rejects)
+- **Controller**: `OpenRouterOAuthController` — `request/2` + `callback/2` only; disconnect handled by LiveView `phx-click="disconnect_openrouter"`
+- **Configurable keys URL**: `Application.get_env(:assistant, :openrouter_keys_url, "https://openrouter.ai/api/v1/auth/keys")` — needed for Bypass in tests
+
 ### Phase Status
 - Phase 1-4 complete and merged (PR #9). Branch: `main`.
 - Phase 4 covers: Gmail (5 skills), Calendar (3 skills), Workflow scheduler (4 skills + WorkflowWorker + QuantumLoader).
 - Phase 5 (PR #11): Per-user Google OAuth2 with magic link authorization flow.
 - Phase 6 (PR #15): Scoped Drive access + OAuth2 improvements (race fix, revocation, encrypted code_verifier, cleanup worker).
+- Phase 7 (PR #19): OpenRouter PKCE OAuth connect button + per-user key threading.
