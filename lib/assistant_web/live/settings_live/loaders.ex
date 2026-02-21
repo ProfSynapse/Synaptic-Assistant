@@ -8,6 +8,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.ConnectedDrives
   alias Assistant.MemoryExplorer
+  alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
   alias Assistant.ModelDefaults
   alias Assistant.OrchestratorSystemPrompt
@@ -23,7 +24,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   def load_section_data(socket, "workflows"), do: reload_workflows(socket)
   def load_section_data(socket, "models"), do: load_models(socket)
   def load_section_data(socket, "analytics"), do: load_analytics(socket)
-  def load_section_data(socket, "memory"), do: socket |> load_transcripts() |> load_memories()
+  def load_section_data(socket, "memory"), do: load_memory_dashboard(socket)
 
   def load_section_data(socket, "apps"),
     do: socket |> load_google_status() |> load_openrouter_status() |> load_connected_drives()
@@ -68,19 +69,36 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       assign(socket, :analytics_snapshot, Data.empty_analytics())
   end
 
+  def load_memory_dashboard(socket) do
+    socket
+    |> load_transcripts()
+    |> load_memories()
+    |> load_memory_graph()
+  end
+
   def load_transcripts(socket) do
     filters = socket.assigns.transcript_filters || %{}
+    global_filters = socket.assigns.graph_filters || Data.blank_graph_filters()
+    since = Data.timeframe_since(Map.get(global_filters, "timeframe", "30d"))
+    type = Map.get(global_filters, "type", "all")
 
     query_opts = [
-      query: Map.get(filters, "query", ""),
+      query: merged_query(Map.get(filters, "query", ""), Map.get(global_filters, "query", "")),
       channel: Map.get(filters, "channel", ""),
       status: Map.get(filters, "status", ""),
       agent_type: Map.get(filters, "agent_type", ""),
+      since: since,
       limit: 60
     ]
 
     options = Transcripts.filter_options()
-    transcripts = Transcripts.list_transcripts(query_opts)
+
+    transcripts =
+      if type in ["all", "transcripts"] do
+        Transcripts.list_transcripts(query_opts)
+      else
+        []
+      end
 
     socket
     |> assign(:transcript_filter_options, options)
@@ -96,19 +114,29 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   def load_memories(socket) do
     filters = socket.assigns.memory_filters || %{}
     user_id = Context.current_user_id(socket)
+    global_filters = socket.assigns.graph_filters || Data.blank_graph_filters()
+    since = Data.timeframe_since(Map.get(global_filters, "timeframe", "30d"))
+    type = Map.get(global_filters, "type", "all")
 
     query_opts = [
       user_id: user_id,
-      query: Map.get(filters, "query", ""),
+      query: merged_query(Map.get(filters, "query", ""), Map.get(global_filters, "query", "")),
       category: Map.get(filters, "category", ""),
       source_type: Map.get(filters, "source_type", ""),
       tag: Map.get(filters, "tag", ""),
       source_conversation_id: Map.get(filters, "source_conversation_id", ""),
+      since: since,
       limit: 80
     ]
 
     options = MemoryExplorer.filter_options(user_id: user_id)
-    memories = MemoryExplorer.list_memories(query_opts)
+
+    memories =
+      if type in ["all", "memories"] do
+        MemoryExplorer.list_memories(query_opts)
+      else
+        []
+      end
 
     socket
     |> assign(:memory_filter_options, options)
@@ -119,6 +147,21 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       socket
       |> assign(:memory_filter_options, Data.blank_memory_filter_options())
       |> assign(:memories, [])
+  end
+
+  def load_memory_graph(socket) do
+    graph_filters = socket.assigns.graph_filters || Data.blank_graph_filters()
+    graph_data = MemoryGraph.get_initial_graph(socket.assigns[:current_scope], graph_filters)
+    loaded_node_ids = graph_data.nodes |> Enum.map(&Map.get(&1, :id)) |> MapSet.new()
+
+    socket
+    |> assign(:graph_data, graph_data)
+    |> assign(:loaded_node_ids, loaded_node_ids)
+  rescue
+    _ ->
+      socket
+      |> assign(:graph_data, %{nodes: [], links: []})
+      |> assign(:loaded_node_ids, MapSet.new())
   end
 
   def load_skill_permissions(socket) do
@@ -264,5 +307,16 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     rescue
       _ -> nil
     end
+  end
+
+  defp merged_query(left, right) do
+    values =
+      [left, right]
+      |> Enum.map(&to_string/1)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    Enum.join(values, " ")
   end
 end

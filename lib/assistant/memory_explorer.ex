@@ -19,6 +19,7 @@ defmodule Assistant.MemoryExplorer do
     source_type = normalize_text(Keyword.get(opts, :source_type, ""))
     tag = normalize_text(Keyword.get(opts, :tag, ""))
     source_conversation_id = normalize_text(Keyword.get(opts, :source_conversation_id, ""))
+    since = Keyword.get(opts, :since)
 
     memory_query =
       from(m in MemoryEntry,
@@ -47,6 +48,7 @@ defmodule Assistant.MemoryExplorer do
       |> maybe_filter_source_type(source_type)
       |> maybe_filter_tag(tag)
       |> maybe_filter_source_conversation_id(source_conversation_id)
+      |> maybe_filter_since(since)
 
     Repo.all(memory_query)
     |> Enum.map(fn memory ->
@@ -154,6 +156,13 @@ defmodule Assistant.MemoryExplorer do
 
   defp maybe_filter_source_conversation_id(queryable, source_conversation_id),
     do: where(queryable, [m], m.source_conversation_id == ^source_conversation_id)
+
+  defp maybe_filter_since(queryable, nil), do: queryable
+
+  defp maybe_filter_since(queryable, %DateTime{} = since),
+    do: where(queryable, [m], m.inserted_at >= ^since)
+
+  defp maybe_filter_since(queryable, _invalid), do: queryable
 
   defp truncate_preview(content) when is_binary(content) do
     content

@@ -18,6 +18,7 @@ defmodule Assistant.Transcripts do
     channel = normalize_text(Keyword.get(opts, :channel, ""))
     status = normalize_text(Keyword.get(opts, :status, ""))
     agent_type = normalize_text(Keyword.get(opts, :agent_type, ""))
+    since = Keyword.get(opts, :since)
 
     conversation_query =
       from(c in Conversation,
@@ -54,6 +55,7 @@ defmodule Assistant.Transcripts do
       |> maybe_filter_status(status)
       |> maybe_filter_agent_type(agent_type)
       |> maybe_filter_query(query)
+      |> maybe_filter_since(since)
       |> order_by([c], desc: coalesce(c.last_active_at, c.inserted_at))
       |> limit(^limit)
 
@@ -132,7 +134,7 @@ defmodule Assistant.Transcripts do
     where(
       queryable,
       [c],
-      ilike(c.id, ^pattern) or
+      fragment("CAST(? AS text) ILIKE ?", c.id, ^pattern) or
         fragment(
           "EXISTS (SELECT 1 FROM messages m3 WHERE m3.conversation_id = ? AND COALESCE(m3.content, '') ILIKE ?)",
           c.id,
@@ -151,6 +153,18 @@ defmodule Assistant.Transcripts do
 
   defp maybe_filter_agent_type(queryable, agent_type),
     do: where(queryable, [c], c.agent_type == ^agent_type)
+
+  defp maybe_filter_since(queryable, nil), do: queryable
+
+  defp maybe_filter_since(queryable, %DateTime{} = since) do
+    where(
+      queryable,
+      [c],
+      fragment("COALESCE(?, ?) >= ?", c.last_active_at, c.inserted_at, ^since)
+    )
+  end
+
+  defp maybe_filter_since(queryable, _invalid), do: queryable
 
   defp map_message(message) do
     %{

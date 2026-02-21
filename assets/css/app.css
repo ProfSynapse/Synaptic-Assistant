@@ -130,6 +130,7 @@ a {
 
 .sa-main {
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
 /* Auth shell */
@@ -514,10 +515,12 @@ a {
 .sa-settings-shell {
   display: flex;
   min-height: 100vh;
+  min-width: 0;
 }
 
 .sa-sidebar {
   width: 264px;
+  flex: 0 0 auto;
   background: linear-gradient(180deg, var(--sa-slate) 0%, #1f2d3c 100%);
   color: var(--sa-white);
   padding: 16px 12px;
@@ -592,7 +595,8 @@ a {
 }
 
 .sa-content {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -625,6 +629,7 @@ a {
 .sa-section-stack {
   display: grid;
   gap: 24px;
+  min-width: 0;
 }
 
 .sa-card,
@@ -636,6 +641,7 @@ a {
   padding: clamp(18px, 2vw, 24px);
   display: grid;
   gap: 16px;
+  min-width: 0;
 }
 
 .sa-card h2,
@@ -1015,6 +1021,130 @@ a {
 
 /* Transcript */
 
+.sa-memory-filter-card {
+  position: sticky;
+  top: 16px;
+  z-index: 8;
+}
+
+.sa-memory-global-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.sa-knowledge-graph-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.sa-knowledge-graph-canvas {
+  width: 100%;
+  min-height: 500px;
+  height: min(68vh, 680px);
+  border: 1px solid var(--sa-border);
+  border-radius: 14px;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(850px 340px at 18% 8%, rgba(0, 169, 157, 0.16) 0%, rgba(0, 169, 157, 0) 60%),
+    radial-gradient(760px 320px at 88% 92%, rgba(41, 171, 226, 0.14) 0%, rgba(41, 171, 226, 0) 58%),
+    linear-gradient(180deg, #ffffff 0%, #f8fcfb 100%);
+}
+
+.sa-knowledge-graph-canvas canvas {
+  cursor: grab;
+}
+
+.sa-knowledge-graph-canvas canvas:active {
+  cursor: grabbing;
+}
+
+.sa-graph-controls {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: grid;
+  gap: 6px;
+  z-index: 6;
+}
+
+.sa-graph-control-btn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(51, 71, 91, 0.24);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #294259;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(27, 47, 66, 0.14);
+}
+
+.sa-graph-control-btn:hover,
+.sa-graph-control-btn:focus-visible {
+  border-color: rgba(0, 169, 157, 0.6);
+  background: #ffffff;
+  outline: none;
+}
+
+.sa-memory-accordions {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.sa-accordion {
+  border: 1px solid var(--sa-border);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.sa-accordion > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: #294259;
+  background: linear-gradient(180deg, #ffffff 0%, #f5faf9 100%);
+  border-bottom: 1px solid rgba(214, 224, 220, 0.85);
+}
+
+.sa-accordion > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sa-accordion > summary::after {
+  content: "";
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid #4c6474;
+  border-bottom: 2px solid #4c6474;
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+}
+
+.sa-accordion[open] > summary::after {
+  transform: rotate(225deg);
+}
+
+.sa-accordion-body {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px 16px;
+  min-width: 0;
+}
+
 .sa-transcript-filters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1028,6 +1158,7 @@ a {
   border-radius: 12px;
   background: #fdfdfd;
   padding: 12px;
+  min-width: 0;
 }
 
 .sa-transcript-messages {
@@ -1296,6 +1427,15 @@ a {
 
   .sa-auth-logo-wide {
     width: min(280px, 72vw);
+  }
+
+  .sa-memory-filter-card {
+    position: static;
+  }
+
+  .sa-knowledge-graph-canvas {
+    min-height: 420px;
+    height: 60vh;
   }
 }
 

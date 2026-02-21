@@ -19,7 +19,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "profile" -> "hero-user-circle"
       "models" -> "hero-cube"
       "analytics" -> "hero-chart-bar"
-      "memory" -> "hero-document-text"
+      "memory" -> "hero-cpu-chip"
       "apps" -> "hero-puzzle-piece"
       "workflows" -> "hero-command-line"
       "skills" -> "hero-wrench-screwdriver"

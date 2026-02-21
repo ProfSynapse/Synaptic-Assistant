@@ -72,6 +72,217 @@
 
   const Hooks = {}
 
+  Hooks.KnowledgeGraph = {
+    mounted() {
+      this.canvasEl = this.el.querySelector("[data-graph-canvas]") || this.el
+      this.graph = null
+      this.graphData = { nodes: [], links: [] }
+      this.handleResize = () => this.resize()
+      this.controlListeners = []
+
+      this.handleEvent("render_graph", (payload) => {
+        this.replaceData(payload)
+      })
+
+      this.handleEvent("append_graph", (payload) => {
+        this.appendData(payload)
+      })
+
+      this.initGraph()
+      this.bindControlButtons()
+      window.addEventListener("resize", this.handleResize)
+      this.pushEvent("init_graph", {})
+    },
+
+    destroyed() {
+      this.unbindControlButtons()
+      window.removeEventListener("resize", this.handleResize)
+    },
+
+    initGraph() {
+      const createForceGraph = window.ForceGraph
+
+      if (typeof createForceGraph !== "function") {
+        return
+      }
+
+      this.graph = createForceGraph()(this.canvasEl)
+        .nodeId("id")
+        .nodeLabel((node) => node.label || node.id || "node")
+        .nodeColor((node) => node.color || "#29abe2")
+        .nodeVal((node) => node.val || 6)
+        .linkColor((link) => link.color || "rgba(104, 123, 135, 0.32)")
+        .linkWidth((link) => (link.kind === "relation" ? 1.9 : 1.3))
+        .linkLabel((link) => link.label || "")
+        .linkDirectionalArrowLength((link) => (link.directional ? 4 : 0))
+        .linkDirectionalArrowRelPos(1)
+        .cooldownTicks(90)
+        .onNodeClick((node) => {
+          if (node && node.id) {
+            this.pushEvent("expand_node", { node_id: node.id })
+          }
+        })
+
+      if (typeof this.graph.enableNodeDrag === "function") {
+        this.graph.enableNodeDrag(false)
+      }
+
+      if (typeof this.graph.enableZoomPanInteraction === "function") {
+        this.graph.enableZoomPanInteraction(true)
+      } else {
+        if (typeof this.graph.enableZoomInteraction === "function") {
+          this.graph.enableZoomInteraction(true)
+        }
+
+        if (typeof this.graph.enablePanInteraction === "function") {
+          this.graph.enablePanInteraction(true)
+        }
+      }
+
+      if (typeof this.graph.minZoom === "function") this.graph.minZoom(0.12)
+      if (typeof this.graph.maxZoom === "function") this.graph.maxZoom(10)
+
+      this.resize()
+      this.graph.graphData(this.graphData)
+    },
+
+    resize() {
+      if (!this.graph) return
+
+      const width = this.canvasEl.clientWidth || 600
+      const height = this.canvasEl.clientHeight || 500
+
+      this.graph.width(width)
+      this.graph.height(height)
+    },
+
+    bindControlButtons() {
+      const controls = this.el.querySelectorAll("[data-graph-control]")
+
+      controls.forEach((button) => {
+        const action = button.dataset.graphControl
+        const handler = () => this.applyControl(action)
+        button.addEventListener("click", handler)
+        this.controlListeners.push({ button, handler })
+      })
+    },
+
+    unbindControlButtons() {
+      this.controlListeners.forEach(({ button, handler }) => {
+        button.removeEventListener("click", handler)
+      })
+      this.controlListeners = []
+    },
+
+    applyControl(action) {
+      if (!this.graph) return
+
+      switch (action) {
+        case "zoom-in":
+          this.adjustZoom(1.2)
+          break
+        case "zoom-out":
+          this.adjustZoom(1 / 1.2)
+          break
+        case "reset":
+          this.resetView()
+          break
+        default:
+          break
+      }
+    },
+
+    adjustZoom(multiplier) {
+      if (typeof this.graph.zoom !== "function") return
+
+      const currentZoom = this.graph.zoom()
+      const safeCurrent = typeof currentZoom === "number" && currentZoom > 0 ? currentZoom : 1
+      const nextZoom = safeCurrent * multiplier
+      this.graph.zoom(nextZoom, 260)
+    },
+
+    resetView() {
+      if (typeof this.graph.centerAt === "function") this.graph.centerAt(0, 0, 300)
+      if (typeof this.graph.zoom === "function") this.graph.zoom(1, 300)
+    },
+
+    replaceData(payload) {
+      if (!this.graph) this.initGraph()
+      if (!this.graph) return
+
+      this.graphData = this.normalizePayload(payload)
+      this.graph.graphData(this.graphData)
+      this.resize()
+    },
+
+    appendData(payload) {
+      if (!this.graph) this.initGraph()
+      if (!this.graph) return
+
+      const incoming = this.normalizePayload(payload)
+      const nextNodes = this.mergeNodes(this.graphData.nodes, incoming.nodes)
+      const nextLinks = this.mergeLinks(this.graphData.links, incoming.links)
+      this.graphData = { nodes: nextNodes, links: nextLinks }
+      this.graph.graphData(this.graphData)
+      this.resize()
+    },
+
+    normalizePayload(payload) {
+      if (!payload || typeof payload !== "object") {
+        return { nodes: [], links: [] }
+      }
+
+      return {
+        nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+        links: Array.isArray(payload.links) ? payload.links : [],
+      }
+    },
+
+    mergeNodes(currentNodes, incomingNodes) {
+      const byId = new Map()
+
+      currentNodes.forEach((node) => {
+        const id = node && node.id
+        if (id) byId.set(id, node)
+      })
+
+      incomingNodes.forEach((node) => {
+        const id = node && node.id
+        if (id) byId.set(id, node)
+      })
+
+      return Array.from(byId.values())
+    },
+
+    mergeLinks(currentLinks, incomingLinks) {
+      const byId = new Map()
+
+      currentLinks.forEach((link) => {
+        const id = this.linkId(link)
+        if (id) byId.set(id, link)
+      })
+
+      incomingLinks.forEach((link) => {
+        const id = this.linkId(link)
+        if (id) byId.set(id, link)
+      })
+
+      return Array.from(byId.values())
+    },
+
+    linkId(link) {
+      if (!link || typeof link !== "object") return null
+      if (typeof link.id === "string" && link.id !== "") return link.id
+
+      const sourceId = typeof link.source === "object" ? link.source.id : link.source
+      const targetId = typeof link.target === "object" ? link.target.id : link.target
+
+      if (!sourceId || !targetId) return null
+
+      return `${sourceId}->${targetId}:${link.kind || ""}:${link.label || ""}`
+    },
+  }
+
   Hooks.AutosaveToast = {
     mounted() {
       this.messageEl = this.el.querySelector("[data-autosave-message]")

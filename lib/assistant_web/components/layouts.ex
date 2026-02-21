@@ -35,7 +35,8 @@ defmodule AssistantWeb.Layouts do
         {@inner_content}
         <script defer src="/vendor/phoenix/phoenix.min.js"></script>
         <script defer src="/vendor/phoenix_live_view/phoenix_live_view.min.js"></script>
-        <script defer src={~p"/assets/app.js?v=editorrefresh4"}></script>
+        <script defer src="https://unpkg.com/force-graph"></script>
+        <script defer src={~p"/assets/app.js?v=graphrefresh1"}></script>
       </body>
     </html>
     """

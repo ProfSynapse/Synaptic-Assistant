@@ -3,15 +3,15 @@
 ## Overview
 This document outlines the plan to transform the existing "Memory" settings tab into an interactive, Obsidian-style Knowledge Graph dashboard. The goal is to provide a visual, explorable representation of the user's entities, memories, and transcripts, while retaining access to the raw tabular data via accordions.
 
-## 1. UI Restructuring (`lib/assistant_web/components/settings_page.ex`)
-- [ ] **Update Navigation Icon:** Change the "Memory" sidebar icon from `hero-document-text` to `hero-cpu` (or similar) to represent the "Assistant's Brain".
-- [ ] **Create Global Filter Bar:** Add a top-level card with a search input and timeframe/type dropdowns that control the entire page's state.
+## 1. UI Restructuring (`lib/assistant_web/components/settings_page/memory.ex` & `helpers.ex`)
+- [ ] **Update Navigation Icon:** In `lib/assistant_web/components/settings_page/helpers.ex`, change the "Memory" sidebar icon from `hero-document-text` to `hero-cpu` (or similar) to represent the "Assistant's Brain".
+- [ ] **Create Global Filter Bar:** In `lib/assistant_web/components/settings_page/memory.ex`, add a top-level card with a search input and timeframe/type dropdowns that control the entire page's state.
 - [ ] **Add Graph Container:** Create a large, prominent `div` with `phx-hook="KnowledgeGraph"` and `phx-update="ignore"` to host the canvas.
 - [ ] **Wrap Existing Data in Accordions:** Move the existing "Transcripts" and "Memories" tables into native HTML `<details>` and `<summary>` tags below the graph.
 
-## 2. LiveView State Management (`lib/assistant_web/live/settings_live.ex`)
-- [ ] **Initialize Graph State:** Add `graph_filters`, `loaded_node_ids`, and `graph_data` to the `mount/3` assigns.
-- [ ] **Handle Global Filters:** Create a `handle_event("update_global_filters", ...)` that updates the filters and re-queries the graph, memories, and transcripts simultaneously.
+## 2. LiveView State Management (`lib/assistant_web/live/settings_live/state.ex` & `events.ex`)
+- [ ] **Initialize Graph State:** In `lib/assistant_web/live/settings_live/state.ex`, add `graph_filters`, `loaded_node_ids`, and `graph_data` to the `init/1` assigns.
+- [ ] **Handle Global Filters:** In `lib/assistant_web/live/settings_live/events.ex`, create a `handle_event("update_global_filters", ...)` that updates the filters and re-queries the graph, memories, and transcripts simultaneously.
 - [ ] **Handle Graph Initialization:** Create a `handle_event("init_graph", ...)` that pushes the initial seed data to the JS hook when the graph mounts.
 - [ ] **Handle Node Expansion:** Create a `handle_event("expand_node", ...)` that fetches neighbors for a clicked node and pushes them to the JS hook.
 

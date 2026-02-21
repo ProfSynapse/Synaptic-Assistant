@@ -13,6 +13,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.Google.Drive, as: GoogleDrive
   alias Assistant.MemoryExplorer
+  alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
   alias Assistant.ModelDefaults
   alias Assistant.OrchestratorSystemPrompt
@@ -381,6 +382,58 @@ defmodule AssistantWeb.SettingsLive.Events do
     end
   end
 
+  def handle_event("update_global_filters", %{"global" => params}, socket) do
+    filters = normalize_graph_filters(params)
+
+    socket =
+      socket
+      |> assign(:graph_filters, filters)
+      |> assign(:graph_filters_form, to_form(filters, as: :global))
+      |> assign(:selected_transcript, nil)
+      |> assign(:selected_memory, nil)
+      |> Loaders.load_memory_dashboard()
+
+    {:noreply, push_event(socket, "render_graph", socket.assigns.graph_data)}
+  end
+
+  def handle_event("init_graph", _params, socket) do
+    {:noreply, push_event(socket, "render_graph", socket.assigns.graph_data)}
+  end
+
+  def handle_event("expand_node", %{"node_id" => node_id}, socket) do
+    graph_filters = socket.assigns.graph_filters || Data.blank_graph_filters()
+
+    expanded_data =
+      MemoryGraph.expand_node(socket.assigns[:current_scope], node_id, graph_filters)
+
+    existing_data = socket.assigns.graph_data || %{nodes: [], links: []}
+    existing_node_ids = socket.assigns.loaded_node_ids || MapSet.new()
+
+    append_nodes =
+      expanded_data.nodes
+      |> Enum.reject(fn node -> MapSet.member?(existing_node_ids, Map.get(node, :id)) end)
+
+    append_links = new_links(existing_data.links, expanded_data.links)
+
+    graph_data = merge_graph_data(existing_data, %{nodes: append_nodes, links: append_links})
+
+    loaded_node_ids =
+      append_nodes
+      |> Enum.map(&Map.get(&1, :id))
+      |> Enum.reduce(existing_node_ids, &MapSet.put(&2, &1))
+
+    socket =
+      socket
+      |> assign(:graph_data, graph_data)
+      |> assign(:loaded_node_ids, loaded_node_ids)
+
+    if append_nodes == [] and append_links == [] do
+      {:noreply, socket}
+    else
+      {:noreply, push_event(socket, "append_graph", %{nodes: append_nodes, links: append_links})}
+    end
+  end
+
   def handle_event("filter_transcripts", %{"transcripts" => params}, socket) do
     filters = normalize_transcript_filters(params)
 
@@ -454,4 +507,81 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   defp normalize_memory_filters(_), do: Data.blank_memory_filters()
+
+  defp normalize_graph_filters(params) when is_map(params) do
+    defaults = Data.blank_graph_filters()
+    timeframe_values = Data.graph_timeframe_values()
+    type_values = Data.graph_type_values()
+
+    timeframe =
+      params
+      |> Map.get("timeframe", defaults["timeframe"])
+      |> to_string()
+      |> String.trim()
+      |> case do
+        value ->
+          if Enum.member?(timeframe_values, value) do
+            value
+          else
+            defaults["timeframe"]
+          end
+      end
+
+    type =
+      params
+      |> Map.get("type", defaults["type"])
+      |> to_string()
+      |> String.trim()
+      |> case do
+        value ->
+          if Enum.member?(type_values, value) do
+            value
+          else
+            defaults["type"]
+          end
+      end
+
+    %{
+      "query" => params |> Map.get("query", "") |> to_string() |> String.trim(),
+      "timeframe" => timeframe,
+      "type" => type
+    }
+  end
+
+  defp normalize_graph_filters(_), do: Data.blank_graph_filters()
+
+  defp merge_graph_data(existing, incoming) do
+    nodes =
+      unique_by_id((Map.get(existing, :nodes, []) || []) ++ (Map.get(incoming, :nodes, []) || []))
+
+    links =
+      unique_by_id((Map.get(existing, :links, []) || []) ++ (Map.get(incoming, :links, []) || []))
+
+    %{nodes: nodes, links: links}
+  end
+
+  defp new_links(existing_links, expanded_links) do
+    existing_ids =
+      existing_links
+      |> Enum.map(&Map.get(&1, :id))
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    Enum.reject(expanded_links, fn link -> MapSet.member?(existing_ids, Map.get(link, :id)) end)
+  end
+
+  defp unique_by_id(items) do
+    {list, _ids} =
+      Enum.reduce(items, {[], MapSet.new()}, fn item, {acc, ids} ->
+        id = Map.get(item, :id)
+
+        if is_nil(id) or MapSet.member?(ids, id) do
+          {acc, ids}
+        else
+          {[item | acc], MapSet.put(ids, id)}
+        end
+      end)
+
+    Enum.reverse(list)
+  end
 end

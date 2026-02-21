@@ -113,6 +113,28 @@ defmodule AssistantWeb.SettingsLive.Data do
 
   @blank_memory_filter_options %{categories: [], source_types: [], tags: []}
 
+  @blank_graph_filters %{
+    "query" => "",
+    "timeframe" => "30d",
+    "type" => "all"
+  }
+
+  @graph_filter_options %{
+    timeframes: [
+      {"Last 24 hours", "24h"},
+      {"Last 7 days", "7d"},
+      {"Last 30 days", "30d"},
+      {"Last 90 days", "90d"},
+      {"All time", "all"}
+    ],
+    types: [
+      {"All data", "all"},
+      {"Entities", "entities"},
+      {"Memories", "memories"},
+      {"Transcripts", "transcripts"}
+    ]
+  }
+
   def sections, do: @sections
   def app_catalog, do: @app_catalog
   def help_articles, do: @help_articles
@@ -123,6 +145,17 @@ defmodule AssistantWeb.SettingsLive.Data do
   def blank_transcript_filter_options, do: @blank_transcript_filter_options
   def blank_memory_filters, do: @blank_memory_filters
   def blank_memory_filter_options, do: @blank_memory_filter_options
+  def blank_graph_filters, do: @blank_graph_filters
+  def graph_filter_options, do: @graph_filter_options
+  def graph_timeframe_values, do: Enum.map(@graph_filter_options.timeframes, &elem(&1, 1))
+  def graph_type_values, do: Enum.map(@graph_filter_options.types, &elem(&1, 1))
+
+  def timeframe_since("24h"), do: DateTime.add(DateTime.utc_now(), -24 * 60 * 60, :second)
+  def timeframe_since("7d"), do: DateTime.add(DateTime.utc_now(), -7 * 24 * 60 * 60, :second)
+  def timeframe_since("30d"), do: DateTime.add(DateTime.utc_now(), -30 * 24 * 60 * 60, :second)
+  def timeframe_since("90d"), do: DateTime.add(DateTime.utc_now(), -90 * 24 * 60 * 60, :second)
+  def timeframe_since("all"), do: nil
+  def timeframe_since(_), do: nil
 
   def normalize_section(section) when section in @sections, do: section
   def normalize_section("general"), do: "profile"
