@@ -39,4 +39,26 @@ defmodule Assistant.Skills.Result do
     side_effects: [],
     metadata: %{}
   ]
+
+  # Tool results exceeding this limit get truncated before entering message
+  # history. Prevents a single oversized API response (Drive search, email
+  # list, etc.) from blowing out the context window. 100 KB keeps well under
+  # typical model context limits while preserving useful data.
+  @max_content_chars 100_000
+
+  @doc """
+  Truncates `content` if it exceeds the safe limit for message history.
+
+  Returns the content unchanged when within bounds. When truncated, appends
+  a marker so the LLM knows data was cut.
+  """
+  @spec truncate_content(String.t() | nil) :: String.t() | nil
+  def truncate_content(nil), do: nil
+  def truncate_content(content) when byte_size(content) <= @max_content_chars, do: content
+
+  def truncate_content(content) do
+    String.slice(content, 0, @max_content_chars) <>
+      "\n\n[Truncated — result exceeded #{@max_content_chars} character limit. " <>
+      "Use more specific filters to narrow results.]"
+  end
 end

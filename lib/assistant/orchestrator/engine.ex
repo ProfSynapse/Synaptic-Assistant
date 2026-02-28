@@ -50,7 +50,7 @@ defmodule Assistant.Orchestrator.Engine do
   alias Assistant.Orchestrator.{AgentScheduler, Context, Limits, LoopRunner, Nudger, SubAgent}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults}
   alias Assistant.Resilience.CircuitBreaker
-  alias Assistant.Scheduler.Workers.MemorySaveWorker
+  alias Assistant.Scheduler.Workers.{MemorySaveWorker, TrajectoryExportWorker}
 
   require Logger
 
@@ -157,6 +157,9 @@ defmodule Assistant.Orchestrator.Engine do
 
   @impl true
   def handle_call({:send_message, message}, _from, state) do
+    # Interrupt any still-running sub-agents from the previous turn
+    interrupt_active_agents(state)
+
     # Reset per-turn state for each new user message
     state =
       state
@@ -182,6 +185,9 @@ defmodule Assistant.Orchestrator.Engine do
 
         # Broadcast turn completion for TurnClassifier
         broadcast_turn_completed(final_state, message, response_text)
+
+        # Async trajectory export for fine-tuning data
+        enqueue_trajectory_export(final_state, message, response_text)
 
         {:reply, {:ok, response_text}, final_state}
 
@@ -663,6 +669,93 @@ defmodule Assistant.Orchestrator.Engine do
        }}
     )
   end
+
+  # --- Interrupt Propagation ---
+
+  # Sends an interrupt signal to all non-terminal sub-agents from the
+  # previous turn. Called at the start of a new user message to stop
+  # stale work. Best-effort — agents that already finished are ignored.
+  defp interrupt_active_agents(state) do
+    Enum.each(state.dispatched_agents, fn {agent_id, result} ->
+      status = result[:status]
+
+      if status not in [:completed, :failed, :timeout, :skipped] do
+        case SubAgent.interrupt(agent_id) do
+          :ok ->
+            Logger.debug("Interrupted sub-agent",
+              agent_id: agent_id,
+              conversation_id: state.conversation_id
+            )
+
+          {:error, :not_found} ->
+            :ok
+        end
+      end
+    end)
+  end
+
+  # --- Trajectory Export ---
+
+  # Enqueues a background Oban job to export the current turn as JSONL.
+  # Fire-and-forget: failures are logged but never affect the user response.
+  defp enqueue_trajectory_export(state, user_message, assistant_response) do
+    model = ConfigLoader.model_for(:orchestrator)
+    model_id = if model, do: model.id, else: nil
+
+    # Serialize messages for the Oban job args (must be JSON-encodable).
+    # Keep only the essential fields to avoid bloating the jobs table.
+    messages =
+      Enum.map(state.messages, fn msg ->
+        msg
+        |> Map.take([:role, :content, :tool_calls, :tool_call_id])
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+        |> Map.new()
+      end)
+
+    job_args = %{
+      conversation_id: state.conversation_id,
+      user_id: state.user_id,
+      channel: to_string(state.channel),
+      mode: to_string(state.mode),
+      model: model_id,
+      user_message: user_message,
+      assistant_response: assistant_response,
+      messages: messages,
+      dispatched_agents: serialize_dispatched_agents(state.dispatched_agents),
+      usage: state.total_usage,
+      iteration_count: state.iteration_count
+    }
+
+    case TrajectoryExportWorker.new(job_args) |> Oban.insert() do
+      {:ok, _job} -> :ok
+      {:error, reason} ->
+        Logger.warning("Failed to enqueue trajectory export",
+          conversation_id: state.conversation_id,
+          reason: inspect(reason)
+        )
+    end
+  end
+
+  # Serializes dispatched_agents map for JSON encoding in Oban job args.
+  defp serialize_dispatched_agents(agents) when is_map(agents) do
+    Map.new(agents, fn {agent_id, result} ->
+      {agent_id,
+       %{
+         status: to_string(result[:status] || "unknown"),
+         result: truncate_for_export(result[:result]),
+         tool_calls_used: result[:tool_calls_used] || 0,
+         duration_ms: result[:duration_ms] || 0
+       }}
+    end)
+  end
+
+  defp serialize_dispatched_agents(_), do: %{}
+
+  # Cap agent results at 2KB in trajectory exports to keep job args reasonable.
+  defp truncate_for_export(nil), do: nil
+  defp truncate_for_export(text) when is_binary(text) and byte_size(text) <= 2_000, do: text
+  defp truncate_for_export(text) when is_binary(text), do: String.slice(text, 0, 2_000) <> "..."
+  defp truncate_for_export(other), do: inspect(other)
 
   defp via_tuple(conversation_id) do
     {:via, Registry, {Assistant.Orchestrator.EngineRegistry, conversation_id}}

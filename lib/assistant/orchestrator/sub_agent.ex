@@ -152,6 +152,29 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   @doc """
+  Sends an interrupt signal to a running sub-agent.
+
+  The agent will finish its current tool call (no mid-execution abort),
+  then return its partial results instead of continuing the loop.
+  Graceful by design — the agent acknowledges partial work in its result.
+
+  ## Parameters
+
+    * `agent_id` - The sub-agent's identifier
+
+  ## Returns
+
+    * `:ok` — interrupt signal sent (agent may already be done)
+    * `{:error, :not_found}` — agent not registered
+  """
+  @spec interrupt(String.t()) :: :ok | {:error, :not_found}
+  def interrupt(agent_id) do
+    GenServer.cast(via_tuple(agent_id), :interrupt)
+  catch
+    :exit, {:noproc, _} -> {:error, :not_found}
+  end
+
+  @doc """
   Synchronous execute for backward compatibility and simpler callers.
 
   Starts the GenServer, waits for completion (up to timeout), and returns
@@ -254,7 +277,9 @@ defmodule Assistant.Orchestrator.SubAgent do
       pending_help_tc: nil,
       # The Task running the LLM loop
       loop_task: nil,
-      loop_ref: nil
+      loop_ref: nil,
+      # Interrupt flag — when set, the loop finishes current tool call then exits
+      interrupted: false
     }
 
     # Start the LLM loop in the next tick so init returns fast
@@ -334,6 +359,21 @@ defmodule Assistant.Orchestrator.SubAgent do
 
       {:reply, :ok,
        %{state | status: :running, awaiting_reason: nil, awaiting_partial_history: nil}}
+    end
+  end
+
+  @impl true
+  def handle_cast(:interrupt, state) do
+    if state.status == :running and state.loop_task != nil do
+      Logger.info("Sub-agent received interrupt signal",
+        agent_id: state.agent_id,
+        conversation_id: state.engine_state[:conversation_id]
+      )
+
+      send(state.loop_task.pid, :interrupt)
+      {:noreply, %{state | interrupted: true}}
+    else
+      {:noreply, state}
     end
   end
 
@@ -431,6 +471,24 @@ defmodule Assistant.Orchestrator.SubAgent do
   # --- LLM Loop (runs in Task) ---
 
   defp run_loop(context, agent_state, dispatch_params, engine_state, genserver_pid) do
+    # Check for interrupt before starting a new LLM call
+    if interrupted?() do
+      last_text = extract_last_text(context.messages)
+
+      %{
+        status: :completed,
+        result:
+          last_text ||
+            "Interrupted (#{agent_state.skill_calls} calls completed).",
+        tool_calls_used: agent_state.skill_calls,
+        messages: context.messages
+      }
+    else
+      run_loop_inner(context, agent_state, dispatch_params, engine_state, genserver_pid)
+    end
+  end
+
+  defp run_loop_inner(context, agent_state, dispatch_params, engine_state, genserver_pid) do
     model_opts = build_model_opts(dispatch_params, context, engine_state)
     model = Keyword.get(model_opts, :model)
     user_id = engine_state[:user_id] || "unknown"
@@ -510,6 +568,33 @@ defmodule Assistant.Orchestrator.SubAgent do
   defp execute_tool_calls(
          tool_calls,
          _response,
+         context,
+         agent_state,
+         dispatch_params,
+         engine_state,
+         genserver_pid
+       ) do
+    # Check for interrupt before executing any tool calls
+    if interrupted?() do
+      last_text = extract_last_text(context.messages)
+
+      %{
+        status: :completed,
+        result:
+          last_text ||
+            "Interrupted before tool execution (#{agent_state.skill_calls} calls completed).",
+        tool_calls_used: agent_state.skill_calls,
+        messages: context.messages
+      }
+    else
+      execute_tool_calls_inner(
+        tool_calls, context, agent_state, dispatch_params, engine_state, genserver_pid
+      )
+    end
+  end
+
+  defp execute_tool_calls_inner(
+         tool_calls,
          context,
          agent_state,
          dispatch_params,
@@ -716,7 +801,7 @@ defmodule Assistant.Orchestrator.SubAgent do
                 case execute_handler(skill_def, skill_args, skill_context) do
                   {:ok, %Result{} = result} ->
                     Limits.record_skill_success(skill_name)
-                    {tc, result.content}
+                    {tc, Result.truncate_content(result.content)}
 
                   {:error, reason} ->
                     Limits.record_skill_failure(skill_name)
@@ -1333,6 +1418,16 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp elapsed_ms(started_at) do
     System.monotonic_time(:millisecond) - started_at
+  end
+
+  # Non-blocking check for an interrupt message from the GenServer.
+  # Called from within the Task's run_loop to check between iterations.
+  defp interrupted? do
+    receive do
+      :interrupt -> true
+    after
+      0 -> false
+    end
   end
 
   defp build_skill_context(dispatch_params, engine_state) do
