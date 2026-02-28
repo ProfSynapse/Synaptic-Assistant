@@ -1,4 +1,4 @@
-# lib/assistant/orchestrator/sub_agent.ex — GenServer-based sub-agent execution engine.
+# lib/assistant/orchestrator/sub_agent.ex — GenServer lifecycle for sub-agents.
 #
 # Each sub-agent runs as a GenServer registered in Assistant.SubAgent.Registry.
 # The LLM loop runs in a Task.async linked to the GenServer, sending messages
@@ -8,19 +8,20 @@
 #
 # States: :running | :awaiting_orchestrator | :completed | :failed
 #
+# Extracted modules (SOLID decomposition):
+#   - SubAgent.Loop — LLM loop, response handling, interrupt checks
+#   - SubAgent.SkillExecutor — scope check, sentinel, auth, handler dispatch
+#   - SubAgent.ContextBuilder — system prompt, context files, budget
+#   - SubAgent.ToolDefs — use_skill + request_help tool schemas
+#
 # Related files:
 #   - lib/assistant/orchestrator/engine.ex (spawns sub-agents via scheduler)
 #   - lib/assistant/orchestrator/agent_scheduler.ex (DAG execution)
-#   - lib/assistant/orchestrator/sentinel.ex (security gate for each tool call)
 #   - lib/assistant/orchestrator/limits.ex (budget enforcement)
-#   - lib/assistant/skills/executor.ex (runs skill handlers)
-#   - lib/assistant/skills/registry.ex (skill definition lookup)
-#   - lib/assistant/behaviours/llm_client.ex (LLM call contract)
-#   - lib/assistant/config/prompt_loader.ex (sub-agent system prompt template)
 
 defmodule Assistant.Orchestrator.SubAgent do
   @moduledoc """
-  GenServer execution engine for sub-agents dispatched by the orchestrator.
+  GenServer lifecycle for sub-agents dispatched by the orchestrator.
 
   Each sub-agent runs its own short LLM loop with a scoped tool surface.
   The sub-agent only sees `use_skill` and `request_help` tools, where
@@ -30,10 +31,10 @@ defmodule Assistant.Orchestrator.SubAgent do
   ## Lifecycle
 
   1. `start_link/1` — starts the GenServer, registers in SubAgent.Registry
-  2. The GenServer spawns a Task that runs the LLM loop
+  2. The GenServer spawns a Task that runs the LLM loop (via `SubAgent.Loop`)
   3. If LLM returns text -> done (`:completed`)
   4. If LLM returns `use_skill` calls -> validate scope -> sentinel check ->
-     execute via Executor -> feed results back to LLM -> loop
+     execute via SkillExecutor -> feed results back to LLM -> loop
   5. If LLM returns `request_help` call -> transition to `:awaiting_orchestrator`
   6. `resume/2` — orchestrator sends update, task resumes LLM loop
   7. If tool budget exhausted -> `:completed` with partial result
@@ -45,40 +46,20 @@ defmodule Assistant.Orchestrator.SubAgent do
     * `:awaiting_orchestrator` — paused, waiting for orchestrator update
     * `:completed` — terminal, mission finished or budget exhausted
     * `:failed` — terminal, unrecoverable error
-
-  ## Scope Enforcement
-
-  The `use_skill` tool definition includes an `enum` restricting the skill
-  name to only the skills the orchestrator granted. This is enforced at both
-  the tool definition level (LLM sees the enum) and at runtime (the executor
-  validates against the allowed list).
-
-  ## Configuration
-
-  The LLM client is injected via `Application.compile_env/3` for testability
-  with Mox.
   """
 
   use GenServer
 
-  alias Assistant.Analytics
-  alias Assistant.Auth.MagicLink
-  alias Assistant.Config.{Loader, PromptLoader}
-  alias Assistant.Integrations.Google.Auth, as: GoogleAuth
-  alias Assistant.Integrations.LLMRouter
-  alias Assistant.Orchestrator.{GoogleContext, LLMHelpers, Limits, Sentinel}
-  alias Assistant.SkillPermissions
-  alias Assistant.Skills.{Context, Executor, Registry, Result}
+  alias Assistant.Orchestrator.Limits
+  alias Assistant.Orchestrator.SubAgent.{ContextBuilder, Loop}
 
   require Logger
 
-  # Google skill domains that require a per-user OAuth2 token.
-  @google_skill_domains ~w(email calendar files)
-
   @default_max_tool_calls 5
-  @default_timeout_ms 30_000
 
-  # --- Client API ---
+  # ---------------------------------------------------------------
+  # Client API
+  # ---------------------------------------------------------------
 
   @doc """
   Start a sub-agent GenServer process.
@@ -106,10 +87,6 @@ defmodule Assistant.Orchestrator.SubAgent do
   @doc """
   Get the current status and result of a sub-agent.
 
-  ## Parameters
-
-    * `agent_id` - The sub-agent's identifier
-
   ## Returns
 
     * `{:ok, status_map}` with keys: `:status`, `:result`, `:tool_calls_used`,
@@ -133,16 +110,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   ## Parameters
 
     * `agent_id` - The sub-agent's identifier
-    * `update` - Map with orchestrator response, e.g.:
-      * `:message` - Text response/instructions from orchestrator
-      * `:skills` - Optional list of new skill names to add
-      * `:context_files` - Optional list of new context file paths
-
-  ## Returns
-
-    * `:ok` if agent was paused and is now resuming
-    * `{:error, :not_awaiting}` if agent is not in awaiting state
-    * `{:error, :not_found}` if agent is not registered
+    * `update` - Map with orchestrator response (`:message`, `:skills`, `:context_files`)
   """
   @spec resume(String.t(), map()) :: :ok | {:error, :not_awaiting | :not_found}
   def resume(agent_id, update) do
@@ -156,16 +124,6 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   The agent will finish its current tool call (no mid-execution abort),
   then return its partial results instead of continuing the loop.
-  Graceful by design — the agent acknowledges partial work in its result.
-
-  ## Parameters
-
-    * `agent_id` - The sub-agent's identifier
-
-  ## Returns
-
-    * `:ok` — interrupt signal sent (agent may already be done)
-    * `{:error, :not_found}` — agent not registered
   """
   @spec interrupt(String.t()) :: :ok | {:error, :not_found}
   def interrupt(agent_id) do
@@ -175,27 +133,14 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   @doc """
-  Synchronous execute for backward compatibility and simpler callers.
+  Synchronous execute — starts, waits for completion, returns result.
 
-  Starts the GenServer, waits for completion (up to timeout), and returns
-  the final result map. This is the interface the AgentScheduler uses.
-
-  ## Parameters
-
-    * `dispatch_params` - Map with mission, skills, context, etc. from dispatch_agent
-    * `dep_results` - Map of agent_id => result from dependency agents
-    * `engine_state` - Map with conversation_id, user_id, etc. from the Engine
+  This is the interface the AgentScheduler uses.
 
   ## Returns
 
-  A map with:
-    * `:status` - `:completed`, `:failed`, `:timeout`, or `:awaiting_orchestrator`
-    * `:result` - Human-readable summary of what was accomplished
-    * `:tool_calls_used` - Number of skill calls executed
-    * `:duration_ms` - Wall-clock execution time
-
-  Or `{:error, {:context_budget_exceeded, details}}` if context files
-  exceed the model's token budget.
+  A map with `:status`, `:result`, `:tool_calls_used`, `:duration_ms`,
+  or `{:error, {:context_budget_exceeded, details}}`.
   """
   @spec execute(map(), map(), map()) ::
           map() | {:error, {:context_budget_exceeded, map()}}
@@ -209,15 +154,12 @@ defmodule Assistant.Orchestrator.SubAgent do
     ]
 
     # Use GenServer.start (NOT start_link) to avoid linking the GenServer
-    # to the calling Task. With start_link, when the GenServer exits via
-    # {:stop, {:shutdown, result_map}, state}, the EXIT signal propagates
-    # to the linked Task and kills it before wait_for_completion can read
-    # the :DOWN message from the monitor. The monitor alone is sufficient
-    # for detecting GenServer termination.
+    # to the calling Task. The monitor alone is sufficient for detecting
+    # GenServer termination.
     case GenServer.start(__MODULE__, opts, name: via_tuple(agent_id)) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
-        wait_for_completion(agent_id, ref)
+        wait_for_completion(ref)
 
       {:error, reason} ->
         %{
@@ -230,7 +172,9 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  # --- GenServer Callbacks ---
+  # ---------------------------------------------------------------
+  # GenServer Callbacks
+  # ---------------------------------------------------------------
 
   @impl true
   def init(opts) do
@@ -241,8 +185,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     agent_id = dispatch_params.agent_id
     started_at = System.monotonic_time(:millisecond)
 
-    # Each sub-agent gets its own conversation_id. The orchestrator's
-    # conversation_id becomes the parent (root) for memory unification.
+    # Each sub-agent gets its own conversation_id.
     sub_conversation_id = Ecto.UUID.generate()
     parent_conversation_id = engine_state[:conversation_id]
 
@@ -269,34 +212,27 @@ defmodule Assistant.Orchestrator.SubAgent do
       result: nil,
       tool_calls_used: 0,
       duration_ms: nil,
-      # Full LLM conversation transcript (populated on completion)
       messages: nil,
-      # Pause/resume state
       awaiting_reason: nil,
       awaiting_partial_history: nil,
       pending_help_tc: nil,
-      # The Task running the LLM loop
       loop_task: nil,
       loop_ref: nil,
-      # Interrupt flag — when set, the loop finishes current tool call then exits
       interrupted: false
     }
 
-    # Start the LLM loop in the next tick so init returns fast
     {:ok, state, {:continue, :start_loop}}
   end
 
   @impl true
   def handle_continue(:start_loop, state) do
-    case build_context(state.dispatch_params, state.dep_results, state.engine_state) do
+    case ContextBuilder.build(state.dispatch_params, state.dep_results, state.engine_state) do
       {:error, {:context_budget_exceeded, _details}} = error ->
         Logger.warning("Sub-agent aborted — context files exceed token budget",
           agent_id: state.agent_id,
           conversation_id: state.engine_state[:conversation_id]
         )
 
-        # Store the error and terminate. The caller (execute/3) will detect
-        # the DOWN message and extract the error from process state.
         final_state = %{state | status: :failed, result: error}
         {:stop, {:shutdown, error}, final_state}
 
@@ -304,12 +240,11 @@ defmodule Assistant.Orchestrator.SubAgent do
         max_calls = state.dispatch_params[:max_tool_calls] || @default_max_tool_calls
         agent_limit_state = Limits.new_agent_state(max_skill_calls: max_calls)
 
-        # Spawn the LLM loop as a linked Task
         parent = self()
 
         task =
           Task.async(fn ->
-            run_loop(
+            Loop.run(
               context,
               agent_limit_state,
               state.dispatch_params,
@@ -354,7 +289,6 @@ defmodule Assistant.Orchestrator.SubAgent do
         has_message: update[:message] != nil
       )
 
-      # Send the resume signal to the loop task (it's waiting on receive)
       send(state.loop_task.pid, {:resume, update})
 
       {:reply, :ok,
@@ -403,7 +337,6 @@ defmodule Assistant.Orchestrator.SubAgent do
   def handle_info({ref, result}, %{loop_ref: ref} = state) do
     # Task completed normally
     Process.demonitor(ref, [:flush])
-
     duration_ms = elapsed_ms(state.started_at)
 
     final_result =
@@ -438,9 +371,6 @@ defmodule Assistant.Orchestrator.SubAgent do
         messages: final_result[:messages]
     }
 
-    # Use {:shutdown, result_map} so wait_for_completion can extract the
-    # final result from the :DOWN message — the GenServer is dead before
-    # get_status can be called.
     {:stop, {:shutdown, build_final_result_map(final_state)}, final_state}
   end
 
@@ -468,911 +398,20 @@ defmodule Assistant.Orchestrator.SubAgent do
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # --- LLM Loop (runs in Task) ---
-
-  defp run_loop(context, agent_state, dispatch_params, engine_state, genserver_pid) do
-    # Check for interrupt before starting a new LLM call
-    if interrupted?() do
-      last_text = extract_last_text(context.messages)
-
-      %{
-        status: :completed,
-        result:
-          last_text ||
-            "Interrupted (#{agent_state.skill_calls} calls completed).",
-        tool_calls_used: agent_state.skill_calls,
-        messages: context.messages
-      }
-    else
-      run_loop_inner(context, agent_state, dispatch_params, engine_state, genserver_pid)
-    end
-  end
-
-  defp run_loop_inner(context, agent_state, dispatch_params, engine_state, genserver_pid) do
-    model_opts = build_model_opts(dispatch_params, context, engine_state)
-    model = Keyword.get(model_opts, :model)
-    user_id = engine_state[:user_id] || "unknown"
-
-    case LLMRouter.chat_completion(context.messages, model_opts, user_id) do
-      {:ok, response} ->
-        record_llm_analytics(engine_state, response, model, :ok)
-
-        handle_response(
-          response,
-          context,
-          agent_state,
-          dispatch_params,
-          engine_state,
-          genserver_pid
-        )
-
-      {:error, reason} ->
-        record_llm_analytics(engine_state, nil, model, :error, reason)
-
-        Logger.error("Sub-agent LLM call failed",
-          agent_id: dispatch_params.agent_id,
-          reason: inspect(reason),
-          conversation_id: engine_state[:conversation_id]
-        )
-
-        %{
-          status: :failed,
-          result: "LLM call failed: #{inspect(reason)}",
-          tool_calls_used: agent_state.skill_calls,
-          messages: context.messages
-        }
-    end
-  end
-
-  defp handle_response(
-         response,
-         context,
-         agent_state,
-         dispatch_params,
-         engine_state,
-         genserver_pid
-       ) do
-    cond do
-      # Text response — mission complete
-      has_text_no_tools?(response) ->
-        %{
-          status: :completed,
-          result: response.content,
-          tool_calls_used: agent_state.skill_calls,
-          messages: context.messages
-        }
-
-      # Tool calls — execute and loop
-      has_tool_calls?(response) ->
-        execute_tool_calls(
-          response.tool_calls,
-          response,
-          context,
-          agent_state,
-          dispatch_params,
-          engine_state,
-          genserver_pid
-        )
-
-      # Fallback: empty response
-      true ->
-        %{
-          status: :completed,
-          result: response[:content] || "Agent completed with no output.",
-          tool_calls_used: agent_state.skill_calls,
-          messages: context.messages
-        }
-    end
-  end
-
-  defp execute_tool_calls(
-         tool_calls,
-         _response,
-         context,
-         agent_state,
-         dispatch_params,
-         engine_state,
-         genserver_pid
-       ) do
-    # Check for interrupt before executing any tool calls
-    if interrupted?() do
-      last_text = extract_last_text(context.messages)
-
-      %{
-        status: :completed,
-        result:
-          last_text ||
-            "Interrupted before tool execution (#{agent_state.skill_calls} calls completed).",
-        tool_calls_used: agent_state.skill_calls,
-        messages: context.messages
-      }
-    else
-      execute_tool_calls_inner(
-        tool_calls, context, agent_state, dispatch_params, engine_state, genserver_pid
-      )
-    end
-  end
-
-  defp execute_tool_calls_inner(
-         tool_calls,
-         context,
-         agent_state,
-         dispatch_params,
-         engine_state,
-         genserver_pid
-       ) do
-    call_count = length(tool_calls)
-
-    case Limits.check_agent(agent_state, call_count) do
-      {:ok, new_agent_state} ->
-        # Check for request_help tool call first
-        {help_calls, skill_calls} =
-          Enum.split_with(tool_calls, fn tc ->
-            extract_function_name(tc) == "request_help"
-          end)
-
-        # Execute skill calls
-        {results, final_agent_state} =
-          Enum.map_reduce(skill_calls, new_agent_state, fn tc, acc_state ->
-            result = execute_single_tool(tc, dispatch_params, engine_state)
-            {result, acc_state}
-          end)
-
-        # Report tool call count back to GenServer
-        send(genserver_pid, {:tool_calls_update, final_agent_state.skill_calls})
-
-        # Build messages: assistant tool_calls + tool results
-        assistant_msg = %{role: "assistant", tool_calls: tool_calls}
-
-        tool_msgs =
-          Enum.map(results, fn {tc, result_content} ->
-            %{role: "tool", tool_call_id: tc.id, content: result_content}
-          end)
-
-        new_messages = context.messages ++ [assistant_msg | tool_msgs]
-
-        # If there was a request_help call, pause and wait for orchestrator
-        case help_calls do
-          [help_tc | _] ->
-            help_args = extract_function_args(help_tc)
-            reason = help_args["reason"] || "Sub-agent requests assistance"
-            partial_results = help_args["partial_results"]
-
-            # Notify GenServer we're pausing
-            send(genserver_pid, {:loop_paused, reason, partial_results, help_tc})
-
-            # Block until orchestrator sends resume (5 min timeout)
-            receive do
-              {:resume, update} ->
-                # Inject orchestrator response as tool result for request_help
-                resume_content = build_resume_content(update, dispatch_params)
-
-                help_result_msg = %{
-                  role: "tool",
-                  tool_call_id: help_tc.id,
-                  content: resume_content
-                }
-
-                # If new skills were added, inject their definitions as a user message
-                skill_injection_msgs = build_skill_injection_messages(update)
-
-                resumed_messages = new_messages ++ [help_result_msg | skill_injection_msgs]
-
-                # Update dispatch_params with any new skills
-                updated_dispatch = maybe_add_skills(dispatch_params, update[:skills])
-
-                updated_context =
-                  update_context_with_new_tools(context, resumed_messages, updated_dispatch)
-
-                run_loop(
-                  updated_context,
-                  final_agent_state,
-                  updated_dispatch,
-                  engine_state,
-                  genserver_pid
-                )
-
-              {:shutdown, reason} ->
-                %{
-                  status: :failed,
-                  result: "Sub-agent shut down while awaiting orchestrator: #{inspect(reason)}",
-                  tool_calls_used: final_agent_state.skill_calls,
-                  messages: new_messages
-                }
-            after
-              300_000 ->
-                Logger.warning("Sub-agent resume timeout after 5 minutes",
-                  agent_id: dispatch_params.agent_id
-                )
-
-                %{
-                  status: :failed,
-                  result: "Timed out waiting for orchestrator response (5 minutes).",
-                  tool_calls_used: final_agent_state.skill_calls,
-                  messages: new_messages
-                }
-            end
-
-          [] ->
-            # No request_help — continue the loop normally
-            new_context = %{context | messages: new_messages}
-            run_loop(new_context, final_agent_state, dispatch_params, engine_state, genserver_pid)
-        end
-
-      {:error, :limit_exceeded, _details} ->
-        Logger.info("Sub-agent tool budget exhausted",
-          agent_id: dispatch_params.agent_id,
-          used: agent_state.skill_calls,
-          max: agent_state.max_skill_calls
-        )
-
-        last_text = extract_last_text(context.messages)
-
-        %{
-          status: :completed,
-          result:
-            last_text ||
-              "Tool call limit reached (#{agent_state.skill_calls}/#{agent_state.max_skill_calls}). " <>
-                "Partial work completed.",
-          tool_calls_used: agent_state.skill_calls,
-          messages: context.messages
-        }
-    end
-  end
-
-  defp execute_single_tool(tc, dispatch_params, engine_state) do
-    name = extract_function_name(tc)
-    args = extract_function_args(tc)
-
-    case name do
-      "use_skill" ->
-        execute_use_skill(tc, args, dispatch_params, engine_state)
-
-      "request_help" ->
-        # Handled upstream in execute_tool_calls; this is a fallback
-        {tc, "Request acknowledged. Waiting for orchestrator response."}
-
-      other ->
-        {tc, "Error: Unknown tool \"#{other}\". Only use_skill and request_help are available."}
-    end
-  end
-
-  defp execute_use_skill(tc, args, dispatch_params, engine_state) do
-    skill_name = args["skill"]
-    skill_args = args["arguments"] || %{}
-
-    cond do
-      is_nil(skill_name) ->
-        {tc, "Error: Missing required \"skill\" parameter in use_skill call."}
-
-      not SkillPermissions.enabled?(skill_name) ->
-        {tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}
-
-      skill_name not in dispatch_params.skills ->
-        Logger.warning("Sub-agent attempted out-of-scope skill",
-          agent_id: dispatch_params.agent_id,
-          skill: skill_name,
-          allowed: dispatch_params.skills
-        )
-
-        {tc,
-         "Error: Skill \"#{skill_name}\" is not available to this agent. " <>
-           "Available skills: #{Enum.join(dispatch_params.skills, ", ")}"}
-
-      true ->
-        # Sentinel security gate
-        proposed_action = %{
-          skill_name: skill_name,
-          arguments: skill_args,
-          agent_id: dispatch_params.agent_id
-        }
-
-        original_request = engine_state[:original_request]
-
-        case Sentinel.check(original_request, dispatch_params.mission, proposed_action) do
-          {:ok, :approved} ->
-            execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state)
-
-          {:ok, {:rejected, reason}} ->
-            Logger.warning("Sentinel rejected sub-agent action",
-              agent_id: dispatch_params.agent_id,
-              skill: skill_name,
-              reason: reason
-            )
-
-            {tc, "Action rejected by security gate: #{reason}"}
-        end
-    end
-  end
-
-  defp execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state) do
-    # Level 1: Check skill circuit breaker
-    case Limits.check_skill(skill_name) do
-      {:ok, :closed} ->
-        # Look up the skill and execute
-        case Registry.lookup(skill_name) do
-          {:ok, skill_def} ->
-            skill_context = build_skill_context(dispatch_params, engine_state)
-
-            # Lazy auth: if this is a Google skill and the user has no token,
-            # generate a magic link instead of executing.
-            case maybe_require_google_auth(skill_name, skill_context, engine_state) do
-              :ok ->
-                case execute_handler(skill_def, skill_args, skill_context) do
-                  {:ok, %Result{} = result} ->
-                    Limits.record_skill_success(skill_name)
-                    {tc, Result.truncate_content(result.content)}
-
-                  {:error, reason} ->
-                    Limits.record_skill_failure(skill_name)
-                    {tc, "Skill execution failed: #{inspect(reason)}"}
-                end
-
-              {:needs_auth, magic_link_url} ->
-                channel = engine_state[:channel]
-                {tc, format_needs_auth_message(magic_link_url, channel)}
-
-              {:needs_auth_rate_limited} ->
-                {tc,
-                 "Authorization already in progress. Please check your messages for the link."}
-            end
-
-          {:error, :not_found} ->
-            {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
-        end
-
-      {:error, :circuit_open} ->
-        {tc,
-         "Skill \"#{skill_name}\" is temporarily unavailable (circuit breaker open). " <>
-           "Try a different approach or report this in your result."}
-    end
-  end
-
-  # Check if a skill requires Google OAuth and whether the user has a token.
-  # Returns :ok if no auth needed or token is present, {:needs_auth, url}
-  # if the user needs to connect their Google account.
-  defp maybe_require_google_auth(skill_name, skill_context, engine_state) do
-    [domain | _] = String.split(skill_name, ".", parts: 2)
-
-    if domain in @google_skill_domains and is_nil(skill_context.google_token) and
-         GoogleAuth.oauth_configured?() do
-      # Build pending intent for auto-retry after OAuth
-      pending_intent = %{
-        message: engine_state[:original_request] || "",
-        conversation_id:
-          engine_state[:parent_conversation_id] || engine_state[:conversation_id] || "",
-        channel: to_string(engine_state[:channel] || "unknown"),
-        reply_context: %{}
-      }
-
-      channel = to_string(engine_state[:channel] || "unknown")
-
-      case MagicLink.generate(skill_context.user_id, channel, pending_intent) do
-        {:ok, %{url: url}} ->
-          {:needs_auth, url}
-
-        {:error, :rate_limited} ->
-          {:needs_auth_rate_limited}
-
-        {:error, reason} ->
-          Logger.error("Failed to generate magic link",
-            user_id: skill_context.user_id,
-            reason: inspect(reason)
-          )
-
-          # Fall through to normal execution — the skill will fail with a
-          # "not configured" error, which is acceptable as a degraded path.
-          :ok
-      end
-    else
-      :ok
-    end
-  end
-
-  # Format the "needs Google auth" message per channel. Each channel gets
-  # a format the user can click/tap easily.
-  defp format_needs_auth_message(magic_link_url, :google_chat) do
-    # Google Chat supports the <URL|label> link format in plain text messages.
-    """
-    NEEDS_GOOGLE_AUTH: I need access to your Google account to complete this request.
-
-    <#{magic_link_url}|Connect Google Account> (expires in 10 minutes)
-
-    After connecting, your original request will be automatically resumed.\
-    """
-  end
-
-  defp format_needs_auth_message(magic_link_url, :telegram) do
-    # Telegram markdown supports [label](url) links.
-    """
-    NEEDS_GOOGLE_AUTH: I need access to your Google account to complete this request.
-
-    [Connect Google Account](#{magic_link_url}) (expires in 10 minutes)
-
-    After connecting, your original request will be automatically resumed.\
-    """
-  end
-
-  defp format_needs_auth_message(magic_link_url, _channel) do
-    # Default plain text format for WhatsApp, SMS, or unknown channels.
-    """
-    NEEDS_GOOGLE_AUTH: I need access to your Google account to complete this request. \
-    Please click the link below to connect your account (expires in 10 minutes):
-
-    #{magic_link_url}
-
-    After connecting, your original request will be automatically resumed.\
-    """
-  end
-
-  defp execute_handler(skill_def, flags, context) do
-    case skill_def.handler do
-      nil ->
-        # Template/custom skill with no handler — return the body as guidance
-        {:ok,
-         %Result{
-           status: :ok,
-           content:
-             "This is a template skill. Instructions:\n\n#{String.slice(skill_def.body, 0, 500)}"
-         }}
-
-      handler_module ->
-        Executor.execute(handler_module, flags, context, timeout: @default_timeout_ms)
-    end
-  end
-
-  # --- Context Building ---
-
-  defp build_context(dispatch_params, dep_results, _engine_state) do
-    case build_system_prompt(dispatch_params, dep_results) do
-      {:error, _} = error ->
-        error
-
-      {:ok, system_prompt} ->
-        tools = build_scoped_tools(dispatch_params.skills)
-        mission_msg = %{role: "user", content: dispatch_params.mission}
-
-        {:ok,
-         %{
-           system_prompt: system_prompt,
-           messages: [%{role: "system", content: system_prompt}, mission_msg],
-           tools: tools,
-           allowed_skills: dispatch_params.skills
-         }}
-    end
-  end
-
-  defp build_system_prompt(dispatch_params, dep_results) do
-    skills_text = Enum.join(dispatch_params.skills, ", ")
-    dep_section = build_dependency_section(dep_results)
-    context_section = build_context_section(dispatch_params.context)
-    skill_definitions_section = build_skill_definitions_section(dispatch_params.skills)
-
-    assigns = %{
-      skills_text: skills_text,
-      dep_section: dep_section,
-      context_section: context_section
-    }
-
-    base_prompt =
-      case PromptLoader.render(:sub_agent, assigns) do
-        {:ok, rendered} ->
-          rendered
-
-        {:error, _reason} ->
-          # Fallback: hardcoded prompt if YAML not loaded
-          Logger.warning("PromptLoader fallback for :sub_agent — using hardcoded prompt")
-
-          """
-          You are a focused execution agent. Complete your mission using only the provided skills.
-
-          Available skills: #{skills_text}
-
-          Rules:
-          - Call use_skill to execute skills. Only skills listed above are available.
-          - Call request_help if you are blocked and need additional context or skills from the orchestrator.
-          - Be concise in your final response — the orchestrator synthesizes for the user.
-          - If a skill fails, report the error clearly. Do not retry indefinitely.
-          - If you cannot complete the mission, explain what blocked you.\
-          #{dep_section}#{context_section}\
-          """
-      end
-
-    # Inject skill definitions for cache positioning (static section)
-    prompt_with_skills =
-      if skill_definitions_section != "" do
-        base_prompt <> "\n\n" <> skill_definitions_section
-      else
-        base_prompt
-      end
-
-    # Inject context documents at the TOP of the prompt for cache positioning
-    context_files = dispatch_params[:context_files] || []
-
-    case load_context_files(context_files, dispatch_params) do
-      {:ok, ""} ->
-        {:ok, prompt_with_skills}
-
-      {:ok, docs_section} ->
-        {:ok, docs_section <> "\n\n" <> prompt_with_skills}
-
-      {:error, _} = error ->
-        error
-    end
-  end
-
-  defp build_skill_definitions_section(skill_names) do
-    definitions =
-      skill_names
-      |> Enum.sort()
-      |> Enum.map(fn name ->
-        case Registry.lookup(name) do
-          {:ok, skill_def} ->
-            body_preview = String.slice(skill_def.body, 0, 2000)
-
-            """
-            ### #{skill_def.name}
-            #{skill_def.description}
-
-            #{body_preview}\
-            """
-
-          {:error, :not_found} ->
-            nil
-        end
-      end)
-      |> Enum.reject(&is_nil/1)
-
-    case definitions do
-      [] -> ""
-      defs -> "## Available Skills\n\n" <> Enum.join(defs, "\n\n---\n\n")
-    end
-  end
-
-  defp build_dependency_section(dep_results) when dep_results == %{}, do: ""
-
-  defp build_dependency_section(dep_results) do
-    results_text =
-      Enum.map_join(dep_results, "\n\n", fn {dep_id, result} ->
-        result_text = result[:result] || inspect(result)
-        "Results from #{dep_id}:\n#{result_text}"
-      end)
-
-    "\n\nPrior agent results:\n#{results_text}"
-  end
-
-  defp build_context_section(nil), do: ""
-  defp build_context_section(""), do: ""
-  defp build_context_section(ctx), do: "\n\nAdditional context: #{ctx}"
-
-  # --- Context File Loading ---
-
-  # Reads context files and checks the total against the model's token budget.
-  defp load_context_files([], _dispatch_params), do: {:ok, ""}
-
-  defp load_context_files(file_paths, dispatch_params) do
-    budget_tokens = compute_context_file_budget(dispatch_params)
-
-    # Phase 1: Read all readable files, skip missing ones with a warning
-    loaded_files =
-      file_paths
-      |> Enum.reduce([], fn path, acc ->
-        case resolve_path(path) do
-          {:ok, resolved} ->
-            case File.read(resolved) do
-              {:ok, contents} ->
-                estimated_tokens = div(byte_size(contents), 4)
-                [%{path: path, contents: contents, estimated_tokens: estimated_tokens} | acc]
-
-              {:error, reason} ->
-                Logger.warning("Context file not found or unreadable — skipping",
-                  path: path,
-                  resolved: resolved,
-                  reason: inspect(reason),
-                  agent_id: dispatch_params[:agent_id]
-                )
-
-                acc
-            end
-
-          {:error, :path_traversal_denied} ->
-            Logger.warning("Context file path rejected — outside allowed base directory",
-              path: path,
-              agent_id: dispatch_params[:agent_id]
-            )
-
-            acc
-        end
-      end)
-      |> Enum.reverse()
-
-    # Phase 2: Check total against budget
-    total_tokens = Enum.reduce(loaded_files, 0, fn f, sum -> sum + f.estimated_tokens end)
-
-    if total_tokens > budget_tokens do
-      file_breakdown =
-        loaded_files
-        |> Enum.map(fn f -> %{path: f.path, estimated_tokens: f.estimated_tokens} end)
-        |> Enum.sort_by(& &1.estimated_tokens, :desc)
-
-      {:error,
-       {:context_budget_exceeded,
-        %{
-          estimated_tokens: total_tokens,
-          budget_tokens: budget_tokens,
-          overage_tokens: total_tokens - budget_tokens,
-          files: file_breakdown
-        }}}
-    else
-      case loaded_files do
-        [] ->
-          {:ok, ""}
-
-        entries ->
-          docs =
-            Enum.map_join(entries, "\n---\n", fn %{path: path, contents: contents} ->
-              "### #{path}\n#{contents}"
-            end)
-
-          {:ok, "## Context Documents\n#{docs}"}
-      end
-    end
-  end
-
-  defp compute_context_file_budget(dispatch_params) do
-    model_info =
-      case dispatch_params[:model_override] do
-        nil ->
-          Loader.model_for(:sub_agent)
-
-        model_id ->
-          Loader.model_for(:sub_agent, id: model_id)
-      end
-
-    max_context = (model_info && model_info.max_context_tokens) || 200_000
-    limits = Loader.limits_config()
-
-    target = limits.context_utilization_target
-    reserve = limits.response_reserve_tokens
-
-    available = trunc(max_context * target) - reserve
-    div(max(available, 0), 2)
-  end
-
-  defp resolve_path(path) do
-    base = File.cwd!()
-
-    resolved =
-      if Path.type(path) == :absolute do
-        Path.expand(path)
-      else
-        Path.expand(path, base)
-      end
-
-    if String.starts_with?(resolved, base <> "/") or resolved == base do
-      {:ok, resolved}
-    else
-      {:error, :path_traversal_denied}
-    end
-  end
-
-  # --- Tool Definitions ---
-
-  defp build_scoped_tools(skill_names) do
-    allowed_skill_names =
-      skill_names
-      |> Enum.filter(&SkillPermissions.enabled?/1)
-      |> Enum.uniq()
-
-    # Look up each skill definition to build the scoped use_skill tool
-    skill_defs =
-      allowed_skill_names
-      |> Enum.sort()
-      |> Enum.map(fn name ->
-        case Registry.lookup(name) do
-          {:ok, skill_def} ->
-            %{name: skill_def.name, description: skill_def.description}
-
-          {:error, :not_found} ->
-            %{name: name, description: "(skill not found in registry)"}
-        end
-      end)
-
-    skills_desc =
-      Enum.map_join(skill_defs, "\n", fn sd ->
-        "  - #{sd.name}: #{sd.description}"
-      end)
-
-    use_skill_tool = %{
-      type: "function",
-      function: %{
-        name: "use_skill",
-        description: """
-        Execute a skill. Available skills for this agent:\n#{skills_desc}\n\n\
-        Call with the skill name and arguments as a JSON object.\
-        """,
-        parameters: %{
-          "type" => "object",
-          "properties" => %{
-            "skill" => %{
-              "type" => "string",
-              "enum" => Enum.map(skill_defs, & &1.name),
-              "description" => "The skill to execute"
-            },
-            "arguments" => %{
-              "type" => "object",
-              "description" => "Arguments for the skill as key-value pairs"
-            }
-          },
-          "required" => ["skill", "arguments"]
-        }
-      }
-    }
-
-    request_help_tool = %{
-      type: "function",
-      function: %{
-        name: "request_help",
-        description: """
-        Pause this task and request additional context, skills, or instructions \
-        from the orchestrator. Use this when you are blocked and cannot complete \
-        your mission with the current information or tools.
-
-        The orchestrator may respond with new skills, updated instructions, \
-        or additional context. Your conversation will resume after the response.\
-        """,
-        parameters: %{
-          "type" => "object",
-          "properties" => %{
-            "reason" => %{
-              "type" => "string",
-              "description" =>
-                "Describe what you need from the orchestrator — what information, " <>
-                  "skills, or context would help you complete your mission."
-            },
-            "partial_results" => %{
-              "type" => "string",
-              "description" =>
-                "Optional: describe what you've accomplished so far before getting stuck."
-            }
-          },
-          "required" => ["reason"]
-        }
-      }
-    }
-
-    [use_skill_tool, request_help_tool]
-  end
-
-  defp record_llm_analytics(engine_state, response, model, status, reason \\ nil) do
-    usage = if is_map(response), do: response[:usage] || %{}, else: %{}
-
-    metadata =
-      %{
-        reason: if(reason, do: inspect(reason), else: nil)
-      }
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-      |> Map.new()
-
-    Analytics.record_llm_call(%{
-      status: status,
-      scope: "sub_agent",
-      model: if(is_map(response), do: response[:model] || model, else: model),
-      conversation_id: engine_state[:conversation_id],
-      user_id: engine_state[:user_id],
-      prompt_tokens: usage[:prompt_tokens] || 0,
-      completion_tokens: usage[:completion_tokens] || 0,
-      total_tokens: usage[:total_tokens] || 0,
-      cost: usage[:cost] || 0.0,
-      metadata: metadata
-    })
-  end
-
-  # --- Resume Helpers ---
-
-  defp build_resume_content(update, _dispatch_params) do
-    parts = []
-
-    parts =
-      if update[:message] do
-        ["Orchestrator response: #{update.message}" | parts]
-      else
-        parts
-      end
-
-    parts =
-      if update[:skills] do
-        ["New skills added: #{Enum.join(update.skills, ", ")}" | parts]
-      else
-        parts
-      end
-
-    parts =
-      if update[:context_files] do
-        ["New context files provided: #{Enum.join(update.context_files, ", ")}" | parts]
-      else
-        parts
-      end
-
-    case parts do
-      [] -> "Orchestrator acknowledged your request. Continue with your mission."
-      _ -> Enum.reverse(parts) |> Enum.join("\n\n")
-    end
-  end
-
-  defp build_skill_injection_messages(update) do
-    case update[:skills] do
-      nil ->
-        []
-
-      [] ->
-        []
-
-      new_skills ->
-        definitions =
-          new_skills
-          |> Enum.map(fn name ->
-            case Registry.lookup(name) do
-              {:ok, skill_def} ->
-                body_preview = String.slice(skill_def.body, 0, 2000)
-                "### #{skill_def.name}\n#{skill_def.description}\n\n#{body_preview}"
-
-              {:error, :not_found} ->
-                nil
-            end
-          end)
-          |> Enum.reject(&is_nil/1)
-
-        case definitions do
-          [] ->
-            []
-
-          defs ->
-            content =
-              "Orchestrator update — new skills added:\n\n" <>
-                Enum.join(defs, "\n\n---\n\n")
-
-            [%{role: "user", content: content}]
-        end
-    end
-  end
-
-  defp maybe_add_skills(dispatch_params, nil), do: dispatch_params
-  defp maybe_add_skills(dispatch_params, []), do: dispatch_params
-
-  defp maybe_add_skills(dispatch_params, new_skills) do
-    updated_skills = Enum.uniq(dispatch_params.skills ++ new_skills)
-    %{dispatch_params | skills: updated_skills}
-  end
-
-  defp update_context_with_new_tools(context, new_messages, updated_dispatch) do
-    new_tools = build_scoped_tools(updated_dispatch.skills)
-
-    %{
-      context
-      | messages: new_messages,
-        tools: new_tools,
-        allowed_skills: updated_dispatch.skills
-    }
-  end
-
-  # --- Synchronous wait helper ---
-
-  defp wait_for_completion(_agent_id, monitor_ref) do
+  # ---------------------------------------------------------------
+  # Private Helpers
+  # ---------------------------------------------------------------
+
+  defp wait_for_completion(monitor_ref) do
     receive do
       {:DOWN, ^monitor_ref, :process, _pid,
        {:shutdown, {:error, {:context_budget_exceeded, _}} = error}} ->
-        # Context budget exceeded — return the error directly
         error
 
       {:DOWN, ^monitor_ref, :process, _pid, {:shutdown, %{status: _} = result_map}} ->
-        # Normal completion — the GenServer packed its final result into the
-        # shutdown reason so we can read it here (the process is already dead).
         result_map
 
       {:DOWN, ^monitor_ref, :process, _pid, :normal} ->
-        # Should not happen after the {:shutdown, result} change, but handle
-        # gracefully for safety.
         %{
           status: :completed,
           result: "Agent completed (status unavailable after shutdown).",
@@ -1420,92 +459,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     System.monotonic_time(:millisecond) - started_at
   end
 
-  # Non-blocking check for an interrupt message from the GenServer.
-  # Called from within the Task's run_loop to check between iterations.
-  defp interrupted? do
-    receive do
-      :interrupt -> true
-    after
-      0 -> false
-    end
-  end
-
-  defp build_skill_context(dispatch_params, engine_state) do
-    root_conversation_id =
-      engine_state[:parent_conversation_id] || engine_state[:conversation_id] || "unknown"
-
-    user_id = engine_state[:user_id] || "unknown"
-    google_token = resolve_google_token(user_id, dispatch_params.skills)
-
-    %Context{
-      conversation_id: root_conversation_id,
-      execution_id: Ecto.UUID.generate(),
-      user_id: user_id,
-      channel: engine_state[:channel],
-      integrations: Assistant.Integrations.Registry.default_integrations(),
-      google_token: google_token,
-      metadata: %{
-        agent_id: dispatch_params.agent_id,
-        root_conversation_id: root_conversation_id,
-        agent_type: engine_state[:agent_type] || :orchestrator,
-        google_token: GoogleContext.resolve_google_token(user_id),
-        enabled_drives: GoogleContext.load_enabled_drives(user_id)
-      }
-    }
-  end
-
-  # Resolve the per-user Google OAuth2 access token if any of the dispatched
-  # skills belong to a Google domain (email, calendar, files). Returns the
-  # access token string on success, or nil if the user has not connected their
-  # Google account or the token refresh failed.
-  defp resolve_google_token(user_id, skills) when user_id != "unknown" do
-    needs_google? =
-      Enum.any?(skills, fn skill_name ->
-        [domain | _] = String.split(skill_name, ".", parts: 2)
-        domain in @google_skill_domains
-      end)
-
-    if needs_google? and GoogleAuth.oauth_configured?() do
-      case GoogleAuth.user_token(user_id) do
-        {:ok, access_token} ->
-          access_token
-
-        {:error, reason} when reason in [:not_connected, :refresh_failed] ->
-          Logger.info("Google OAuth token not available for user",
-            user_id: user_id,
-            reason: reason
-          )
-
-          nil
-      end
-    else
-      nil
-    end
-  end
-
-  defp resolve_google_token(_user_id, _skills), do: nil
-
-  defp build_model_opts(dispatch_params, context, _engine_state) do
-    model =
-      case dispatch_params[:model_override] do
-        nil -> LLMHelpers.resolve_model(:sub_agent)
-        override -> override
-      end
-
-    LLMHelpers.build_llm_opts(context.tools, model)
-  end
-
-  # --- Registry ---
-
   defp via_tuple(agent_id) do
-    {:via, Elixir.Registry, {Assistant.SubAgent.Registry, agent_id}}
+    {:via, Registry, {Assistant.SubAgent.Registry, agent_id}}
   end
-
-  # --- Response Parsing Helpers (delegated to LLMHelpers) ---
-
-  defp has_text_no_tools?(response), do: LLMHelpers.text_response?(response)
-  defp has_tool_calls?(response), do: LLMHelpers.tool_call_response?(response)
-  defp extract_function_name(tc), do: LLMHelpers.extract_function_name(tc)
-  defp extract_function_args(tc), do: LLMHelpers.extract_function_args(tc)
-  defp extract_last_text(messages), do: LLMHelpers.extract_last_assistant_text(messages)
 end
