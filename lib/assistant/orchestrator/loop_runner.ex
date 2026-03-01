@@ -216,7 +216,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
       %{
         role: "tool",
         tool_call_id: tc.id,
-        content: result.content
+        content: SkillResult.truncate_content(result.content)
       }
     end)
   end
