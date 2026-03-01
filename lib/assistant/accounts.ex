@@ -6,7 +6,148 @@ defmodule Assistant.Accounts do
   import Ecto.Query, warn: false
   alias Assistant.Repo
 
-  alias Assistant.Accounts.{SettingsUser, SettingsUserToken, SettingsUserNotifier}
+  alias Assistant.Accounts.{
+    SettingsUser,
+    SettingsUserAllowlistEntry,
+    SettingsUserNotifier,
+    SettingsUserToken
+  }
+
+  @managed_access_scopes [
+    "chat",
+    "workflows",
+    "memory",
+    "integrations",
+    "analytics"
+  ]
+
+  def managed_access_scopes, do: @managed_access_scopes
+
+  ## Admin and allowlist
+
+  @doc """
+  Returns `true` when the admin bootstrap flow is available.
+
+  Bootstrap is available only until at least one admin exists.
+  """
+  def admin_bootstrap_available? do
+    not Repo.exists?(from(su in SettingsUser, where: su.is_admin == true))
+  end
+
+  @doc """
+  Claims the initial admin role for the given settings_user and creates
+  a matching allowlist entry.
+  """
+  def bootstrap_admin_access(%SettingsUser{} = settings_user) do
+    if admin_bootstrap_available?() do
+      Repo.transact(fn ->
+        with {:ok, _entry} <-
+               upsert_settings_user_allowlist_entry(
+                 %{
+                   email: settings_user.email,
+                   active: true,
+                   is_admin: true,
+                   scopes: @managed_access_scopes,
+                   notes: "Bootstrap admin"
+                 },
+                 settings_user,
+                 transaction?: false
+               ),
+             {:ok, synced_user} <- sync_settings_user_access_from_allowlist(settings_user) do
+          {:ok, synced_user}
+        else
+          {:error, _} = error -> error
+        end
+      end)
+    else
+      {:error, :bootstrap_closed}
+    end
+  end
+
+  @doc """
+  Lists all settings users for the admin UI.
+  """
+  def list_admin_settings_users do
+    Repo.all(
+      from(su in SettingsUser,
+        order_by: [desc: su.is_admin, asc: su.email]
+      )
+    )
+  end
+
+  @doc """
+  Lists allowlist entries for the admin UI.
+  """
+  def list_settings_user_allowlist_entries do
+    Repo.all(
+      from(e in SettingsUserAllowlistEntry,
+        order_by: [desc: e.active, asc: e.email]
+      )
+    )
+  end
+
+  @doc """
+  Returns a changeset for an allowlist entry.
+  """
+  def change_settings_user_allowlist_entry(entry, attrs \\ %{}) do
+    SettingsUserAllowlistEntry.changeset(entry, attrs, allowed_scopes: @managed_access_scopes)
+  end
+
+  @doc """
+  Creates or updates an allowlist entry keyed by email.
+  """
+  def upsert_settings_user_allowlist_entry(attrs, actor \\ nil, opts \\ [])
+
+  def upsert_settings_user_allowlist_entry(attrs, actor, opts) when is_map(attrs) do
+    transaction? = Keyword.get(opts, :transaction?, true)
+
+    fun = fn ->
+      email = normalize_email_param(Map.get(attrs, :email) || Map.get(attrs, "email"))
+      entry = if is_binary(email), do: Repo.get_by(SettingsUserAllowlistEntry, email: email)
+
+      attrs =
+        attrs
+        |> Map.new()
+        |> Map.put(:email, email)
+
+      base = entry || %SettingsUserAllowlistEntry{}
+
+      changeset =
+        base
+        |> change_settings_user_allowlist_entry(attrs)
+        |> maybe_stamp_allowlist_actor(actor)
+
+      with {:ok, saved_entry} <- Repo.insert_or_update(changeset),
+           :ok <- sync_matching_settings_user_access(saved_entry.email) do
+        {:ok, saved_entry}
+      else
+        {:error, _} = error -> error
+      end
+    end
+
+    if transaction?, do: Repo.transact(fun), else: fun.()
+  end
+
+  @doc """
+  Sends a recovery magic link to the given settings user.
+  """
+  def admin_send_recovery_link(%SettingsUser{} = settings_user, magic_link_url_fun)
+      when is_function(magic_link_url_fun, 1) do
+    deliver_login_instructions(settings_user, magic_link_url_fun)
+  end
+
+  @doc """
+  Clears the user's password, expires active sessions, and sends a recovery link.
+  """
+  def admin_force_password_reset(%SettingsUser{} = settings_user, magic_link_url_fun)
+      when is_function(magic_link_url_fun, 1) do
+    with {:ok, {updated_user, expired_tokens}} <-
+           Ecto.Changeset.change(settings_user, hashed_password: nil)
+           |> update_settings_user_and_delete_all_tokens(),
+         {:ok, email} <- deliver_login_instructions(updated_user, magic_link_url_fun) do
+      {:ok, updated_user, expired_tokens, email}
+    end
+  end
 
   ## Database getters
 
@@ -41,7 +182,13 @@ defmodule Assistant.Accounts do
   def get_settings_user_by_email_and_password(email, password)
       when is_binary(email) and is_binary(password) do
     settings_user = Repo.get_by(SettingsUser, email: email)
-    if SettingsUser.valid_password?(settings_user, password), do: settings_user
+
+    if SettingsUser.valid_password?(settings_user, password) do
+      case maybe_sync_and_authorize_settings_user(settings_user) do
+        {:ok, synced_settings_user} -> synced_settings_user
+        _ -> nil
+      end
+    end
   end
 
   @doc """
@@ -77,7 +224,9 @@ defmodule Assistant.Accounts do
   def register_settings_user(attrs) do
     %SettingsUser{}
     |> SettingsUser.email_changeset(attrs)
+    |> maybe_validate_allowlist_registration()
     |> Repo.insert()
+    |> maybe_sync_new_settings_user_access()
   end
 
   @doc """
@@ -87,29 +236,43 @@ defmodule Assistant.Accounts do
     with {:ok, email} <- normalize_oauth_email(Map.get(attrs, "email") || Map.get(attrs, :email)) do
       display_name = normalize_oauth_display_name(Map.get(attrs, "name") || Map.get(attrs, :name))
 
-      case get_settings_user_by_email(email) do
-        nil ->
-          %SettingsUser{}
-          |> SettingsUser.email_changeset(%{email: email}, validate_changed: false)
-          |> Ecto.Changeset.change(
-            display_name: display_name,
-            confirmed_at: DateTime.utc_now(:second)
-          )
-          |> Repo.insert()
+      if email_allowed_by_allowlist?(email) do
+        case get_settings_user_by_email(email) do
+          nil ->
+            %SettingsUser{}
+            |> SettingsUser.email_changeset(%{email: email}, validate_changed: false)
+            |> Ecto.Changeset.change(
+              display_name: display_name,
+              confirmed_at: DateTime.utc_now(:second)
+            )
+            |> Repo.insert()
+            |> maybe_sync_new_settings_user_access()
 
-        %SettingsUser{} = settings_user ->
-          attrs =
-            %{}
-            |> maybe_put_confirmed_at(settings_user)
-            |> maybe_put_display_name(settings_user, display_name)
+          %SettingsUser{} = settings_user ->
+            attrs =
+              %{}
+              |> maybe_put_confirmed_at(settings_user)
+              |> maybe_put_display_name(settings_user, display_name)
 
-          if map_size(attrs) == 0 do
-            {:ok, settings_user}
-          else
-            settings_user
-            |> Ecto.Changeset.change(attrs)
-            |> Repo.update()
-          end
+            result =
+              if map_size(attrs) == 0 do
+                {:ok, settings_user}
+              else
+                settings_user
+                |> Ecto.Changeset.change(attrs)
+                |> Repo.update()
+              end
+
+            case result do
+              {:ok, updated_settings_user} ->
+                maybe_sync_and_authorize_settings_user(updated_settings_user)
+
+              other ->
+                other
+            end
+        end
+      else
+        {:error, :not_allowed}
       end
     end
   end
@@ -242,7 +405,17 @@ defmodule Assistant.Accounts do
   """
   def get_settings_user_by_session_token(token) do
     {:ok, query} = SettingsUserToken.verify_session_token_query(token)
-    Repo.one(query)
+
+    case Repo.one(query) do
+      {settings_user, token_inserted_at} ->
+        case maybe_sync_and_authorize_settings_user(settings_user) do
+          {:ok, synced_settings_user} -> {synced_settings_user, token_inserted_at}
+          _ -> nil
+        end
+
+      nil ->
+        nil
+    end
   end
 
   @doc """
@@ -250,8 +423,9 @@ defmodule Assistant.Accounts do
   """
   def get_settings_user_by_magic_link_token(token) do
     with {:ok, query} <- SettingsUserToken.verify_magic_link_token_query(token),
-         {settings_user, _token} <- Repo.one(query) do
-      settings_user
+         {settings_user, _token} <- Repo.one(query),
+         {:ok, synced_settings_user} <- maybe_sync_and_authorize_settings_user(settings_user) do
+      synced_settings_user
     else
       _ -> nil
     end
@@ -290,13 +464,21 @@ defmodule Assistant.Accounts do
         """
 
       {%SettingsUser{confirmed_at: nil} = settings_user, _token} ->
-        settings_user
-        |> SettingsUser.confirm_changeset()
-        |> update_settings_user_and_delete_all_tokens()
+        with {:ok, _} <- maybe_sync_and_authorize_settings_user(settings_user),
+             {:ok, {updated_settings_user, expired_tokens}} <-
+               settings_user
+               |> SettingsUser.confirm_changeset()
+               |> update_settings_user_and_delete_all_tokens(),
+             {:ok, synced_settings_user} <-
+               maybe_sync_and_authorize_settings_user(updated_settings_user) do
+          {:ok, {synced_settings_user, expired_tokens}}
+        end
 
       {settings_user, token} ->
-        Repo.delete!(token)
-        {:ok, {settings_user, []}}
+        with {:ok, synced_settings_user} <- maybe_sync_and_authorize_settings_user(settings_user) do
+          Repo.delete!(token)
+          {:ok, {synced_settings_user, []}}
+        end
 
       nil ->
         {:error, :not_found}
@@ -334,15 +516,17 @@ defmodule Assistant.Accounts do
   """
   def deliver_login_instructions(%SettingsUser{} = settings_user, magic_link_url_fun)
       when is_function(magic_link_url_fun, 1) do
-    {encoded_token, settings_user_token} =
-      SettingsUserToken.build_email_token(settings_user, "login")
+    with {:ok, _} <- maybe_sync_and_authorize_settings_user(settings_user) do
+      {encoded_token, settings_user_token} =
+        SettingsUserToken.build_email_token(settings_user, "login")
 
-    Repo.insert!(settings_user_token)
+      Repo.insert!(settings_user_token)
 
-    SettingsUserNotifier.deliver_login_instructions(
-      settings_user,
-      magic_link_url_fun.(encoded_token)
-    )
+      SettingsUserNotifier.deliver_login_instructions(
+        settings_user,
+        magic_link_url_fun.(encoded_token)
+      )
+    end
   end
 
   @doc """
@@ -352,6 +536,117 @@ defmodule Assistant.Accounts do
     Repo.delete_all(from(SettingsUserToken, where: [token: ^token, context: "session"]))
     :ok
   end
+
+  defp maybe_validate_allowlist_registration(%Ecto.Changeset{} = changeset) do
+    email = Ecto.Changeset.get_field(changeset, :email)
+
+    if changeset.valid? and is_binary(email) and not email_allowed_by_allowlist?(email) do
+      Ecto.Changeset.add_error(changeset, :email, "is not on the allow list")
+    else
+      changeset
+    end
+  end
+
+  defp maybe_sync_new_settings_user_access({:ok, %SettingsUser{} = settings_user}) do
+    maybe_sync_and_authorize_settings_user(settings_user)
+  end
+
+  defp maybe_sync_new_settings_user_access(other), do: other
+
+  defp maybe_sync_and_authorize_settings_user(%SettingsUser{} = settings_user) do
+    with true <- email_allowed_by_allowlist?(settings_user.email),
+         {:ok, synced_settings_user} <- sync_settings_user_access_from_allowlist(settings_user) do
+      {:ok, synced_settings_user}
+    else
+      false -> {:error, :not_allowed}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp sync_settings_user_access_from_allowlist(%SettingsUser{} = settings_user) do
+    if allowlist_enforced?() do
+      desired =
+        case active_allowlist_entry_for_email(settings_user.email) do
+          %SettingsUserAllowlistEntry{} = entry ->
+            %{
+              is_admin: entry.is_admin,
+              access_scopes: entry.scopes |> List.wrap() |> Enum.uniq()
+            }
+
+          nil ->
+            %{is_admin: false, access_scopes: []}
+        end
+
+      if settings_user.is_admin == desired.is_admin and
+           Enum.sort(List.wrap(settings_user.access_scopes)) == Enum.sort(desired.access_scopes) do
+        {:ok, settings_user}
+      else
+        settings_user
+        |> Ecto.Changeset.change(desired)
+        |> Repo.update()
+      end
+    else
+      {:ok, settings_user}
+    end
+  end
+
+  defp email_allowed_by_allowlist?(email) when is_binary(email) do
+    not allowlist_enforced?() or
+      match?(%SettingsUserAllowlistEntry{}, active_allowlist_entry_for_email(email))
+  end
+
+  defp email_allowed_by_allowlist?(_), do: false
+
+  defp allowlist_enforced? do
+    Repo.exists?(from(e in SettingsUserAllowlistEntry, where: e.active == true))
+  end
+
+  defp active_allowlist_entry_for_email(email) when is_binary(email) do
+    Repo.one(
+      from(e in SettingsUserAllowlistEntry,
+        where: e.email == ^normalize_email_param(email) and e.active == true,
+        limit: 1
+      )
+    )
+  end
+
+  defp active_allowlist_entry_for_email(_), do: nil
+
+  defp sync_matching_settings_user_access(email) when is_binary(email) do
+    case Repo.get_by(SettingsUser, email: normalize_email_param(email)) do
+      nil ->
+        :ok
+
+      %SettingsUser{} = settings_user ->
+        case sync_settings_user_access_from_allowlist(settings_user) do
+          {:ok, _} -> :ok
+          {:error, _} = error -> error
+        end
+    end
+  end
+
+  defp sync_matching_settings_user_access(_), do: :ok
+
+  defp maybe_stamp_allowlist_actor(changeset, %SettingsUser{id: actor_id}) do
+    changeset =
+      Ecto.Changeset.put_change(changeset, :updated_by_settings_user_id, actor_id)
+
+    if Ecto.get_meta(changeset.data, :state) == :built do
+      Ecto.Changeset.put_change(changeset, :created_by_settings_user_id, actor_id)
+    else
+      changeset
+    end
+  end
+
+  defp maybe_stamp_allowlist_actor(changeset, _actor), do: changeset
+
+  defp normalize_email_param(email) when is_binary(email) do
+    email
+    |> String.trim()
+    |> String.downcase()
+  end
+
+  defp normalize_email_param(_), do: nil
 
   ## Token helper
 

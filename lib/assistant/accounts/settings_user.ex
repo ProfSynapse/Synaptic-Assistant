@@ -8,6 +8,8 @@ defmodule Assistant.Accounts.SettingsUser do
     field :display_name, :string
     field :timezone, :string, default: "UTC"
     field :email, :string
+    field :is_admin, :boolean, default: false
+    field :access_scopes, {:array, :string}, default: []
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime

@@ -94,6 +94,38 @@ defmodule Assistant.AccountsTest do
       assert is_nil(settings_user.confirmed_at)
       assert is_nil(settings_user.password)
     end
+
+    test "rejects registration when allowlist is active and email is not listed" do
+      {:ok, _entry} =
+        Accounts.upsert_settings_user_allowlist_entry(%{
+          email: "allowed@example.com",
+          active: true,
+          is_admin: false,
+          scopes: ["chat"]
+        })
+
+      {:error, changeset} =
+        Accounts.register_settings_user(%{email: unique_settings_user_email()})
+
+      assert "is not on the allow list" in errors_on(changeset).email
+    end
+
+    test "syncs admin flag and access scopes from allowlist on registration" do
+      email = unique_settings_user_email()
+
+      {:ok, _entry} =
+        Accounts.upsert_settings_user_allowlist_entry(%{
+          email: email,
+          active: true,
+          is_admin: true,
+          scopes: ["chat", "analytics"]
+        })
+
+      {:ok, settings_user} = Accounts.register_settings_user(%{email: email})
+
+      assert settings_user.is_admin
+      assert Enum.sort(settings_user.access_scopes) == ["analytics", "chat"]
+    end
   end
 
   describe "sudo_mode?/2" do

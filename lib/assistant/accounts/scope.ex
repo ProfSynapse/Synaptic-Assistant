@@ -18,7 +18,7 @@ defmodule Assistant.Accounts.Scope do
 
   alias Assistant.Accounts.SettingsUser
 
-  defstruct settings_user: nil
+  defstruct settings_user: nil, admin?: false, privileges: []
 
   @doc """
   Creates a scope for the given settings_user.
@@ -26,7 +26,21 @@ defmodule Assistant.Accounts.Scope do
   Returns nil if no settings_user is given.
   """
   def for_settings_user(%SettingsUser{} = settings_user) do
-    %__MODULE__{settings_user: settings_user}
+    privileges =
+      settings_user.access_scopes
+      |> List.wrap()
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    %__MODULE__{
+      settings_user: settings_user,
+      admin?: settings_user.is_admin == true,
+      privileges:
+        if(settings_user.is_admin == true,
+          do: Enum.uniq(["admin" | privileges]),
+          else: privileges
+        )
+    }
   end
 
   def for_settings_user(nil), do: nil

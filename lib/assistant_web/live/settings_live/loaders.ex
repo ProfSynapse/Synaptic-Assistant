@@ -65,7 +65,10 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     options = model_options_with_unavailable_defaults(models, current_defaults)
     provider_options = active_model_provider_options(models)
     query = socket.assigns[:active_model_query] || ""
-    provider = normalize_active_model_provider(socket.assigns[:active_model_provider], provider_options)
+
+    provider =
+      normalize_active_model_provider(socket.assigns[:active_model_provider], provider_options)
+
     filtered_models = filter_active_models(models, query, provider)
 
     socket
@@ -76,7 +79,10 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     |> assign(:models, filtered_models)
     |> assign(:active_model_provider, provider)
     |> assign(:active_model_provider_options, provider_options)
-    |> assign(:active_model_filter_form, to_form(%{"q" => query, "provider" => provider}, as: :active_models))
+    |> assign(
+      :active_model_filter_form,
+      to_form(%{"q" => query, "provider" => provider}, as: :active_models)
+    )
     |> assign(:model_options, options)
     |> assign(:model_defaults, current_defaults)
     |> assign(:model_default_roles, roles)
