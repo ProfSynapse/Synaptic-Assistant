@@ -154,6 +154,143 @@ defmodule Assistant.Memory.CompactionTest do
   end
 
   # ---------------------------------------------------------------
+  # compact/2 — boundary marker tracking
+  # ---------------------------------------------------------------
+
+  describe "compact/2 with boundary marker (last_compacted_message_id)" do
+    test "conversation with boundary marker and no new messages returns :no_new_messages", %{
+      user: user
+    } do
+      # Create conversation with messages, then mark the last one as the boundary
+      {:ok, conversation} =
+        %Conversation{}
+        |> Conversation.changeset(%{channel: "test", user_id: user.id})
+        |> Repo.insert()
+
+      {:ok, msg} =
+        %Message{}
+        |> Message.changeset(%{
+          conversation_id: conversation.id,
+          role: "user",
+          content: "Only message"
+        })
+        |> Repo.insert()
+
+      # Set the boundary to the last message and summary_version > 0
+      conversation
+      |> Ecto.Changeset.change(%{
+        summary_version: 1,
+        summary: "Previous summary",
+        last_compacted_message_id: msg.id
+      })
+      |> Repo.update!()
+
+      # No messages after the boundary — should return :no_new_messages
+      assert {:error, :no_new_messages} = Compaction.compact(conversation.id)
+    end
+
+    test "conversation with boundary marker and new messages proceeds to LLM", %{user: user} do
+      {:ok, conversation} =
+        %Conversation{}
+        |> Conversation.changeset(%{channel: "test", user_id: user.id})
+        |> Repo.insert()
+
+      # Insert first batch of messages
+      {:ok, boundary_msg} =
+        %Message{}
+        |> Message.changeset(%{
+          conversation_id: conversation.id,
+          role: "user",
+          content: "Boundary message"
+        })
+        |> Repo.insert()
+
+      # Set summary_version > 0 and boundary marker
+      conversation
+      |> Ecto.Changeset.change(%{
+        summary_version: 1,
+        summary: "Old summary covering earlier messages",
+        last_compacted_message_id: boundary_msg.id
+      })
+      |> Repo.update!()
+
+      # Small delay so new messages have different timestamps
+      Process.sleep(10)
+
+      # Add new messages after the boundary
+      %Message{}
+      |> Message.changeset(%{
+        conversation_id: conversation.id,
+        role: "user",
+        content: "New message after boundary"
+      })
+      |> Repo.insert!()
+
+      # Should find the new message and proceed to LLM call (which will fail)
+      result = Compaction.compact(conversation.id)
+      assert {:error, reason} = result
+      assert reason != :no_new_messages
+      assert reason != :not_found
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # compact/2 — large message batch
+  # ---------------------------------------------------------------
+
+  describe "compact/2 with large message history" do
+    test "respects message_limit when many messages exist", %{user: user} do
+      {:ok, conversation} =
+        %Conversation{}
+        |> Conversation.changeset(%{channel: "test", user_id: user.id})
+        |> Repo.insert()
+
+      # Insert many messages
+      for i <- 1..20 do
+        %Message{}
+        |> Message.changeset(%{
+          conversation_id: conversation.id,
+          role: if(rem(i, 2) == 1, do: "user", else: "assistant"),
+          content: "Message number #{i}"
+        })
+        |> Repo.insert!()
+      end
+
+      # Should not crash with a small message_limit
+      result = Compaction.compact(conversation.id, message_limit: 5)
+      assert {:error, reason} = result
+      # Should proceed past fetching (not :no_new_messages)
+      assert reason != :no_new_messages
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # compact/2 — single message edge case
+  # ---------------------------------------------------------------
+
+  describe "compact/2 with single message" do
+    test "works with exactly one message", %{user: user} do
+      {:ok, conversation} =
+        %Conversation{}
+        |> Conversation.changeset(%{channel: "test", user_id: user.id})
+        |> Repo.insert()
+
+      %Message{}
+      |> Message.changeset(%{
+        conversation_id: conversation.id,
+        role: "user",
+        content: "A single message"
+      })
+      |> Repo.insert!()
+
+      result = Compaction.compact(conversation.id)
+      assert {:error, reason} = result
+      assert reason != :no_new_messages
+      assert reason != :not_found
+    end
+  end
+
+  # ---------------------------------------------------------------
   # Module API
   # ---------------------------------------------------------------
 

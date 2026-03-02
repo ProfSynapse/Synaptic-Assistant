@@ -93,6 +93,49 @@ defmodule Assistant.Orchestrator.EngineTranscriptTest do
       assert result == "[assistant]"
     end
 
+    test "preserves message order for long conversation history" do
+      messages =
+        for i <- 1..10 do
+          role = if rem(i, 2) == 1, do: "user", else: "assistant"
+          %{role: role, content: "Turn #{i}"}
+        end
+
+      result = Engine.serialize_transcript(messages)
+
+      # Verify ordering by checking "Turn 1" appears before "Turn 10"
+      idx_1 = :binary.match(result, "Turn 1") |> elem(0)
+      idx_10 = :binary.match(result, "Turn 10") |> elem(0)
+      assert idx_1 < idx_10
+
+      # Verify all turns present
+      for i <- 1..10 do
+        assert result =~ "Turn #{i}"
+      end
+    end
+
+    test "handles mixed system and non-system messages correctly" do
+      messages = [
+        %{role: "system", content: "System prompt here"},
+        %{role: "user", content: "User message"},
+        %{role: "system", content: "Injected system context"},
+        %{role: "assistant", content: "Assistant reply"},
+        %{role: "tool", content: "Tool output"},
+        %{role: "system", content: "Another system injection"}
+      ]
+
+      result = Engine.serialize_transcript(messages)
+
+      # All system messages should be stripped
+      refute result =~ "system"
+      refute result =~ "System prompt"
+      refute result =~ "Injected system"
+
+      # Non-system messages preserved
+      assert result =~ "[user] User message"
+      assert result =~ "[assistant] Assistant reply"
+      assert result =~ "[tool] Tool output"
+    end
+
     test "serializes a full conversation with tool calls" do
       messages = [
         %{role: "system", content: "You are a helpful agent."},
@@ -155,6 +198,33 @@ defmodule Assistant.Orchestrator.EngineTranscriptTest do
     test "formats message with role only (no content key)" do
       msg = %{role: "assistant"}
       assert Engine.format_transcript_message(msg) == "[assistant]"
+    end
+  end
+
+  describe "format_transcript_message/1 — edge cases" do
+    test "formats message with nil content (key present)" do
+      # When content key is present but nil, it matches the content clause
+      # and interpolates nil as empty string
+      msg = %{role: "assistant", content: nil}
+      assert Engine.format_transcript_message(msg) == "[assistant] "
+    end
+
+    test "formats message with empty string content" do
+      msg = %{role: "user", content: ""}
+      assert Engine.format_transcript_message(msg) == "[user] "
+    end
+
+    test "formats message with multiline content" do
+      msg = %{role: "user", content: "Line 1\nLine 2\nLine 3"}
+      result = Engine.format_transcript_message(msg)
+      assert result == "[user] Line 1\nLine 2\nLine 3"
+    end
+
+    test "formats message with special characters in content" do
+      msg = %{role: "user", content: "What about <html> & \"quotes\"?"}
+      result = Engine.format_transcript_message(msg)
+      assert result =~ "<html>"
+      assert result =~ "&"
     end
   end
 
