@@ -165,7 +165,7 @@ defmodule Assistant.Integration.Helpers do
     - `{:text, content}` if the LLM responds with text only
     - `{:error, reason}` on failure
   """
-  def ask_llm_for_skill_call(mission, skill_names) do
+  def ask_llm_for_skill_call(mission, skill_names, opts \\ []) do
     system_prompt = build_system_prompt(skill_names)
     tools = build_tools(skill_names)
 
@@ -174,13 +174,14 @@ defmodule Assistant.Integration.Helpers do
       %{role: "user", content: mission}
     ]
 
-    opts = [
-      model: @integration_model,
-      tools: tools,
-      temperature: 0.0
-    ]
+    llm_opts =
+      [
+        model: @integration_model,
+        tools: tools,
+        temperature: 0.0
+      ] ++ Keyword.take(opts, [:api_key])
 
-    case OpenRouter.chat_completion(messages, opts) do
+    case OpenRouter.chat_completion(messages, llm_opts) do
       {:ok, response} ->
         parse_llm_response(response)
 
@@ -368,10 +369,10 @@ defmodule Assistant.Integration.Helpers do
     - `{:ok, %{skill: name, flags: args, result: %Result{}}}` on success
     - `{:error, reason}` on failure
   """
-  def run_skill_integration(mission, skill_names, domain_or_context)
+  def run_skill_integration(mission, skill_names, domain_or_context, opts \\ [])
 
-  def run_skill_integration(mission, skill_names, %Context{} = context) do
-    case ask_llm_for_skill_call(mission, skill_names) do
+  def run_skill_integration(mission, skill_names, %Context{} = context, opts) do
+    case ask_llm_for_skill_call(mission, skill_names, opts) do
       {:tool_call, skill_name, flags} ->
         case execute_skill(skill_name, flags, context) do
           {:ok, result} ->
@@ -389,9 +390,9 @@ defmodule Assistant.Integration.Helpers do
     end
   end
 
-  def run_skill_integration(mission, skill_names, domain) when is_atom(domain) do
+  def run_skill_integration(mission, skill_names, domain, opts) when is_atom(domain) do
     context = build_context(domain)
-    run_skill_integration(mission, skill_names, context)
+    run_skill_integration(mission, skill_names, context, opts)
   end
 
   # -------------------------------------------------------------------
