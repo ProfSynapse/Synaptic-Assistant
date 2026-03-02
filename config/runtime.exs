@@ -89,13 +89,18 @@ end
 # Per-user Gmail/Drive/Calendar access uses OAuth2 client credentials below.
 if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
   credentials =
-    if String.starts_with?(String.trim(google_creds), "{") do
-      Jason.decode!(google_creds)
-    else
-      google_creds |> File.read!() |> Jason.decode!()
+    cond do
+      String.starts_with?(String.trim(google_creds), "{") ->
+        Jason.decode!(google_creds)
+
+      File.exists?(google_creds) ->
+        google_creds |> File.read!() |> Jason.decode!()
+
+      true ->
+        nil
     end
 
-  config :assistant, :google_credentials, credentials
+  if credentials, do: config(:assistant, :google_credentials, credentials)
 end
 
 # Google OAuth2 client credentials — for per-user authorization flow.
