@@ -119,13 +119,17 @@ defmodule AssistantWeb.SettingsUserLive.Login do
 
   @impl true
   def mount(_params, _session, socket) do
-    email =
-      Phoenix.Flash.get(socket.assigns.flash, :email) ||
-        get_in(socket.assigns, [:current_scope, Access.key(:settings_user), Access.key(:email)])
+    if Accounts.admin_bootstrap_available?() do
+      {:ok, push_navigate(socket, to: ~p"/setup")}
+    else
+      email =
+        Phoenix.Flash.get(socket.assigns.flash, :email) ||
+          get_in(socket.assigns, [:current_scope, Access.key(:settings_user), Access.key(:email)])
 
-    form = to_form(%{"email" => email}, as: "settings_user")
+      form = to_form(%{"email" => email}, as: "settings_user")
 
-    {:ok, assign(socket, form: form, trigger_submit: false)}
+      {:ok, assign(socket, form: form, trigger_submit: false)}
+    end
   end
 
   @impl true

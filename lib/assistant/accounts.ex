@@ -65,6 +65,71 @@ defmodule Assistant.Accounts do
   end
 
   @doc """
+  Registers a new settings_user with the given email and password, confirms
+  them immediately, and claims the initial admin role — all in one transaction.
+
+  This is the happy-path for the first-admin setup page. It bypasses the
+  allowlist check (no allowlist exists yet) and email confirmation (first
+  admin should be usable immediately).
+
+  Returns `{:ok, settings_user}` or `{:error, changeset}`.
+  """
+  def register_and_bootstrap_admin(attrs) do
+    if admin_bootstrap_available?() do
+      Repo.transaction(fn ->
+        with {:ok, settings_user} <- do_register_admin(attrs),
+             {:ok, confirmed_user} <- do_confirm_user(settings_user),
+             {:ok, admin_user} <- do_bootstrap_admin(confirmed_user) do
+          admin_user
+        else
+          {:error, %Ecto.Changeset{} = changeset} -> Repo.rollback(changeset)
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+    else
+      changeset =
+        %SettingsUser{}
+        |> SettingsUser.email_changeset(attrs)
+        |> Ecto.Changeset.add_error(:email, "admin setup is no longer available")
+
+      {:error, changeset}
+    end
+  end
+
+  defp do_register_admin(attrs) do
+    # Compose email + password validations into one changeset for a single insert.
+    # SettingsUser.password_changeset/3 accepts a changeset (cast/3 handles both).
+    %SettingsUser{}
+    |> SettingsUser.email_changeset(attrs)
+    |> SettingsUser.password_changeset(attrs)
+    |> Repo.insert()
+  end
+
+  defp do_confirm_user(settings_user) do
+    settings_user
+    |> SettingsUser.confirm_changeset()
+    |> Repo.update()
+  end
+
+  defp do_bootstrap_admin(settings_user) do
+    with {:ok, _entry} <-
+           upsert_settings_user_allowlist_entry(
+             %{
+               email: settings_user.email,
+               active: true,
+               is_admin: true,
+               scopes: @managed_access_scopes,
+               notes: "Bootstrap admin"
+             },
+             settings_user,
+             transaction?: false
+           ),
+         {:ok, synced_user} <- sync_settings_user_access_from_allowlist(settings_user) do
+      {:ok, synced_user}
+    end
+  end
+
+  @doc """
   Lists all settings users for the admin UI.
   """
   def list_admin_settings_users do

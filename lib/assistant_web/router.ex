@@ -131,6 +131,7 @@ defmodule AssistantWeb.Router do
 
     live_session :current_settings_user,
       on_mount: [{AssistantWeb.SettingsUserAuth, :mount_current_scope}] do
+      live "/setup", SettingsUserLive.Setup, :index
       live "/settings_users/register", SettingsUserLive.Registration, :new
       live "/settings_users/log-in", SettingsUserLive.Login, :new
       live "/settings_users/magic-link", SettingsUserLive.Login, :magic
