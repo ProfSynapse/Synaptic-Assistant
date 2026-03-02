@@ -20,8 +20,12 @@ defmodule Assistant.Channels.RegistryTest do
       assert {:ok, Assistant.Channels.Slack} = Registry.adapter_for(:slack)
     end
 
+    test "returns Discord adapter for :discord" do
+      assert {:ok, Assistant.Channels.Discord} = Registry.adapter_for(:discord)
+    end
+
     test "returns error for unregistered channel" do
-      assert {:error, :unknown_channel} = Registry.adapter_for(:discord)
+      assert {:error, :unknown_channel} = Registry.adapter_for(:whatsapp)
     end
 
     test "returns error for unknown atom" do
@@ -30,22 +34,24 @@ defmodule Assistant.Channels.RegistryTest do
   end
 
   describe "all_channels/0" do
-    test "returns all three registered channel atoms" do
+    test "returns all four registered channel atoms" do
       channels = Registry.all_channels()
       assert :google_chat in channels
       assert :telegram in channels
       assert :slack in channels
-      assert length(channels) == 3
+      assert :discord in channels
+      assert length(channels) == 4
     end
   end
 
   describe "all_adapters/0" do
-    test "returns all three registered adapter modules" do
+    test "returns all four registered adapter modules" do
       adapters = Registry.all_adapters()
       assert Assistant.Channels.GoogleChat in adapters
       assert Assistant.Channels.Telegram in adapters
       assert Assistant.Channels.Slack in adapters
-      assert length(adapters) == 3
+      assert Assistant.Channels.Discord in adapters
+      assert length(adapters) == 4
     end
   end
 
@@ -54,11 +60,12 @@ defmodule Assistant.Channels.RegistryTest do
       assert Registry.registered?(:google_chat)
       assert Registry.registered?(:telegram)
       assert Registry.registered?(:slack)
+      assert Registry.registered?(:discord)
     end
 
     test "returns false for unregistered channels" do
-      refute Registry.registered?(:discord)
       refute Registry.registered?(:whatsapp)
+      refute Registry.registered?(:signal)
     end
   end
 end
