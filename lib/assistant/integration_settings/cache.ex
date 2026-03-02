@@ -139,7 +139,14 @@ defmodule Assistant.IntegrationSettings.Cache do
 
   @impl true
   def handle_info(%{key: key}, state) when is_atom(key) do
-    :ets.delete(state.table, key)
+    # Re-warm specific key from DB instead of just deleting.
+    # This ensures the cache stays populated after remote writes,
+    # especially for keys without env var fallback.
+    case warm_single_key(Atom.to_string(key), state.table) do
+      :ok -> :ok
+      :not_found -> :ets.delete(state.table, key)
+    end
+
     {:noreply, state}
   end
 
@@ -156,14 +163,18 @@ defmodule Assistant.IntegrationSettings.Cache do
     import Ecto.Query
 
     Repo.transaction(fn ->
-      Repo.query!("SET LOCAL app.is_admin = 'true'")
+      case Repo.query("SET LOCAL app.is_admin = 'true'") do
+        {:ok, _} ->
+          IntegrationSetting
+          |> select([s], {s.key, s.value})
+          |> Repo.all()
+          |> Enum.each(fn {key_str, value} ->
+            insert_cached_key(table, key_str, value)
+          end)
 
-      IntegrationSetting
-      |> select([s], {s.key, s.value})
-      |> Repo.all()
-      |> Enum.each(fn {key_str, value} ->
-        insert_cached_key(table, key_str, value)
-      end)
+        {:error, reason} ->
+          Repo.rollback({:rls_setup_failed, reason})
+      end
     end)
     |> case do
       {:ok, _} -> :ok
@@ -177,5 +188,32 @@ defmodule Assistant.IntegrationSettings.Cache do
   rescue
     ArgumentError ->
       Logger.warning("Unknown integration key in database, skipping", key: key_str)
+  end
+
+  defp warm_single_key(key_str, table) do
+    alias Assistant.Repo
+    alias Assistant.Schemas.IntegrationSetting
+
+    import Ecto.Query
+
+    Repo.transaction(fn ->
+      case Repo.query("SET LOCAL app.is_admin = 'true'") do
+        {:ok, _} ->
+          IntegrationSetting
+          |> where([s], s.key == ^key_str)
+          |> select([s], {s.key, s.value})
+          |> Repo.one()
+
+        {:error, reason} ->
+          Repo.rollback({:rls_setup_failed, reason})
+      end
+    end)
+    |> case do
+      {:ok, nil} -> :not_found
+      {:ok, {key_s, value}} -> insert_cached_key(table, key_s, value); :ok
+      {:error, _} -> :not_found
+    end
+  rescue
+    _ -> :not_found
   end
 end

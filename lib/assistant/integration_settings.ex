@@ -151,17 +151,26 @@ defmodule Assistant.IntegrationSettings do
     result =
       with_admin_transaction(fn ->
         case Repo.get_by(IntegrationSetting, key: key_str) do
-          nil -> :ok
-          setting -> Repo.delete(setting) |> elem(0)
+          nil ->
+            :ok
+
+          setting ->
+            case Repo.delete(setting) do
+              {:ok, _deleted} -> :ok
+              {:error, changeset} -> {:error, changeset}
+            end
         end
       end)
 
     case result do
-      {:ok, _} ->
+      {:ok, :ok} ->
         Cache.invalidate(key)
         broadcast_change(key)
         Logger.info("Integration setting deleted (reverted to env var)", key: key_str)
         :ok
+
+      {:ok, {:error, changeset}} ->
+        {:error, changeset}
 
       {:error, reason} ->
         {:error, reason}
@@ -242,8 +251,10 @@ defmodule Assistant.IntegrationSettings do
 
   defp with_admin_transaction(fun) do
     Repo.transaction(fn ->
-      Repo.query!("SET LOCAL app.is_admin = 'true'")
-      fun.()
+      case Repo.query("SET LOCAL app.is_admin = 'true'") do
+        {:ok, _} -> fun.()
+        {:error, reason} -> Repo.rollback({:rls_setup_failed, reason})
+      end
     end)
   end
 

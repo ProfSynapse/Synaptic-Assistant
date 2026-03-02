@@ -33,6 +33,13 @@ defmodule Assistant.Repo.Migrations.CreateIntegrationSettings do
       "ALTER TABLE integration_settings DISABLE ROW LEVEL SECURITY"
     )
 
+    # FORCE ensures RLS applies even to the table owner (the app's DB user).
+    # Without this, the owner bypasses all policies and SET LOCAL has no effect.
+    execute(
+      "ALTER TABLE integration_settings FORCE ROW LEVEL SECURITY",
+      "ALTER TABLE integration_settings NO FORCE ROW LEVEL SECURITY"
+    )
+
     execute(
       """
       CREATE POLICY admin_read ON integration_settings FOR SELECT
