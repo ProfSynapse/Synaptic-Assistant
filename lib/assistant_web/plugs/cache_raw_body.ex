@@ -35,17 +35,26 @@ defmodule AssistantWeb.Plugs.CacheRawBody do
 
   This function has the same signature as `Plug.Conn.read_body/2` and is
   used as a drop-in replacement via the `body_reader` option.
+
+  For bodies that fit in a single read (`:ok`), the full body is cached
+  directly. For chunked reads (`:more`), partial chunks are accumulated
+  in `conn.private[:raw_body]` across calls and finalized when the
+  terminal `:ok` is received.
   """
   @spec read_body(Plug.Conn.t(), keyword()) ::
           {:ok, binary(), Plug.Conn.t()} | {:more, binary(), Plug.Conn.t()} | {:error, term()}
   def read_body(conn, opts \\ []) do
     case Plug.Conn.read_body(conn, opts) do
       {:ok, body, conn} ->
-        conn = Plug.Conn.put_private(conn, :raw_body, body)
+        # Finalize: prepend any previously accumulated chunks
+        accumulated = conn.private[:raw_body] || ""
+        conn = Plug.Conn.put_private(conn, :raw_body, accumulated <> body)
         {:ok, body, conn}
 
       {:more, partial, conn} ->
-        # For large bodies read in chunks, accumulate
+        # Accumulate partial chunk for large bodies read across multiple calls
+        accumulated = conn.private[:raw_body] || ""
+        conn = Plug.Conn.put_private(conn, :raw_body, accumulated <> partial)
         {:more, partial, conn}
 
       {:error, reason} ->
