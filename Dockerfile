@@ -1,18 +1,14 @@
 # Dockerfile — Multi-stage Elixir release build for Railway deployment.
 #
 # Stage 1: Build (compile deps + release)
-# Stage 2: Runtime (minimal Debian image with the release binary)
+# Stage 2: Runtime (minimal Ubuntu image with the release binary)
 #
 # Build: docker build -t assistant .
 # Run:   docker run -p 4000:4000 --env-file .env assistant
 
 # --- Build Stage ---
-ARG ELIXIR_VERSION=1.19.5
-ARG OTP_VERSION=28.2
-ARG DEBIAN_VERSION=bookworm-20240904-slim
-
-ARG BUILDER_IMAGE="hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION}"
-ARG RUNNER_IMAGE="debian:${DEBIAN_VERSION}"
+ARG BUILDER_IMAGE="hexpm/elixir:1.19.5-erlang-28.3.3-ubuntu-noble-20260210.1"
+ARG RUNNER_IMAGE="ubuntu:noble-20260210.1"
 
 FROM ${BUILDER_IMAGE} AS builder
 
@@ -42,9 +38,13 @@ RUN mix deps.compile
 # Copy application code
 COPY priv priv
 COPY lib lib
+COPY assets assets
 
 # Compile the release
 RUN mix compile
+
+# Build assets (Tailwind CSS)
+RUN mix assets.deploy
 
 # Copy runtime config (needed for release)
 COPY config/runtime.exs config/
@@ -56,7 +56,7 @@ RUN mix release
 FROM ${RUNNER_IMAGE}
 
 RUN apt-get update -y && \
-    apt-get install -y libstdc++6 openssl libncurses5 locales ca-certificates \
+    apt-get install -y libstdc++6 openssl libncurses6 locales ca-certificates \
     && apt-get clean && rm -f /var/lib/apt/lists/*_*
 
 # Set the locale
@@ -77,11 +77,5 @@ COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/assistant ./
 
 USER nobody
 
-# Railway uses PORT env var
-ENV PHX_HOST="0.0.0.0"
-
-# Health check endpoint
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD curl -f http://localhost:${PORT:-4000}/health || exit 1
-
-CMD ["bin/assistant", "start"]
+# Run migrations on startup, then start the server
+CMD ["/bin/sh", "-c", "bin/assistant eval 'Assistant.Release.migrate' && bin/assistant start"]

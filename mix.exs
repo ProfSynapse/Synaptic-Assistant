@@ -118,7 +118,8 @@ defmodule Assistant.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       precommit: ["format", "test"],
-      dev: ["setup", "phx.server"]
+      dev: ["setup", "phx.server"],
+      "assets.deploy": ["tailwind default --minify"]
     ]
   end
 end
