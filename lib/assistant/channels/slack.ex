@@ -64,23 +64,29 @@ defmodule Assistant.Channels.Slack do
   # Regular message or app_mention with text
   def normalize(%{"type" => type, "text" => text} = event)
       when type in ["message", "app_mention"] and is_binary(text) do
+    # team_id is injected by the controller from the event_callback envelope
+    team_id = event["_team_id"] || event["team"]
+    channel_id = event["channel"] || ""
+    raw_user_id = event["user"] || ""
+    cleaned_text = strip_bot_mention(text, type)
+
     {:ok,
      %Message{
        id: generate_id(),
        channel: :slack,
        channel_message_id: event["ts"] || "",
-       space_id: event["channel"] || "",
+       space_id: scope_id(team_id, channel_id),
        thread_id: event["thread_ts"],
-       user_id: event["user"] || "",
+       user_id: scope_id(team_id, raw_user_id),
        user_display_name: nil,
        user_email: nil,
-       content: String.trim(text),
+       content: String.trim(cleaned_text),
        argument_text: nil,
        slash_command: nil,
        attachments: [],
        metadata: %{
          "event_type" => type,
-         "team" => event["team"],
+         "team" => team_id,
          "channel_type" => event["channel_type"]
        },
        timestamp: parse_timestamp(event["ts"])
@@ -124,6 +130,21 @@ defmodule Assistant.Channels.Slack do
   def capabilities, do: [:typing, :threads, :rich_cards, :markdown_formatting]
 
   # --- Helpers ---
+
+  # Build a globally-unique scoped ID: "slack:{team_id}:{local_id}"
+  # Falls back to just the local_id when team_id is unavailable.
+  defp scope_id(nil, local_id), do: local_id
+  defp scope_id("", local_id), do: local_id
+  defp scope_id(team_id, local_id), do: "slack:#{team_id}:#{local_id}"
+
+  # Strip the leading bot mention from app_mention events.
+  # Slack prefixes app_mention text with "<@U_BOTID> " — remove it so the
+  # orchestrator receives the actual user intent.
+  defp strip_bot_mention(text, "app_mention") do
+    String.replace(text, ~r/^<@[A-Z0-9_]+>\s*/, "")
+  end
+
+  defp strip_bot_mention(text, _type), do: text
 
   # Slack timestamps are in "epoch.sequence" format (e.g., "1234567890.123456")
   defp parse_timestamp(nil), do: nil

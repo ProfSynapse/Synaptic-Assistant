@@ -45,8 +45,9 @@ defmodule Assistant.Channels.SlackTest do
 
       assert msg.channel == :slack
       assert msg.content == "Hello from Slack"
-      assert msg.user_id == "U12345"
-      assert msg.space_id == "C67890"
+      # user_id and space_id are scoped with team_id when available
+      assert msg.user_id == "slack:T00000:U12345"
+      assert msg.space_id == "slack:T00000:C67890"
       assert msg.channel_message_id == "1234567890.123456"
     end
 
@@ -134,7 +135,7 @@ defmodule Assistant.Channels.SlackTest do
   # ---------------------------------------------------------------
 
   describe "normalize/1 app_mention event" do
-    test "normalizes app_mention like a message" do
+    test "normalizes app_mention and strips bot mention from text" do
       event = %{
         "type" => "app_mention",
         "text" => "<@U_BOT> what is the status?",
@@ -147,10 +148,32 @@ defmodule Assistant.Channels.SlackTest do
       assert {:ok, %Message{} = msg} = Slack.normalize(event)
 
       assert msg.channel == :slack
-      assert msg.content == "<@U_BOT> what is the status?"
-      assert msg.user_id == "U99999"
-      assert msg.space_id == "C11111"
+      # Bot mention is stripped from app_mention events
+      assert msg.content == "what is the status?"
+      assert msg.user_id == "slack:T00000:U99999"
+      assert msg.space_id == "slack:T00000:C11111"
       assert msg.metadata["event_type"] == "app_mention"
+    end
+
+    test "strips bot mention with various ID formats" do
+      event = %{
+        "type" => "app_mention",
+        "text" => "<@U0123ABCDEF> run report",
+        "user" => "U99999",
+        "channel" => "C11111",
+        "ts" => "1234567890.222222",
+        "team" => "T00000"
+      }
+
+      {:ok, msg} = Slack.normalize(event)
+      assert msg.content == "run report"
+    end
+
+    test "does not strip mention from regular messages" do
+      event = build_message_event(%{"text" => "<@U_BOT> hello"})
+
+      {:ok, msg} = Slack.normalize(event)
+      assert msg.content == "<@U_BOT> hello"
     end
   end
 
@@ -264,6 +287,7 @@ defmodule Assistant.Channels.SlackTest do
       }
 
       {:ok, msg} = Slack.normalize(event)
+      # No team_id available, so falls back to unscoped empty string
       assert msg.space_id == ""
     end
 
@@ -276,7 +300,38 @@ defmodule Assistant.Channels.SlackTest do
       }
 
       {:ok, msg} = Slack.normalize(event)
+      # No team_id available, so falls back to unscoped empty string
       assert msg.user_id == ""
+    end
+
+    test "handles missing team_id (no scoping)" do
+      event = %{
+        "type" => "message",
+        "text" => "hello",
+        "user" => "U12345",
+        "channel" => "C67890",
+        "ts" => "1234567890.123456"
+      }
+
+      {:ok, msg} = Slack.normalize(event)
+      # Without team from either _team_id or team field, IDs are unscoped
+      assert msg.user_id == "U12345"
+      assert msg.space_id == "C67890"
+    end
+
+    test "scopes IDs using _team_id from controller envelope" do
+      event = %{
+        "type" => "message",
+        "text" => "hello",
+        "user" => "U12345",
+        "channel" => "C67890",
+        "ts" => "1234567890.123456",
+        "_team_id" => "T99999"
+      }
+
+      {:ok, msg} = Slack.normalize(event)
+      assert msg.user_id == "slack:T99999:U12345"
+      assert msg.space_id == "slack:T99999:C67890"
     end
 
     test "handles missing ts field" do

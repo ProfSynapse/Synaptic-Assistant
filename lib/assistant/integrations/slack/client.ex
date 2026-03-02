@@ -32,7 +32,7 @@ defmodule Assistant.Integrations.Slack.Client do
 
   require Logger
 
-  @base_url "https://slack.com/api"
+  @default_base_url "https://slack.com/api"
 
   @doc """
   Send a message to a Slack channel.
@@ -107,7 +107,7 @@ defmodule Assistant.Integrations.Slack.Client do
   # --- HTTP Helpers ---
 
   defp post(bot_token, method, body) do
-    url = "#{@base_url}/#{method}"
+    url = "#{base_url()}/#{method}"
 
     case Req.post(url,
            json: body,
@@ -141,6 +141,10 @@ defmodule Assistant.Integrations.Slack.Client do
 
         {:error, {:request_failed, reason}}
     end
+  end
+
+  defp base_url do
+    Application.get_env(:assistant, :slack_api_base_url, @default_base_url)
   end
 
   defp maybe_put(map, _key, nil), do: map

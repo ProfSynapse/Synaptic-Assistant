@@ -100,6 +100,15 @@ defmodule Assistant.Channels.Dispatcher do
         error: inspect(error),
         stacktrace: inspect(__STACKTRACE__)
       )
+
+      # Best-effort error reply so the user's message doesn't silently disappear.
+      # Wrapped in try/rescue to avoid masking the original error.
+      try do
+        reply_opts = build_reply_opts(message)
+        adapter.send_reply(message.space_id, @error_message, reply_opts)
+      rescue
+        _ -> :ok
+      end
   end
 
   defp handle_engine_response(adapter, message, conversation_id) do

@@ -32,7 +32,7 @@ defmodule Assistant.Integrations.Telegram.Client do
 
   require Logger
 
-  @base_url "https://api.telegram.org"
+  @default_base_url "https://api.telegram.org"
   @max_message_length 4096
 
   @doc """
@@ -117,7 +117,7 @@ defmodule Assistant.Integrations.Telegram.Client do
 
   defp post(method, body) do
     with {:ok, token} <- get_token() do
-      url = "#{@base_url}/bot#{token}/#{method}"
+      url = "#{base_url()}/bot#{token}/#{method}"
 
       case Req.post(url, json: body) do
         {:ok, %Req.Response{status: 200, body: %{"ok" => true, "result" => result}}} ->
@@ -154,7 +154,7 @@ defmodule Assistant.Integrations.Telegram.Client do
 
   defp get(method) do
     with {:ok, token} <- get_token() do
-      url = "#{@base_url}/bot#{token}/#{method}"
+      url = "#{base_url()}/bot#{token}/#{method}"
 
       case Req.get(url) do
         {:ok, %Req.Response{status: 200, body: %{"ok" => true, "result" => result}}} ->
@@ -189,6 +189,10 @@ defmodule Assistant.Integrations.Telegram.Client do
     end
   end
 
+  defp base_url do
+    Application.get_env(:assistant, :telegram_api_base_url, @default_base_url)
+  end
+
   defp get_token do
     case Application.get_env(:assistant, :telegram_bot_token) do
       nil ->
@@ -200,12 +204,13 @@ defmodule Assistant.Integrations.Telegram.Client do
     end
   end
 
-  defp truncate_message(text) when byte_size(text) <= @max_message_length, do: text
-
   defp truncate_message(text) do
-    max = @max_message_length - 40
-    truncated = String.slice(text, 0, max)
-    truncated <> "\n\n[Message truncated]"
+    if String.length(text) <= @max_message_length do
+      text
+    else
+      max = @max_message_length - 40
+      String.slice(text, 0, max) <> "\n\n[Message truncated]"
+    end
   end
 
   defp maybe_put(map, _key, nil), do: map

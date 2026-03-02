@@ -48,7 +48,7 @@ defmodule AssistantWeb.SlackController do
     json(conn, %{"challenge" => challenge})
   end
 
-  def event(conn, %{"type" => "event_callback", "event" => event_data}) do
+  def event(conn, %{"type" => "event_callback", "event" => event_data} = params) do
     # Check for retries — return 200 immediately to prevent duplicate processing
     if retry?(conn) do
       Logger.debug("Slack retry detected, acknowledging without processing",
@@ -57,7 +57,10 @@ defmodule AssistantWeb.SlackController do
 
       json(conn, %{})
     else
-      handle_event(conn, event_data)
+      # Inject team_id from envelope into event data for globally unique IDs
+      team_id = params["team_id"]
+      enriched_event = Map.put(event_data, "_team_id", team_id)
+      handle_event(conn, enriched_event)
     end
   end
 
