@@ -53,6 +53,10 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       flunk("OPENROUTER_API_KEY not set — required for real-LLM integration tests")
     end
 
+    # Save original config value so we can restore it in on_exit
+    # (deleting the key causes TurnClassifier background Tasks to crash)
+    original_key = Application.get_env(:assistant, :openrouter_api_key)
+
     # Ensure the real API key is available to OpenRouter client
     Application.put_env(:assistant, :openrouter_api_key, api_key)
 
@@ -108,8 +112,9 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     end)
 
     on_exit(fn ->
-      # Restore original API key (or clear it)
-      Application.delete_env(:assistant, :openrouter_api_key)
+      # Restore original API key value (not delete!) to prevent
+      # TurnClassifier background Tasks from crashing on key lookup
+      Application.put_env(:assistant, :openrouter_api_key, original_key)
     end)
 
     %{api_key: api_key}
@@ -218,7 +223,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
 
-      result = Engine.send_message(conversation.id, "Hello! What is 2 + 2?")
+      result = engine_send(conversation.id, "Hello! What is 2 + 2?", "simple_greeting")
 
       assert {:ok, response} = result
       assert is_binary(response)
@@ -243,9 +248,10 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
 
       result =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "In one sentence, what is the capital of France?"
+          "In one sentence, what is the capital of France?",
+          "knowledge_question"
         )
 
       assert {:ok, response} = result
@@ -272,9 +278,10 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
 
       result =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "What email skills do you have available? Use your tools to find out."
+          "What email skills do you have available? Use your tools to find out.",
+          "skill_discovery_email"
         )
 
       assert {:ok, response} = result
@@ -299,9 +306,10 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
 
       result =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "What can you do? List all your skill domains. Use your tools to check."
+          "What can you do? List all your skill domains. Use your tools to check.",
+          "skill_discovery_all"
         )
 
       assert {:ok, response} = result
@@ -339,9 +347,10 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       # Ask something that requires discovering skills first, then acting
       result =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "First check what email skills are available, then tell me about them. Use your get_skill tool."
+          "First check what email skills are available, then tell me about them. Use your get_skill tool.",
+          "chain_email_skills"
         )
 
       assert {:ok, response} = result
@@ -366,9 +375,10 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
 
       result =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "Look up what skills are available in both the email domain and the calendar domain. Use get_skill for each."
+          "Look up what skills are available in both the email domain and the calendar domain. Use get_skill for each.",
+          "chain_multi_domain"
         )
 
       assert {:ok, response} = result
@@ -402,16 +412,18 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       # Turn 1: Establish context
       {:ok, _} =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "Remember this: my favorite color is turquoise."
+          "Remember this: my favorite color is turquoise.",
+          "context_turn1"
         )
 
       # Turn 2: Reference prior context
       {:ok, response2} =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "What is my favorite color? Answer in one word."
+          "What is my favorite color? Answer in one word.",
+          "context_turn2"
         )
 
       assert is_binary(response2)
@@ -434,17 +446,18 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       # Turn 1
       {:ok, _} =
-        Engine.send_message(conversation.id, "My name is Zephyr.")
+        engine_send(conversation.id, "My name is Zephyr.", "thread_turn1")
 
       # Turn 2
       {:ok, _} =
-        Engine.send_message(conversation.id, "I live in a lighthouse.")
+        engine_send(conversation.id, "I live in a lighthouse.", "thread_turn2")
 
       # Turn 3: Reference both prior turns
       {:ok, response3} =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "What is my name and where do I live? Answer briefly."
+          "What is my name and where do I live? Answer briefly.",
+          "thread_turn3"
         )
 
       assert is_binary(response3)
@@ -475,9 +488,10 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       # no Google OAuth token exists for this test user. The Engine should
       # handle the error gracefully and still produce a text response.
       result =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "Search my emails for messages from alice@example.com about the weekly report."
+          "Search my emails for messages from alice@example.com about the weekly report.",
+          "error_agent_fail"
         )
 
       # We should still get SOME response (either error message or graceful fallback)
@@ -506,9 +520,10 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       # First message: something that might trigger tool errors
       _result1 =
-        Engine.send_message(
+        engine_send(
           conversation.id,
-          "Send an email to nobody@example.com saying hello"
+          "Send an email to nobody@example.com saying hello",
+          "error_survive_msg1"
         )
 
       # Engine should still be alive
@@ -516,7 +531,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       # Second message: simple question that shouldn't need tools
       result2 =
-        Engine.send_message(conversation.id, "What is 3 + 7?")
+        engine_send(conversation.id, "What is 3 + 7?", "error_survive_msg2")
 
       assert {:ok, response2} = result2
       assert is_binary(response2)
@@ -546,7 +561,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       {:ok, state} = Engine.get_state(conversation.id)
       assert state.mode == :single_loop
 
-      result = Engine.send_message(conversation.id, "Say hello in exactly one word.")
+      result = engine_send(conversation.id, "Say hello in exactly one word.", "single_loop")
 
       assert {:ok, response} = result
       assert is_binary(response)
@@ -568,7 +583,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
 
-      {:ok, _} = Engine.send_message(conversation.id, "Hello, how are you?")
+      {:ok, _} = engine_send(conversation.id, "Hello, how are you?", "token_tracking")
 
       {:ok, state} = Engine.get_state(conversation.id)
 

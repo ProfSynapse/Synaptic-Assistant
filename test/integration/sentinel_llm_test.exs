@@ -165,14 +165,15 @@ defmodule Assistant.Integration.SentinelLLMTest do
 
       result =
         sentinel_check(
-          "Create a meeting with the team tomorrow at 2pm",
-          "Create a calendar event for the team meeting",
+          "Create a meeting with the team tomorrow at 2pm UTC",
+          "Create a calendar event for the team meeting at 2pm UTC",
           %{
             skill_name: "calendar.create",
             arguments: %{
               "summary" => "Team Meeting",
               "start" => "2026-03-03T14:00:00Z",
-              "end" => "2026-03-03T15:00:00Z"
+              "end" => "2026-03-03T15:00:00Z",
+              "timeZone" => "UTC"
             },
             agent_id: "calendar-agent-001"
           },
