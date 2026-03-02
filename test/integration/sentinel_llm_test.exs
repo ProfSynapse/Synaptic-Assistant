@@ -20,7 +20,7 @@ defmodule Assistant.Integration.SentinelLLMTest do
 
   alias Assistant.Integrations.OpenRouter
 
-  @integration_model "openai/gpt-4.1-mini"
+  @integration_model "openai/gpt-5.2"
 
   # Real API key must be provided via OPENROUTER_API_KEY env var.
   # Tests are skipped if no key is available (CI without secrets).
