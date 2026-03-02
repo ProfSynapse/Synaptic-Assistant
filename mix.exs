@@ -78,6 +78,7 @@ defmodule Assistant.MixProject do
       {:google_api_drive, "~> 0.32"},
       {:google_api_gmail, "~> 0.17"},
       {:google_api_calendar, "~> 0.26"},
+      {:google_api_slides, "~> 0.24"},
 
       # Job processing & scheduling
       {:oban, "~> 2.18"},
