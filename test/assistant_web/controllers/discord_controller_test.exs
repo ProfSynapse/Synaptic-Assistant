@@ -115,7 +115,7 @@ defmodule AssistantWeb.DiscordControllerTest do
     test "returns 401 for wrong signature", %{conn: conn} do
       payload = %{"type" => 1}
       body = Jason.encode!(payload)
-      timestamp = "1709395200"
+      timestamp = to_string(System.system_time(:second))
       fake_sig = String.duplicate("ab", 64)
 
       conn =
@@ -135,7 +135,7 @@ defmodule AssistantWeb.DiscordControllerTest do
 
   defp post_discord(conn, payload) do
     body = Jason.encode!(payload)
-    timestamp = "1709395200"
+    timestamp = to_string(System.system_time(:second))
     signature = sign_message(timestamp, body)
 
     conn

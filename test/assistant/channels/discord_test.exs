@@ -233,7 +233,7 @@ defmodule Assistant.Channels.DiscordTest do
         "type" => 2,
         "id" => "1234567890123456789",
         "channel_id" => "444555666",
-        "guild_id" => "",
+        "guild_id" => nil,
         "user" => %{
           "id" => "777888999",
           "username" => "dmuser",
@@ -264,6 +264,43 @@ defmodule Assistant.Channels.DiscordTest do
       {:ok, msg} = Discord.normalize(interaction)
       assert msg.slash_command == "/"
       assert msg.content == ""
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # normalize/1 — snowflake validation (defense-in-depth)
+  # ---------------------------------------------------------------
+
+  describe "normalize/1 snowflake validation" do
+    @tag :capture_log
+    test "logs warning for non-snowflake channel_id but still processes" do
+      import ExUnit.CaptureLog
+
+      interaction =
+        build_slash_command(%{
+          "channel_id" => "not-a-snowflake"
+        })
+
+      log =
+        capture_log(fn ->
+          assert {:ok, %Message{} = msg} = Discord.normalize(interaction)
+          assert msg.metadata["channel_id"] == "not-a-snowflake"
+        end)
+
+      assert log =~ "non-snowflake channel_id"
+    end
+
+    test "does not warn for valid snowflake channel_id" do
+      import ExUnit.CaptureLog
+
+      interaction = build_slash_command()
+
+      log =
+        capture_log(fn ->
+          assert {:ok, %Message{}} = Discord.normalize(interaction)
+        end)
+
+      refute log =~ "non-snowflake"
     end
   end
 

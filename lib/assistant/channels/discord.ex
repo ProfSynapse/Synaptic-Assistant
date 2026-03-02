@@ -68,6 +68,12 @@ defmodule Assistant.Channels.Discord do
       channel_id = interaction["channel_id"] || ""
       user_id = user["id"] || ""
 
+      unless valid_snowflake?(channel_id) do
+        Logger.warning("Discord interaction has non-snowflake channel_id",
+          channel_id: channel_id
+        )
+      end
+
       # Extract command name and options text
       data = interaction["data"] || %{}
       command_name = data["name"] || ""
@@ -197,6 +203,11 @@ defmodule Assistant.Channels.Discord do
   end
 
   defp parse_timestamp(_), do: nil
+
+  # Validate that a string looks like a Discord snowflake (numeric string).
+  # Used for defense-in-depth logging only — does not reject invalid values.
+  defp valid_snowflake?(value) when is_binary(value), do: Regex.match?(~r/^\d+$/, value)
+  defp valid_snowflake?(_), do: false
 
   defp generate_id do
     "discord_" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)

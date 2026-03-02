@@ -42,6 +42,8 @@ defmodule AssistantWeb.Plugs.DiscordAuth do
 
   @behaviour Plug
 
+  @max_timestamp_age 300
+
   @impl true
   def init(opts), do: opts
 
@@ -51,6 +53,7 @@ defmodule AssistantWeb.Plugs.DiscordAuth do
 
     with {:ok, signature_hex} <- get_header(conn, "x-signature-ed25519"),
          {:ok, timestamp} <- get_header(conn, "x-signature-timestamp"),
+         :ok <- validate_timestamp(timestamp),
          {:ok, raw_body} <- get_raw_body(conn),
          :ok <- verify_signature(signature_hex, timestamp, raw_body, public_key_hex) do
       assign(conn, :discord_verified, true)
@@ -72,6 +75,22 @@ defmodule AssistantWeb.Plugs.DiscordAuth do
     case get_req_header(conn, header) do
       [value] when is_binary(value) and value != "" -> {:ok, value}
       _ -> {:error, :"missing_#{String.replace(header, "-", "_")}"}
+    end
+  end
+
+  defp validate_timestamp(timestamp_str) do
+    case Integer.parse(timestamp_str) do
+      {ts, ""} ->
+        now = System.system_time(:second)
+
+        if abs(now - ts) <= @max_timestamp_age do
+          :ok
+        else
+          {:error, :timestamp_too_old}
+        end
+
+      _ ->
+        {:error, :invalid_timestamp}
     end
   end
 
