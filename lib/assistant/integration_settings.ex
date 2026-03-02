@@ -248,8 +248,9 @@ defmodule Assistant.IntegrationSettings do
   end
 
   defp broadcast_change(key) do
-    Phoenix.PubSub.broadcast(
+    Phoenix.PubSub.broadcast_from(
       Assistant.PubSub,
+      self(),
       @pubsub_topic,
       %{key: key}
     )
