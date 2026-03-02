@@ -414,6 +414,11 @@ a {
   box-shadow: 0 1px 0 rgba(20, 39, 54, 0.05);
 }
 
+.sa-auth-card form {
+  display: grid;
+  gap: 14px;
+}
+
 .sa-auth-card .pc-label {
   color: #294259;
 }
