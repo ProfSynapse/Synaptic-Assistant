@@ -27,10 +27,7 @@ defmodule AssistantWeb.SettingsUserLive.Setup do
       </header>
 
       <section class="sa-auth-card sa-auth-card-compact">
-        <h1 class="sa-auth-title">Set Up Your Admin Account</h1>
-        <p class="sa-auth-subtitle">
-          No administrator exists yet. Create the first account to get started.
-        </p>
+        <h1 class="sa-auth-title" style="font-size: 1.3rem;">Admin Setup</h1>
 
         <.form for={@form} id="setup_form" phx-submit="save" phx-change="validate">
           <.field

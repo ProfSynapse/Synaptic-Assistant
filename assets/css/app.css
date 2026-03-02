@@ -243,8 +243,8 @@ a {
 .sa-auth-wordmark {
   font-family: "Montserrat", sans-serif;
   font-weight: 700;
-  font-size: clamp(2rem, 5vw, 2.8rem);
-  letter-spacing: 0.34em;
+  font-size: clamp(1.6rem, 4vw, 2.1rem);
+  letter-spacing: 0.32em;
   text-transform: uppercase;
   width: min(360px, 74vw);
   text-align: center;
@@ -1621,7 +1621,7 @@ a {
 
   .sa-auth-wordmark {
     width: min(280px, 72vw);
-    font-size: clamp(1.6rem, 4vw, 2rem);
+    font-size: clamp(1.2rem, 3.2vw, 1.6rem);
   }
 
   .sa-memory-filter-card {
