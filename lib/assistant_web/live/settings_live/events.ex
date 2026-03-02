@@ -10,6 +10,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.Auth.OAuth
   alias Assistant.Auth.TokenStore
   alias Assistant.ConnectedDrives
+  alias Assistant.IntegrationSettings
   alias Assistant.Integrations.OpenAI
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.Google.Drive, as: GoogleDrive
@@ -807,7 +808,7 @@ defmodule AssistantWeb.SettingsLive.Events do
         key
 
       _ ->
-        case Application.get_env(:assistant, :openrouter_api_key) do
+        case IntegrationSettings.get(:openrouter_api_key) do
           key when is_binary(key) and key != "" -> key
           _ -> nil
         end

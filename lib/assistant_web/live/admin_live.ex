@@ -3,7 +3,11 @@ defmodule AssistantWeb.AdminLive do
 
   alias Assistant.Accounts
   alias Assistant.Accounts.SettingsUserAllowlistEntry
+  alias Assistant.IntegrationSettings
+  alias Assistant.IntegrationSettings.Registry
   alias AssistantWeb.SettingsUserAuth
+
+  import AssistantWeb.Components.AdminIntegrations
 
   @impl true
   def mount(_params, _session, socket) do
@@ -23,7 +27,8 @@ defmodule AssistantWeb.AdminLive do
          socket
          |> assign(:allowlist_form, blank_allowlist_form())
          |> assign(:allowlist_entries, [])
-         |> assign(:settings_users, [])}
+         |> assign(:settings_users, [])
+         |> assign(:integration_settings, [])}
 
       true ->
         {:ok,
@@ -279,6 +284,17 @@ defmodule AssistantWeb.AdminLive do
             </div>
           </section>
         </section>
+
+        <section :if={@current_scope.settings_user.is_admin} class="space-y-4">
+          <div>
+            <h2 class="text-xl font-semibold">Integrations</h2>
+            <p class="text-sm text-zinc-600">
+              Configure API keys and tokens for connected services.
+              Values saved here override environment variables.
+            </p>
+          </div>
+          <.admin_integrations settings={@integration_settings} />
+        </section>
       </section>
     </Layouts.app>
     """
@@ -421,12 +437,63 @@ defmodule AssistantWeb.AdminLive do
     end
   end
 
+  def handle_event("save_integration", %{"key" => key, "value" => value}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      unless Registry.known_key?(key) do
+        {:noreply, put_flash(socket, :error, "Unknown integration key.")}
+      else
+        value = String.trim(value)
+
+        if value == "" do
+          {:noreply, put_flash(socket, :error, "Value cannot be blank.")}
+        else
+          admin_id = socket.assigns.current_scope.settings_user.id
+
+          case IntegrationSettings.put(String.to_existing_atom(key), value, admin_id) do
+            {:ok, _setting} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "Integration setting saved.")
+               |> assign(:integration_settings, IntegrationSettings.list_all())}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Unable to save integration setting.")}
+          end
+        end
+      end
+    end
+  end
+
+  def handle_event("delete_integration", %{"key" => key}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      unless Registry.known_key?(key) do
+        {:noreply, put_flash(socket, :error, "Unknown integration key.")}
+      else
+        case IntegrationSettings.delete(String.to_existing_atom(key)) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Integration setting reverted to environment variable.")
+             |> assign(:integration_settings, IntegrationSettings.list_all())}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Unable to delete integration setting.")}
+        end
+      end
+    end
+  end
+
   defp load_admin_data(socket) do
     assign(socket,
       can_bootstrap_admin: Accounts.admin_bootstrap_available?(),
       allowlist_form: blank_allowlist_form(),
       allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
-      settings_users: Accounts.list_admin_settings_users()
+      settings_users: Accounts.list_admin_settings_users(),
+      integration_settings: IntegrationSettings.list_all()
     )
   end
 

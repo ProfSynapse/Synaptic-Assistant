@@ -29,6 +29,8 @@ defmodule AssistantWeb.Plugs.TelegramAuth do
 
   import Plug.Conn
 
+  alias Assistant.IntegrationSettings
+
   require Logger
 
   @behaviour Plug
@@ -40,7 +42,7 @@ defmodule AssistantWeb.Plugs.TelegramAuth do
 
   @impl true
   def call(conn, _opts) do
-    expected_secret = Application.get_env(:assistant, :telegram_webhook_secret)
+    expected_secret = IntegrationSettings.get(:telegram_webhook_secret)
 
     with {:ok, secret} <- get_secret_header(conn),
          :ok <- verify_secret(secret, expected_secret) do

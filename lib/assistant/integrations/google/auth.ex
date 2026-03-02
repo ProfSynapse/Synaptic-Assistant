@@ -64,6 +64,7 @@ defmodule Assistant.Integrations.Google.Auth do
   require Logger
 
   alias Assistant.Auth.{OAuth, TokenStore}
+  alias Assistant.IntegrationSettings
 
   @goth_name Assistant.Goth
 
@@ -140,8 +141,8 @@ defmodule Assistant.Integrations.Google.Auth do
   """
   @spec oauth_configured?() :: boolean()
   def oauth_configured? do
-    Application.get_env(:assistant, :google_oauth_client_id) != nil and
-      Application.get_env(:assistant, :google_oauth_client_secret) != nil
+    IntegrationSettings.get(:google_oauth_client_id) != nil and
+      IntegrationSettings.get(:google_oauth_client_secret) != nil
   end
 
   @doc """

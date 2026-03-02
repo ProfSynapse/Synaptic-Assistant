@@ -32,6 +32,9 @@ defmodule Assistant.Application do
       ] ++
         maybe_goth() ++
         [
+          # Integration settings cache (after Repo + PubSub — warms from DB, subscribes to PubSub)
+          Assistant.IntegrationSettings.Cache,
+
           # Cron scheduler (before Oban — scheduled jobs may enqueue Oban work)
           Assistant.Scheduler,
 

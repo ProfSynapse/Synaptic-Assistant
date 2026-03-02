@@ -27,6 +27,7 @@ defmodule Assistant.Notifications.Router do
 
   use GenServer
 
+  alias Assistant.IntegrationSettings
   alias Assistant.Notifications.{Dedup, GoogleChat}
 
   require Logger
@@ -191,7 +192,7 @@ defmodule Assistant.Notifications.Router do
 
   # Falls back to the application env webhook for :error and :critical.
   defp dispatch_fallback(severity, message) when severity in [:error, :critical] do
-    case Application.get_env(:assistant, :google_chat_webhook_url) do
+    case IntegrationSettings.get(:google_chat_webhook_url) do
       nil ->
         Logger.debug("No fallback webhook configured, notification dropped",
           severity: severity
