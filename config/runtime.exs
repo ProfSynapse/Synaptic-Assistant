@@ -84,26 +84,7 @@ end
 # OpenAI OAuth settings (client_id, URLs, scope, flow) use hardcoded defaults
 # in OpenaiOauthController. Override via env vars if needed (see controller source).
 
-# Google service account credentials (inline JSON string or file path to JSON key).
-# Now used ONLY for Google Chat bot operations (chat.bot scope).
-# Per-user Gmail/Drive/Calendar access uses OAuth2 client credentials below.
-if google_creds = System.get_env("GOOGLE_APPLICATION_CREDENTIALS") do
-  credentials =
-    cond do
-      String.starts_with?(String.trim(google_creds), "{") ->
-        Jason.decode!(google_creds)
-
-      File.exists?(google_creds) ->
-        google_creds |> File.read!() |> Jason.decode!()
-
-      true ->
-        nil
-    end
-
-  if credentials, do: config(:assistant, :google_credentials, credentials)
-end
-
-# Google OAuth2 client credentials — for per-user authorization flow.
+# Google OAuth2 client credentials — for per-user authorization flow and Chat bot auth.
 # Obtain from Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client ID.
 # Required for Gmail, Drive, and Calendar per-user access.
 if client_id = System.get_env("GOOGLE_OAUTH_CLIENT_ID") do

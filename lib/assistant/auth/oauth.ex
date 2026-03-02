@@ -3,15 +3,12 @@
 # Provides three capabilities:
 #   1. Authorization URL builder (with PKCE S256 + HMAC-signed state)
 #   2. Authorization code exchange via Req HTTP POST
-#   3. Stateless per-user token refresh via Goth.Token.fetch/1
+#   3. Per-user token refresh via direct Req HTTP POST to Google's token endpoint
 #
 # This module is pure-functional — no processes, no state. Token storage
-# is handled by Auth.TokenStore (separate module). The existing Goth
-# supervised process (Assistant.Goth) is used only for the service account;
-# per-user refresh uses Goth.Token.fetch/1 in stateless mode.
+# is handled by Auth.TokenStore (separate module).
 #
 # Related files:
-#   - lib/assistant/integrations/google/auth.ex (service account token — unchanged)
 #   - lib/assistant/auth/token_store.ex (encrypted CRUD for oauth_tokens table)
 #   - lib/assistant/auth/magic_link.ex (magic link lifecycle)
 #   - lib/assistant_web/controllers/oauth_controller.ex (callback handler)
@@ -35,7 +32,7 @@ defmodule Assistant.Auth.OAuth do
   ## Token Refresh
 
       {:ok, access_token} = OAuth.refresh_access_token(refresh_token)
-      # Uses Goth.Token.fetch/1 stateless mode — no running process needed
+      # Direct HTTP POST to Google's token endpoint
   """
 
   alias Assistant.IntegrationSettings
@@ -45,7 +42,7 @@ defmodule Assistant.Auth.OAuth do
   @google_authorize_url "https://accounts.google.com/o/oauth2/v2/auth"
   @google_token_url "https://oauth2.googleapis.com/token"
 
-  # Scopes for per-user OAuth (excludes chat.bot — that stays on service account)
+  # Scopes for per-user OAuth
   @user_scopes [
     "openid",
     "email",
@@ -170,11 +167,10 @@ defmodule Assistant.Auth.OAuth do
   end
 
   @doc """
-  Refresh an access token using a stored refresh_token via Goth stateless mode.
+  Refresh an access token using a stored refresh_token.
 
-  Uses `Goth.Token.fetch/1` with a `{:refresh_token, ...}` source, which
-  performs a single HTTP call to Google's token endpoint and returns a fresh
-  access token. No running Goth process is needed.
+  Performs a direct HTTP POST to Google's token endpoint with the
+  client credentials and refresh token.
 
   ## Parameters
 
@@ -190,21 +186,28 @@ defmodule Assistant.Auth.OAuth do
   def refresh_access_token(refresh_token) do
     with {:ok, client_id} <- fetch_client_id(),
          {:ok, client_secret} <- fetch_client_secret() do
-      credentials = %{
+      form = %{
         "client_id" => client_id,
         "client_secret" => client_secret,
-        "refresh_token" => refresh_token
+        "refresh_token" => refresh_token,
+        "grant_type" => "refresh_token"
       }
 
-      case Goth.Token.fetch(source: {:refresh_token, credentials}) do
-        {:ok, %{token: access_token}} ->
+      case Req.post(@google_token_url, form: form) do
+        {:ok, %Req.Response{status: 200, body: %{"access_token" => access_token}}} ->
           {:ok, access_token}
 
-        {:error, reason} ->
+        {:ok, %Req.Response{status: status, body: body}} ->
           Logger.warning("OAuth token refresh failed",
-            reason: inspect(reason)
+            status: status,
+            error: inspect(body["error"]),
+            description: inspect(body["error_description"])
           )
 
+          {:error, :refresh_failed}
+
+        {:error, reason} ->
+          Logger.error("OAuth token refresh HTTP error", reason: inspect(reason))
           {:error, :refresh_failed}
       end
     end

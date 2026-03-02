@@ -161,27 +161,24 @@ defmodule Assistant.Scheduler.WorkflowWorkerTest do
       %{workflow_path: workflow_path}
     end
 
-    test "crashes when Goth registry is absent (channel posting not wrapped in try/catch)", %{
-      workflow_path: path
-    } do
-      # BUG: maybe_post_to_channel/3 calls Chat.send_message which calls
-      # Auth.token/0 -> Goth.fetch -> Registry.lookup. Without Goth started,
-      # this raises ArgumentError (--no-start) or exits via GenServer.call
-      # (full app). Either way, it's not handled gracefully.
-      # The channel posting should be wrapped in try/catch for resilience.
+    test "completes even when service account is not configured (channel posting fails gracefully)",
+         %{workflow_path: path} do
+      # With Goth removed, Chat bot auth uses direct JWT signing via JOSE.
+      # Without service account credentials configured, send_message returns
+      # an error but the worker should still complete without crashing.
       job = %Oban.Job{args: %{"workflow_path" => path}}
 
-      crashed =
+      result =
         try do
           WorkflowWorker.perform(job)
-          false
         rescue
-          ArgumentError -> true
+          _ -> :crashed
         catch
-          :exit, _ -> true
+          :exit, _ -> :crashed
         end
 
-      assert crashed, "Expected perform/1 to crash when Goth registry is absent"
+      assert result != :crashed,
+             "Expected perform/1 to handle missing credentials gracefully, not crash"
     end
   end
 end

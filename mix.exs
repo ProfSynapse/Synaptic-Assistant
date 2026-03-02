@@ -74,7 +74,6 @@ defmodule Assistant.MixProject do
       {:req, "~> 0.5"},
 
       # Google APIs
-      {:goth, "~> 1.4"},
       {:google_api_drive, "~> 0.32"},
       {:google_api_gmail, "~> 0.17"},
       {:google_api_calendar, "~> 0.26"},
@@ -83,6 +82,9 @@ defmodule Assistant.MixProject do
       # Job processing & scheduling
       {:oban, "~> 2.18"},
       {:quantum, "~> 3.5"},
+
+      # JWT signing (Google Chat bot service account auth)
+      {:jose, "~> 1.11"},
 
       # Security
       {:cloak_ecto, "~> 1.3"},

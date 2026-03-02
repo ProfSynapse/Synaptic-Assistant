@@ -1,18 +1,26 @@
 # lib/assistant/integrations/google/auth.ex — Dual-mode Google auth wrapper.
 #
 # Provides two token paths:
-#   1. service_token/0 — Goth service account for Google Chat bot operations
+#   1. service_token/0 — Service account token for Google Chat bot operations,
+#      obtained via direct JWT assertion (no Goth dependency).
 #   2. user_token/1 — Per-user OAuth2 token from oauth_tokens table, with
 #      automatic refresh when expired via Auth.OAuth.refresh_access_token/1
 #
-# Concurrent refresh safety:
+# Service account token flow (service_token/0):
+#   Reads the service account JSON from IntegrationSettings
+#   (:google_service_account_json key, env var GOOGLE_APPLICATION_CREDENTIALS).
+#   The value can be raw JSON or a file path. Creates a signed JWT assertion
+#   using JOSE, exchanges it at Google's token endpoint, and caches the result
+#   in ETS with TTL tracking. Concurrent callers are serialized via
+#   :global.trans/3 to prevent thundering herd on expiry.
+#
+# Per-user token concurrent refresh safety:
 #   When multiple requests hit an expired token simultaneously, :global.trans/3
 #   serializes refresh calls per-user. The first process acquires the lock and
 #   performs the Google refresh; subsequent processes wait, then re-check the
 #   DB for the freshly cached token (double-checked locking pattern).
 #
 # Related files:
-#   - lib/assistant/application.ex (starts Goth in the supervision tree)
 #   - lib/assistant/auth/oauth.ex (stateless token exchange + refresh)
 #   - lib/assistant/auth/token_store.ex (encrypted CRUD for oauth_tokens)
 #   - config/runtime.exs (Google credentials configuration)
@@ -27,8 +35,10 @@ defmodule Assistant.Integrations.Google.Auth do
 
   Two authentication paths:
 
-  - `service_token/0` — Goth service account token for Google Chat bot
-    operations. Tokens are auto-refreshed by the supervised Goth process.
+  - `service_token/0` — Service account token for Google Chat bot operations.
+    Creates a JWT assertion signed with the service account's private key,
+    exchanges it at Google's OAuth2 token endpoint, and caches the result
+    in ETS (~1 hour TTL). No external dependencies (replaces Goth).
 
   - `user_token/1` — Per-user OAuth2 token from the `oauth_tokens` table.
     Checks whether the cached access token is still valid; if expired,
@@ -37,12 +47,11 @@ defmodule Assistant.Integrations.Google.Auth do
 
   ## Concurrent Refresh Safety
 
-  When multiple requests for the same user arrive simultaneously with an
-  expired token, `:global.trans/3` serializes refresh calls per-user:
+  Both token paths use `:global.trans/3` to serialize concurrent refreshes:
 
-  1. The first process acquires a per-user lock and performs the refresh.
-  2. Concurrent processes block on the lock, then re-check the DB for
-     the freshly cached token (double-checked locking).
+  1. The first process acquires a lock and performs the refresh/exchange.
+  2. Concurrent processes block on the lock, then re-check the cache/DB for
+     the freshly obtained token (double-checked locking).
   3. No additional supervision tree entries or GenServers required.
 
   ## Usage
@@ -66,27 +75,36 @@ defmodule Assistant.Integrations.Google.Auth do
   alias Assistant.Auth.{OAuth, TokenStore}
   alias Assistant.IntegrationSettings
 
-  @goth_name Assistant.Goth
+  @google_token_url "https://oauth2.googleapis.com/token"
+  @chat_bot_scope "https://www.googleapis.com/auth/chat.bot"
+  @jwt_lifetime_seconds 3600
+  @token_cache_table :google_service_token_cache
+  # Refresh 5 minutes before expiry to avoid edge-case failures
+  @token_refresh_margin_seconds 300
 
   # --- Service Account (Chat bot) ---
 
   @doc """
-  Fetch a service account access token from the supervised Goth instance.
+  Fetch a service account access token for Google Chat bot operations.
 
-  Used exclusively for Google Chat bot operations. All other Google API
-  calls (Drive, Gmail, Calendar) use `user_token/1` with per-user OAuth.
+  Creates a JWT assertion signed with the service account's RSA private key,
+  exchanges it at Google's token endpoint for an access token, and caches the
+  result in ETS. Subsequent calls return the cached token until it nears expiry.
+
+  Requires service account credentials configured via
+  `IntegrationSettings.get(:google_service_account_json)` — either raw JSON
+  content or a file path to the service account JSON file.
 
   Returns `{:ok, token_string}` on success or `{:error, reason}` on failure.
   """
   @spec service_token() :: {:ok, String.t()} | {:error, term()}
   def service_token do
-    case Goth.fetch(@goth_name) do
-      {:ok, %{token: access_token}} ->
-        {:ok, access_token}
+    case get_cached_service_token() do
+      {:ok, _token} = hit ->
+        hit
 
-      {:error, reason} = error ->
-        Logger.warning("Failed to fetch Google service account token: #{inspect(reason)}")
-        error
+      :miss ->
+        fetch_service_token_serialized()
     end
   end
 
@@ -121,16 +139,21 @@ defmodule Assistant.Integrations.Google.Auth do
     end
   end
 
-  # --- Legacy Compatibility ---
+  # --- Configuration Checks ---
 
   @doc """
   Check whether Google service account credentials are configured.
 
-  Returns `true` if the `:google_credentials` application env is set.
+  Returns `true` if `:google_service_account_json` is set via
+  IntegrationSettings (DB value or GOOGLE_APPLICATION_CREDENTIALS env var)
+  and contains valid `client_email` and `private_key` fields.
   """
   @spec configured?() :: boolean()
   def configured? do
-    Application.get_env(:assistant, :google_credentials) != nil
+    case load_service_account_credentials() do
+      {:ok, _client_email, _private_key} -> true
+      :error -> false
+    end
   end
 
   @doc """
@@ -145,17 +168,208 @@ defmodule Assistant.Integrations.Google.Auth do
       IntegrationSettings.get(:google_oauth_client_secret) != nil
   end
 
-  @doc """
-  The Google Chat bot scope (service account only).
+  # --- Private: Service Account Token ---
 
-  Per-user scopes are defined in `Auth.OAuth.user_scopes/0`.
-  """
-  @spec scopes() :: [String.t()]
-  def scopes do
-    ["https://www.googleapis.com/auth/chat.bot"]
+  # Check ETS cache for a valid (non-expired) service account token.
+  defp get_cached_service_token do
+    ensure_token_cache()
+
+    case :ets.lookup(@token_cache_table, :service_token) do
+      [{:service_token, token, expires_at}] ->
+        if System.system_time(:second) < expires_at - @token_refresh_margin_seconds do
+          {:ok, token}
+        else
+          :miss
+        end
+
+      [] ->
+        :miss
+    end
   end
 
-  # --- Private ---
+  # Serialize concurrent service token fetches via :global.trans/3.
+  # Double-checked locking: after acquiring the lock, re-check cache
+  # in case another process already fetched while we waited.
+  defp fetch_service_token_serialized do
+    result =
+      :global.trans({:service_token_refresh, self()}, fn ->
+        case get_cached_service_token() do
+          {:ok, _token} = hit ->
+            hit
+
+          :miss ->
+            do_fetch_service_token()
+        end
+      end)
+
+    case result do
+      :aborted ->
+        Logger.warning("Service token lock acquisition failed, falling back to direct fetch")
+        do_fetch_service_token()
+
+      other ->
+        other
+    end
+  end
+
+  # Load service account credentials, build JWT assertion, sign, and exchange.
+  defp do_fetch_service_token do
+    case load_service_account_credentials() do
+      {:ok, client_email, private_key_pem} ->
+        fetch_token_via_jwt(client_email, private_key_pem)
+
+      :error ->
+        Logger.warning("Google service account credentials not configured")
+        {:error, :not_configured}
+    end
+  end
+
+  # Load and parse service account credentials from IntegrationSettings.
+  # The value can be either raw JSON content or a file path to the JSON file.
+  defp load_service_account_credentials do
+    case IntegrationSettings.get(:google_service_account_json) do
+      nil ->
+        :error
+
+      value when is_binary(value) ->
+        parse_service_account_value(value)
+
+      _ ->
+        :error
+    end
+  end
+
+  defp parse_service_account_value(value) do
+    # Try parsing as JSON first; if that fails, treat as file path
+    case Jason.decode(value) do
+      {:ok, %{"client_email" => email, "private_key" => key}}
+      when is_binary(email) and is_binary(key) ->
+        {:ok, email, key}
+
+      {:ok, _} ->
+        Logger.warning("Service account JSON missing client_email or private_key fields")
+        :error
+
+      {:error, _} ->
+        # Not valid JSON — try reading as file path
+        read_service_account_file(value)
+    end
+  end
+
+  defp read_service_account_file(path) do
+    case File.read(path) do
+      {:ok, contents} ->
+        case Jason.decode(contents) do
+          {:ok, %{"client_email" => email, "private_key" => key}}
+          when is_binary(email) and is_binary(key) ->
+            {:ok, email, key}
+
+          _ ->
+            Logger.warning("Service account file missing client_email or private_key",
+              path: path
+            )
+
+            :error
+        end
+
+      {:error, reason} ->
+        Logger.warning("Failed to read service account file",
+          path: path,
+          reason: inspect(reason)
+        )
+
+        :error
+    end
+  end
+
+  defp fetch_token_via_jwt(client_email, private_key_pem) do
+    now = System.system_time(:second)
+
+    claims = %{
+      "iss" => client_email,
+      "scope" => @chat_bot_scope,
+      "aud" => @google_token_url,
+      "iat" => now,
+      "exp" => now + @jwt_lifetime_seconds
+    }
+
+    with {:ok, jwk} <- parse_private_key(private_key_pem),
+         {:ok, signed_jwt} <- sign_jwt(jwk, claims),
+         {:ok, token, expires_in} <- exchange_jwt(signed_jwt) do
+      expires_at = now + expires_in
+      cache_service_token(token, expires_at)
+      {:ok, token}
+    end
+  end
+
+  defp parse_private_key(pem) do
+    try do
+      jwk = JOSE.JWK.from_pem(pem)
+      {:ok, jwk}
+    rescue
+      error ->
+        Logger.error("Failed to parse service account private key: #{inspect(error)}")
+        {:error, :invalid_private_key}
+    end
+  end
+
+  defp sign_jwt(jwk, claims) do
+    try do
+      jws = %{"alg" => "RS256", "typ" => "JWT"}
+      {_, compact} = JOSE.JWT.sign(jwk, jws, claims) |> JOSE.JWS.compact()
+      {:ok, compact}
+    rescue
+      error ->
+        Logger.error("Failed to sign service account JWT: #{inspect(error)}")
+        {:error, :jwt_signing_failed}
+    end
+  end
+
+  defp exchange_jwt(signed_jwt) do
+    body = %{
+      "grant_type" => "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      "assertion" => signed_jwt
+    }
+
+    case Req.post(@google_token_url, form: body) do
+      {:ok, %Req.Response{status: 200, body: %{"access_token" => token} = resp_body}} ->
+        expires_in = Map.get(resp_body, "expires_in", @jwt_lifetime_seconds)
+        {:ok, token, expires_in}
+
+      {:ok, %Req.Response{status: status, body: resp_body}} ->
+        Logger.error("Google token exchange failed",
+          status: status,
+          body: inspect(resp_body)
+        )
+
+        {:error, {:token_exchange_failed, status}}
+
+      {:error, reason} ->
+        Logger.error("Google token exchange request failed: #{inspect(reason)}")
+        {:error, {:token_exchange_failed, reason}}
+    end
+  end
+
+  defp cache_service_token(token, expires_at) do
+    ensure_token_cache()
+    :ets.insert(@token_cache_table, {:service_token, token, expires_at})
+  end
+
+  defp ensure_token_cache do
+    case :ets.whereis(@token_cache_table) do
+      :undefined ->
+        :ets.new(@token_cache_table, [:set, :public, :named_table])
+
+      _ref ->
+        :ok
+    end
+  rescue
+    ArgumentError ->
+      # Table may have been created by another process between check and create
+      :ok
+  end
+
+  # --- Private: Per-User Token ---
 
   # Serialize concurrent refreshes for the same user via :global.trans/3.
   # Uses double-checked locking: after acquiring the lock, re-reads the DB

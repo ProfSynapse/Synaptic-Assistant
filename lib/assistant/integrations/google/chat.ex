@@ -1,12 +1,13 @@
 # lib/assistant/integrations/google/chat.ex — Google Chat REST API client.
 #
 # Provides functions for sending messages to Google Chat spaces via the
-# REST API. Uses service account authentication via Auth.service_token/0.
-# Chat is a bot-level integration (not per-user), so it does NOT accept
-# an access_token parameter — it fetches its own service account token.
+# REST API. Uses service account authentication via Auth.service_token/0
+# (JWT assertion flow — no Goth dependency). Chat is a bot-level integration
+# (not per-user), so it does NOT accept an access_token parameter — it
+# fetches its own service account token internally.
 #
 # Related files:
-#   - lib/assistant/integrations/google/auth.ex (token provider)
+#   - lib/assistant/integrations/google/auth.ex (token provider — JWT assertion)
 #   - lib/assistant/channels/google_chat.ex (channel adapter that calls this)
 #   - lib/assistant_web/controllers/google_chat_controller.ex (async reply)
 
@@ -15,9 +16,9 @@ defmodule Assistant.Integrations.Google.Chat do
   Google Chat REST API client for sending messages.
 
   Sends messages to Google Chat spaces using service account authentication
-  via `Auth.service_token/0`. Unlike Drive, Gmail, and Calendar clients,
-  Chat does NOT accept a per-user `access_token` — it always uses the
-  service account.
+  via `Auth.service_token/0` (JWT assertion flow). Unlike Drive, Gmail, and
+  Calendar clients, Chat does NOT accept a per-user `access_token` — it
+  always uses the service account.
 
   ## Usage
 
