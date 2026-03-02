@@ -149,6 +149,19 @@ if bot_token = System.get_env("SLACK_BOT_TOKEN") do
   config :assistant, :slack_bot_token, bot_token
 end
 
+# Discord Bot
+if token = System.get_env("DISCORD_BOT_TOKEN") do
+  config :assistant, :discord_bot_token, token
+end
+
+if public_key = System.get_env("DISCORD_PUBLIC_KEY") do
+  config :assistant, :discord_public_key, public_key
+end
+
+if app_id = System.get_env("DISCORD_APPLICATION_ID") do
+  config :assistant, :discord_application_id, app_id
+end
+
 # Google Chat
 if webhook_url = System.get_env("GOOGLE_CHAT_WEBHOOK_URL") do
   config :assistant, :google_chat_webhook_url, webhook_url

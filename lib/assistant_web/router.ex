@@ -44,6 +44,10 @@ defmodule AssistantWeb.Router do
     plug AssistantWeb.Plugs.SlackAuth
   end
 
+  pipeline :discord_auth do
+    plug AssistantWeb.Plugs.DiscordAuth
+  end
+
   # Per-user Google OAuth flow (magic link → Google consent → callback)
   # No CSRF protection: /start is from a magic link, /callback is from Google redirect.
   scope "/auth/google", AssistantWeb do
@@ -79,6 +83,13 @@ defmodule AssistantWeb.Router do
     pipe_through [:api, :slack_auth]
 
     post "/slack", SlackController, :event
+  end
+
+  # Discord webhook — Ed25519 signature verified via DiscordAuth plug
+  scope "/webhooks", AssistantWeb do
+    pipe_through [:api, :discord_auth]
+
+    post "/discord", DiscordController, :interaction
   end
 
   ## Authentication routes
