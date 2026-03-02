@@ -63,6 +63,10 @@ if config_env() == :prod do
 
   config :assistant, AssistantWeb.Endpoint,
     url: [host: host, port: 443, scheme: "https"],
+    check_origin: [
+      "https://#{host}",
+      "https://*.railway.app"
+    ],
     http: [
       ip: {0, 0, 0, 0, 0, 0, 0, 0}
     ],
