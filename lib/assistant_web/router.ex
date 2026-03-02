@@ -36,6 +36,14 @@ defmodule AssistantWeb.Router do
     plug AssistantWeb.Plugs.GoogleChatAuth
   end
 
+  pipeline :telegram_auth do
+    plug AssistantWeb.Plugs.TelegramAuth
+  end
+
+  pipeline :slack_auth do
+    plug AssistantWeb.Plugs.SlackAuth
+  end
+
   # Per-user Google OAuth flow (magic link → Google consent → callback)
   # No CSRF protection: /start is from a magic link, /callback is from Google redirect.
   scope "/auth/google", AssistantWeb do
@@ -59,11 +67,18 @@ defmodule AssistantWeb.Router do
     post "/google-chat", GoogleChatController, :event
   end
 
-  # Other webhook endpoints — channel adapters (no additional auth yet)
+  # Telegram webhook — secret token verified via TelegramAuth plug
   scope "/webhooks", AssistantWeb do
-    pipe_through :api
+    pipe_through [:api, :telegram_auth]
 
-    post "/telegram", WebhookController, :telegram
+    post "/telegram", TelegramController, :webhook
+  end
+
+  # Slack webhook — HMAC-SHA256 signature verified via SlackAuth plug
+  scope "/webhooks", AssistantWeb do
+    pipe_through [:api, :slack_auth]
+
+    post "/slack", SlackController, :event
   end
 
   ## Authentication routes
