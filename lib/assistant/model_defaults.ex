@@ -3,7 +3,7 @@ defmodule Assistant.ModelDefaults do
   File-backed default model selections by role.
   """
 
-  @default_path "config/model_defaults.json"
+  @default_rel_path "priv/config/model_defaults.json"
 
   @spec list_defaults() :: map()
   def list_defaults do
@@ -63,6 +63,10 @@ defmodule Assistant.ModelDefaults do
   end
 
   defp defaults_path do
-    Application.get_env(:assistant, :model_defaults_path, @default_path)
+    Application.get_env(
+      :assistant,
+      :model_defaults_path,
+      Application.app_dir(:assistant, @default_rel_path)
+    )
   end
 end

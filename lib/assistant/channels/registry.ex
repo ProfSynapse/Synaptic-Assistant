@@ -10,6 +10,7 @@
 #   - lib/assistant/channels/google_chat.ex (registered adapter)
 #   - lib/assistant/channels/telegram.ex (registered adapter)
 #   - lib/assistant/channels/slack.ex (registered adapter)
+#   - lib/assistant/channels/discord.ex (registered adapter)
 
 defmodule Assistant.Channels.Registry do
   @moduledoc """
@@ -30,7 +31,8 @@ defmodule Assistant.Channels.Registry do
   @adapters %{
     google_chat: Assistant.Channels.GoogleChat,
     telegram: Assistant.Channels.Telegram,
-    slack: Assistant.Channels.Slack
+    slack: Assistant.Channels.Slack,
+    discord: Assistant.Channels.Discord
   }
 
   @doc "Look up the adapter module for a channel atom."

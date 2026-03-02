@@ -19,7 +19,7 @@ defmodule Assistant.Application do
         # Config loader (must be first — other children depend on ETS config)
         Assistant.Config.Loader,
 
-        # Prompt template loader (after Config.Loader — reads config/prompts/*.yaml)
+        # Prompt template loader (after Config.Loader — reads priv/config/prompts/*.yaml)
         Assistant.Config.PromptLoader,
 
         # Encryption vault (must start before Repo consumers that use Cloak types)

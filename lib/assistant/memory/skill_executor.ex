@@ -11,7 +11,7 @@
 # Related files:
 #   - lib/assistant/skills/executor.ex (underlying executor)
 #   - lib/assistant/memory/agent.ex (consumer — memory agent GenServer)
-#   - config/prompts/nudges.yaml (memory_write_without_search hint)
+#   - priv/config/prompts/nudges.yaml (memory_write_without_search hint)
 
 defmodule Assistant.Memory.SkillExecutor do
   @moduledoc """

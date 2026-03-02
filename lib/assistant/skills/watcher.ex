@@ -36,6 +36,13 @@ defmodule Assistant.Skills.Watcher do
 
         {:ok, %{watcher_pid: watcher_pid, skills_dir: skills_dir}}
 
+      :ignore ->
+        Logger.warning("File watcher not supported on this system, hot-reload disabled",
+          dir: skills_dir
+        )
+
+        {:ok, %{watcher_pid: nil, skills_dir: skills_dir}}
+
       {:error, reason} ->
         Logger.warning("Failed to start skill file watcher, hot-reload disabled",
           dir: skills_dir,

@@ -16,7 +16,7 @@
 #   - lib/assistant/orchestrator/sub_agent.ex (LLM loop pattern origin)
 #   - lib/assistant/memory/skill_executor.ex (search-first enforcement)
 #   - lib/assistant/skills/registry.ex (skill loading)
-#   - config/prompts/memory_agent.yaml (system prompt template)
+#   - priv/config/prompts/memory_agent.yaml (system prompt template)
 #   - priv/skills/memory/ (skill definitions)
 #   - lib/assistant/orchestrator/context_monitor.ex (dispatches :compact_conversation)
 #   - lib/assistant/orchestrator/turn_classifier.ex (dispatches :save_memory, :extract_entities)

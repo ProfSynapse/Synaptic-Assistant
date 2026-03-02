@@ -2,17 +2,17 @@
 #
 # ETS-backed GenServer that loads, validates, caches, and hot-reloads the
 # model roster, voice configuration, HTTP client settings, and limits from
-# config/config.yaml. Public API functions read directly from ETS for
+# priv/config/config.yaml. Public API functions read directly from ETS for
 # lock-free concurrent access.
 #
 # Related files:
-#   - config/config.yaml (source of truth for models, voice, HTTP settings)
+#   - priv/config/config.yaml (source of truth for models, voice, HTTP settings)
 #   - lib/assistant/config/watcher.ex (file-system watcher, triggers reload)
 #   - docs/architecture/config-design.md (design spec)
 
 defmodule Assistant.Config.Loader do
   @moduledoc """
-  Loads and serves model roster, voice, HTTP, and limits configuration from config/config.yaml.
+  Loads and serves model roster, voice, HTTP, and limits configuration from priv/config/config.yaml.
 
   Backed by ETS for fast concurrent reads. The GenServer coordinates reloads
   triggered by `Assistant.Config.Watcher` on file changes.
@@ -25,7 +25,7 @@ defmodule Assistant.Config.Loader do
 
   ## Boot Behaviour
 
-  If `config/config.yaml` is missing, malformed, or references undefined env
+  If `priv/config/config.yaml` is missing, malformed, or references undefined env
   vars, `init/1` crashes. The supervisor retries with backoff. The assistant
   cannot operate without a model roster.
 
@@ -43,14 +43,13 @@ defmodule Assistant.Config.Loader do
   require Logger
 
   @ets_table :assistant_config
-  @config_path "config/config.yaml"
 
   # --- Public API (read from ETS, no GenServer call) ---
 
   @doc """
   Returns the HTTP client configuration as a map.
 
-  Values come from the `http:` section of `config/config.yaml`:
+  Values come from the `http:` section of `priv/config/config.yaml`:
 
     - `:max_retries` — Maximum retry attempts on transient errors
     - `:base_backoff_ms` — Initial backoff before first retry
@@ -156,7 +155,7 @@ defmodule Assistant.Config.Loader do
   @doc """
   Returns the limits configuration as a map.
 
-  Values come from the `limits:` section of `config/config.yaml`:
+  Values come from the `limits:` section of `priv/config/config.yaml`:
 
     - `:context_utilization_target` — Fraction of context window to use (0.0–1.0)
     - `:compaction_trigger_threshold` — Trigger compaction at this utilization
@@ -204,7 +203,7 @@ defmodule Assistant.Config.Loader do
 
   @impl true
   def init(opts) do
-    path = Keyword.get(opts, :path, @config_path)
+    path = Keyword.get(opts, :path, config_path())
     table = :ets.new(@ets_table, [:named_table, :set, :public, read_concurrency: true])
 
     case load_and_populate(path, table) do
@@ -401,6 +400,8 @@ defmodule Assistant.Config.Loader do
        }}
     end
   end
+
+  defp config_path, do: Application.app_dir(:assistant, "priv/config/config.yaml")
 
   defp require_pos_integer(map, key) do
     case map[key] do

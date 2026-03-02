@@ -7,7 +7,7 @@ defmodule Assistant.SkillPermissions do
 
   alias Assistant.Skills.Registry
 
-  @default_permissions_path "config/skill_permissions.json"
+  @default_permissions_rel_path "priv/config/skill_permissions.json"
 
   @spec list_permissions() :: [map()]
   def list_permissions do
@@ -104,6 +104,10 @@ defmodule Assistant.SkillPermissions do
   end
 
   defp permissions_path do
-    Application.get_env(:assistant, :skill_permissions_path, @default_permissions_path)
+    Application.get_env(
+      :assistant,
+      :skill_permissions_path,
+      Application.app_dir(:assistant, @default_permissions_rel_path)
+    )
   end
 end

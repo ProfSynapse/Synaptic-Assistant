@@ -3,7 +3,7 @@ defmodule Assistant.ProfileSettings do
   File-backed profile/account settings used by the settings UI.
   """
 
-  @default_path "config/profile_settings.json"
+  @default_rel_path "priv/config/profile_settings.json"
 
   @spec get_profile() :: map()
   def get_profile do
@@ -60,6 +60,10 @@ defmodule Assistant.ProfileSettings do
   end
 
   defp profile_path do
-    Application.get_env(:assistant, :profile_settings_path, @default_path)
+    Application.get_env(
+      :assistant,
+      :profile_settings_path,
+      Application.app_dir(:assistant, @default_rel_path)
+    )
   end
 end

@@ -57,7 +57,7 @@ defmodule Assistant.Skills.Images.ListModels do
     case filtered do
       [] ->
         {:error,
-         "No image generation models are configured. Add models with use_cases: [image_generation] in config/config.yaml."}
+         "No image generation models are configured. Add models with use_cases: [image_generation] in priv/config/config.yaml."}
 
       _ ->
         {:ok, filtered}
