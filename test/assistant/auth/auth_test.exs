@@ -1,7 +1,7 @@
-# test/assistant/auth/auth_test.exs — Integration tests for Auth.user_token/1 and Auth.service_token/0.
+# test/assistant/auth/auth_test.exs — Integration tests for Auth module.
 #
 # Risk Tier: HIGH — Auth is the gateway to all Google API calls.
-# Tests the full error taxonomy: :not_connected, :refresh_failed, :invalid_grant.
+# Tests user_token/1, service_token/0, configured?/0, and oauth_configured?/0.
 # Mocks TokenStore and OAuth to avoid real DB/HTTP calls for the refresh path.
 
 defmodule Assistant.Integrations.Google.AuthTest do
@@ -60,7 +60,7 @@ defmodule Assistant.Integrations.Google.AuthTest do
       user: user
     } do
       # Insert a token with nil access_token (triggers refresh path)
-      # but refresh will fail because Goth isn't configured for real calls
+      # but refresh will fail because Google rejects the fake refresh token
       {:ok, _} =
         TokenStore.upsert_google_token(user.id, %{
           refresh_token: "invalid-refresh-tok",
@@ -68,8 +68,8 @@ defmodule Assistant.Integrations.Google.AuthTest do
           token_expires_at: nil
         })
 
-      # user_token/1 will try to refresh. Without a real Goth setup, it should
-      # fail. The refresh failure is handled as :refresh_failed.
+      # user_token/1 will try to refresh. With a fake refresh token, Google
+      # rejects it. The refresh failure is handled as :refresh_failed.
       result = Auth.user_token(user.id)
       assert result in [{:error, :refresh_failed}, {:error, :not_connected}]
     end
@@ -80,15 +80,28 @@ defmodule Assistant.Integrations.Google.AuthTest do
   # -------------------------------------------------------------------
 
   describe "configured?/0" do
-    test "returns true when google_credentials are set" do
-      Application.put_env(:assistant, :google_credentials, %{"some" => "creds"})
+    test "returns true when service account JSON has client_email and private_key" do
+      json =
+        Jason.encode!(%{
+          "client_email" => "bot@project.iam.gserviceaccount.com",
+          "private_key" => "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n"
+        })
+
+      Application.put_env(:assistant, :google_service_account_json, json)
       assert Auth.configured?()
-      Application.delete_env(:assistant, :google_credentials)
+      Application.delete_env(:assistant, :google_service_account_json)
     end
 
-    test "returns false when google_credentials are not set" do
-      Application.delete_env(:assistant, :google_credentials)
+    test "returns false when service account JSON is not set" do
+      Application.delete_env(:assistant, :google_service_account_json)
       refute Auth.configured?()
+    end
+
+    test "returns false when service account JSON is missing required fields" do
+      json = Jason.encode!(%{"some" => "creds"})
+      Application.put_env(:assistant, :google_service_account_json, json)
+      refute Auth.configured?()
+      Application.delete_env(:assistant, :google_service_account_json)
     end
   end
 
@@ -113,13 +126,13 @@ defmodule Assistant.Integrations.Google.AuthTest do
   end
 
   # -------------------------------------------------------------------
-  # scopes/0
+  # service_token/0
   # -------------------------------------------------------------------
 
-  describe "scopes/0" do
-    test "returns only the chat.bot scope (service account)" do
-      scopes = Auth.scopes()
-      assert scopes == ["https://www.googleapis.com/auth/chat.bot"]
+  describe "service_token/0" do
+    test "returns {:error, :not_configured} when credentials are not set" do
+      Application.delete_env(:assistant, :google_service_account_json)
+      assert {:error, :not_configured} = Auth.service_token()
     end
   end
 end
