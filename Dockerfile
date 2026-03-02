@@ -35,7 +35,8 @@ RUN mkdir config
 COPY config/config.exs config/${MIX_ENV}.exs config/
 RUN mix deps.compile
 
-# Copy application code
+# Copy application code and remaining config (config.yaml, prompts/, runtime.exs)
+COPY config config
 COPY priv priv
 COPY lib lib
 COPY assets assets
@@ -45,9 +46,6 @@ RUN mix compile
 
 # Build assets (Tailwind CSS)
 RUN mix assets.deploy
-
-# Copy runtime config (needed for release)
-COPY config/runtime.exs config/
 
 # Build the release
 RUN mix release
@@ -74,6 +72,9 @@ ENV MIX_ENV="prod"
 
 # Copy the release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/assistant ./
+
+# Copy runtime config files (config.yaml, prompts/) needed by Config.Loader at boot
+COPY --from=builder --chown=nobody:root /app/config ./config
 
 USER nobody
 
