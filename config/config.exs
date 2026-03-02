@@ -55,13 +55,18 @@ config :assistant, Oban,
     email: 5,
     calendar: 3,
     scheduled: 5,
-    oauth_replay: 5
+    oauth_replay: 5,
+    sync: 5
   ],
   plugins: [
     {Oban.Plugins.Cron,
      crontab: [
        # Purge expired/consumed auth_tokens daily at 03:00 UTC
-       {"0 3 * * *", Assistant.Workers.AuthTokenCleanupWorker}
+       {"0 3 * * *", Assistant.Workers.AuthTokenCleanupWorker},
+       # Poll Drive Changes API for active sync users every 60 seconds
+       {"* * * * *", Assistant.Sync.Workers.SyncPollWorker},
+       # Prune sync history entries older than retention period (daily at 04:00 UTC)
+       {"0 4 * * *", Assistant.Sync.Workers.HistoryPruningWorker}
      ]}
   ]
 
