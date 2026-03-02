@@ -15,6 +15,8 @@
 defmodule Assistant.Integration.SentinelLLMTest do
   use ExUnit.Case, async: false
 
+  import Assistant.Integration.TestLogger
+
   @moduletag :integration
   @moduletag timeout: 120_000
 
@@ -337,17 +339,24 @@ defmodule Assistant.Integration.SentinelLLMTest do
   defp has_api_key?(context), do: Map.has_key?(context, :api_key)
 
   defp sentinel_check(original_request, agent_mission, proposed_action, api_key) do
+    skill_name = proposed_action[:skill_name] || proposed_action.skill_name
+    label = "sentinel[#{skill_name}]"
+
     case sentinel_check_raw(original_request, agent_mission, proposed_action, api_key) do
       {:ok, %{"decision" => "approve", "reason" => reason}} ->
+        log_pass(label <> " -> approve", 0)
         {:ok, :approved, reason}
 
       {:ok, %{"decision" => "reject", "reason" => reason}} ->
+        log_pass(label <> " -> reject", 0)
         {:ok, :rejected, reason}
 
       {:ok, %{"decision" => other}} ->
+        log_fail(label, {:invalid_decision, other})
         {:error, {:invalid_decision, other}}
 
       {:error, reason} ->
+        log_fail(label, reason)
         {:error, reason}
     end
   end
@@ -361,6 +370,7 @@ defmodule Assistant.Integration.SentinelLLMTest do
 
     skill_name = proposed_action[:skill_name] || proposed_action.skill_name
     agent_id = proposed_action[:agent_id] || proposed_action.agent_id
+    label = "sentinel_raw[#{skill_name}]"
 
     user_content = """
     ORIGINAL REQUEST: #{original_request || "(none)"}
@@ -388,7 +398,18 @@ defmodule Assistant.Integration.SentinelLLMTest do
       api_key: api_key
     ]
 
-    case OpenRouter.chat_completion(messages, opts) do
+    log_request(label, %{
+      model: @integration_model,
+      messages: messages,
+      response_format: @sentinel_response_format,
+      temperature: 0.0,
+      max_tokens: 4096
+    })
+
+    {elapsed, api_result} =
+      timed(fn -> OpenRouter.chat_completion(messages, opts) end)
+
+    case api_result do
       {:ok, %{content: content}} when is_binary(content) ->
         cleaned =
           content
@@ -398,14 +419,25 @@ defmodule Assistant.Integration.SentinelLLMTest do
           |> String.trim()
 
         case Jason.decode(cleaned) do
-          {:ok, parsed} -> {:ok, parsed}
-          {:error, err} -> {:error, {:json_decode_failed, err, content}}
+          {:ok, parsed} ->
+            log_response(label, {:ok, parsed})
+            log_pass(label, elapsed)
+            {:ok, parsed}
+
+          {:error, err} ->
+            log_response(label, {:error, {:json_decode_failed, err, content}})
+            log_fail(label, {:json_decode_failed, err})
+            {:error, {:json_decode_failed, err, content}}
         end
 
       {:ok, %{content: nil}} ->
+        log_response(label, {:error, :nil_content})
+        log_fail(label, :nil_content)
         {:error, :nil_content}
 
       {:error, reason} ->
+        log_response(label, {:error, reason})
+        log_fail(label, {:llm_call_failed, reason})
         {:error, {:llm_call_failed, reason}}
     end
   end

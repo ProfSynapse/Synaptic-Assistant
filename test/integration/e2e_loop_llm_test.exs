@@ -30,6 +30,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
   # async: false — Engine uses named registries, ConfigLoader uses ETS
 
   import Mox
+  import Assistant.Integration.TestLogger
 
   @moduletag :integration
   @moduletag timeout: 180_000
@@ -150,6 +151,29 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       {:ok, pid} -> Process.unlink(pid)
       {:error, {:already_started, _}} -> :ok
     end
+  end
+
+  # Wraps Engine.send_message with verbose request/response logging.
+  defp engine_send(conversation_id, message, label \\ "e2e") do
+    log_request(label, %{
+      messages: [%{role: "user", content: message}],
+      model: "(via Engine pipeline)"
+    })
+
+    {elapsed, result} =
+      timed(fn -> Engine.send_message(conversation_id, message) end)
+
+    case result do
+      {:ok, response} ->
+        log_response(label, {:ok, %{content: response}})
+        log_pass(label, elapsed)
+
+      {:error, reason} ->
+        log_response(label, {:error, reason})
+        log_fail(label, reason)
+    end
+
+    result
   end
 
   defp ensure_config_loader_started do

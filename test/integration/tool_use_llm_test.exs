@@ -19,6 +19,7 @@ defmodule Assistant.Integration.ToolUseLLMTest do
   use ExUnit.Case, async: false
 
   import Assistant.Integration.Helpers
+  import Assistant.Integration.TestLogger
 
   @moduletag :integration
   @moduletag timeout: 120_000
@@ -164,7 +165,7 @@ defmodule Assistant.Integration.ToolUseLLMTest do
         %{role: "user", content: "I need to search my emails. First check what email skills are available, then dispatch an agent to search for messages from alice@example.com."}
       ]
 
-      case call_llm_with_tools(messages, tools, api_key) do
+      case call_llm_with_tools(messages, tools, api_key, "chain_step1") do
         {:tool_calls, tool_calls} ->
           # First call should be get_skill
           first_tc = hd(tool_calls)
@@ -187,7 +188,7 @@ defmodule Assistant.Integration.ToolUseLLMTest do
                 ]
 
             # Step 2: LLM should now dispatch_agent
-            case call_llm_with_tools(step2_messages, tools, api_key) do
+            case call_llm_with_tools(step2_messages, tools, api_key, "chain_step2") do
               {:tool_calls, step2_calls} ->
                 names = Enum.map(step2_calls, &extract_tool_name/1)
                 assert "dispatch_agent" in names
@@ -429,7 +430,7 @@ defmodule Assistant.Integration.ToolUseLLMTest do
 
   defp has_api_key?(context), do: Map.has_key?(context, :api_key)
 
-  defp call_llm_with_tools(messages, tools, api_key) do
+  defp call_llm_with_tools(messages, tools, api_key, label \\ "tool_use") do
     opts = [
       model: @integration_model,
       tools: tools,
@@ -437,20 +438,37 @@ defmodule Assistant.Integration.ToolUseLLMTest do
       api_key: api_key
     ]
 
-    case OpenRouter.chat_completion(messages, opts) do
+    log_request(label, %{
+      model: @integration_model,
+      messages: messages,
+      tools: tools,
+      temperature: 0.0
+    })
+
+    {elapsed, api_result} =
+      timed(fn -> OpenRouter.chat_completion(messages, opts) end)
+
+    case api_result do
       {:ok, response} ->
-        cond do
-          is_list(response.tool_calls) and response.tool_calls != [] ->
-            {:tool_calls, response.tool_calls}
+        result =
+          cond do
+            is_list(response.tool_calls) and response.tool_calls != [] ->
+              {:tool_calls, response.tool_calls}
 
-          is_binary(response.content) and response.content != "" ->
-            {:text, response.content}
+            is_binary(response.content) and response.content != "" ->
+              {:text, response.content}
 
-          true ->
-            {:text, ""}
-        end
+            true ->
+              {:text, ""}
+          end
+
+        log_response(label, result)
+        log_pass(label, elapsed)
+        result
 
       {:error, reason} ->
+        log_response(label, {:error, reason})
+        log_fail(label, reason)
         {:error, reason}
     end
   end

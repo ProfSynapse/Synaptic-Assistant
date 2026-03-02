@@ -18,6 +18,8 @@
 defmodule Assistant.Integration.MemoryLLMTest do
   use ExUnit.Case, async: false
 
+  import Assistant.Integration.TestLogger
+
   @moduletag :integration
   @moduletag timeout: 120_000
 
@@ -263,11 +265,35 @@ defmodule Assistant.Integration.MemoryLLMTest do
       api_key: api_key
     ]
 
-    case OpenRouter.chat_completion(messages, opts) do
+    log_request("classify_turn", %{
+      model: @integration_model,
+      messages: messages,
+      response_format: @classification_response_format,
+      temperature: 0.0,
+      max_tokens: 500
+    })
+
+    {elapsed, api_result} =
+      timed(fn -> OpenRouter.chat_completion(messages, opts) end)
+
+    case api_result do
       {:ok, %{content: content}} ->
-        parse_classification(content)
+        result = parse_classification(content)
+        log_response("classify_turn", {:ok, %{content: content}})
+
+        case result do
+          {:ok, action, _reason} ->
+            log_pass("classify_turn -> #{action}", elapsed)
+
+          {:error, reason} ->
+            log_fail("classify_turn", reason)
+        end
+
+        result
 
       {:error, reason} ->
+        log_response("classify_turn", {:error, reason})
+        log_fail("classify_turn", reason)
         {:error, {:llm_call_failed, reason}}
     end
   end
@@ -342,14 +368,30 @@ defmodule Assistant.Integration.MemoryLLMTest do
       api_key: api_key
     ]
 
-    case OpenRouter.chat_completion(llm_messages, llm_opts) do
+    log_request("summarize_conversation", %{
+      model: @integration_model,
+      messages: llm_messages,
+      temperature: 0.3,
+      max_tokens: 1024
+    })
+
+    {elapsed, api_result} =
+      timed(fn -> OpenRouter.chat_completion(llm_messages, llm_opts) end)
+
+    case api_result do
       {:ok, %{content: nil}} ->
+        log_response("summarize_conversation", {:error, :empty_llm_response})
+        log_fail("summarize_conversation", :empty_llm_response)
         {:error, :empty_llm_response}
 
       {:ok, %{content: content}} ->
+        log_response("summarize_conversation", {:ok, %{content: content}})
+        log_pass("summarize_conversation", elapsed)
         {:ok, content}
 
       {:error, reason} ->
+        log_response("summarize_conversation", {:error, reason})
+        log_fail("summarize_conversation", reason)
         {:error, {:llm_call_failed, reason}}
     end
   end

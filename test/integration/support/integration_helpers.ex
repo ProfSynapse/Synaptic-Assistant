@@ -14,6 +14,8 @@
 defmodule Assistant.Integration.Helpers do
   @moduledoc false
 
+  import Assistant.Integration.TestLogger
+
   alias Assistant.Integrations.OpenRouter
   alias Assistant.Repo
   alias Assistant.Schemas.{Conversation, User}
@@ -181,11 +183,26 @@ defmodule Assistant.Integration.Helpers do
         temperature: 0.0
       ] ++ Keyword.take(opts, [:api_key])
 
-    case OpenRouter.chat_completion(messages, llm_opts) do
+    log_request("ask_llm_for_skill_call", %{
+      model: @integration_model,
+      messages: messages,
+      tools: tools,
+      temperature: 0.0
+    })
+
+    {elapsed, api_result} =
+      timed(fn -> OpenRouter.chat_completion(messages, llm_opts) end)
+
+    case api_result do
       {:ok, response} ->
-        parse_llm_response(response)
+        result = parse_llm_response(response)
+        log_response("ask_llm_for_skill_call", result)
+        log_pass("ask_llm_for_skill_call", elapsed)
+        result
 
       {:error, reason} ->
+        log_response("ask_llm_for_skill_call", {:error, reason})
+        log_fail("ask_llm_for_skill_call", reason)
         {:error, reason}
     end
   end
@@ -374,18 +391,32 @@ defmodule Assistant.Integration.Helpers do
   def run_skill_integration(mission, skill_names, %Context{} = context, opts) do
     case ask_llm_for_skill_call(mission, skill_names, opts) do
       {:tool_call, skill_name, flags} ->
-        case execute_skill(skill_name, flags, context) do
+        log_request("execute_skill[#{skill_name}]", %{
+          skill: skill_name,
+          flags: flags
+        })
+
+        {elapsed, exec_result} =
+          timed(fn -> execute_skill(skill_name, flags, context) end)
+
+        case exec_result do
           {:ok, result} ->
+            log_response("execute_skill[#{skill_name}]", {:ok, %{status: result.status, content: result.content}})
+            log_pass("execute_skill[#{skill_name}]", elapsed)
             {:ok, %{skill: skill_name, flags: flags, result: result}}
 
           {:error, reason} ->
+            log_response("execute_skill[#{skill_name}]", {:error, reason})
+            log_fail("execute_skill[#{skill_name}]", reason)
             {:error, {:execution_failed, skill_name, reason}}
         end
 
       {:text, content} ->
+        log_fail("run_skill_integration", {:llm_returned_text, String.slice(content, 0, 100)})
         {:error, {:llm_returned_text, content}}
 
       {:error, reason} ->
+        log_fail("run_skill_integration", {:llm_call_failed, reason})
         {:error, {:llm_call_failed, reason}}
     end
   end
