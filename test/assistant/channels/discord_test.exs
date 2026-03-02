@@ -215,7 +215,7 @@ defmodule Assistant.Channels.DiscordTest do
         |> Map.delete("guild_id")
 
       {:ok, msg} = Discord.normalize(interaction)
-      # Missing guild_id falls back to "" which uses "dm" scope prefix
+      # Missing guild_id key returns nil from map access, handled as DM context
       assert msg.space_id == "discord:dm:444555666"
     end
 

@@ -39,6 +39,8 @@ defmodule Assistant.Channels.Discord do
   alias Assistant.Channels.Message
   alias Assistant.Integrations.Discord.Client
 
+  require Logger
+
   @impl true
   def channel_name, do: :discord
 
@@ -62,7 +64,7 @@ defmodule Assistant.Channels.Discord do
     if user["bot"] == true do
       {:error, :ignored}
     else
-      guild_id = interaction["guild_id"] || ""
+      guild_id = interaction["guild_id"]
       channel_id = interaction["channel_id"] || ""
       user_id = user["id"] || ""
 
@@ -155,9 +157,8 @@ defmodule Assistant.Channels.Discord do
   end
 
   # Build a globally-unique scoped ID: "discord:{guild_id}:{local_id}"
-  # nil or "" guild_id indicates a DM context — use "dm" as scope prefix.
+  # nil guild_id indicates a DM context — use "dm" as scope prefix.
   defp scope_id(nil, local_id), do: "discord:dm:#{local_id}"
-  defp scope_id("", local_id), do: "discord:dm:#{local_id}"
   defp scope_id(guild_id, local_id), do: "discord:#{guild_id}:#{local_id}"
 
   # Extract raw channel_id from scoped "discord:guild:channel" format.
