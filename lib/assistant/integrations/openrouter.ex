@@ -8,7 +8,7 @@
 #
 # Related files:
 #   - lib/assistant/behaviours/llm_client.ex (behaviour contract)
-#   - lib/assistant/config/loader.ex (model roster, HTTP config from config.yaml)
+#   - lib/assistant/config/loader.ex (model roster, HTTP config from priv/config/config.yaml)
 #   - config/runtime.exs (API key configuration)
 
 defmodule Assistant.Integrations.OpenRouter do
@@ -55,14 +55,14 @@ defmodule Assistant.Integrations.OpenRouter do
 
   This client does **not** have a default model. Callers must always pass
   `:model` in the opts keyword list. Model selection is the responsibility of
-  `Assistant.Config.Loader`, which resolves model IDs from `config/config.yaml`
+  `Assistant.Config.Loader`, which resolves model IDs from `priv/config/config.yaml`
   based on role (orchestrator, sub_agent, compaction, etc.).
 
   ## HTTP Settings
 
   Retry, backoff, and timeout parameters are loaded at call time from
   `Assistant.Config.Loader.http_config/0` (sourced from the `http:` section
-  of `config/config.yaml`). No defaults are hardcoded in this module.
+  of `priv/config/config.yaml`). No defaults are hardcoded in this module.
   """
 
   @behaviour Assistant.Behaviours.LLMClient
@@ -83,7 +83,7 @@ defmodule Assistant.Integrations.OpenRouter do
 
   ## Options (required)
 
-    - `:model` — Model ID from `config/config.yaml` (e.g. `"anthropic/claude-sonnet-4-6"`).
+    - `:model` — Model ID from `priv/config/config.yaml` (e.g. `"anthropic/claude-sonnet-4-6"`).
       **Required.** Resolve via `Assistant.Config.Loader.model_for/1`.
 
   ## Options (optional)

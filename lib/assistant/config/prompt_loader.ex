@@ -1,4 +1,4 @@
-# lib/assistant/config/prompt_loader.ex — Prompt template loader for config/prompts/*.yaml.
+# lib/assistant/config/prompt_loader.ex — Prompt template loader for priv/config/prompts/*.yaml.
 #
 # ETS-backed GenServer that loads, caches, and hot-reloads system prompt
 # templates from YAML files. Public API functions read compiled EEx
@@ -8,14 +8,14 @@
 # Follows the same GenServer/ETS pattern as Assistant.Config.Loader.
 #
 # Related files:
-#   - config/prompts/*.yaml (source of truth for system prompts)
+#   - priv/config/prompts/*.yaml (source of truth for system prompts)
 #   - lib/assistant/config/loader.ex (sibling config loader, same pattern)
 #   - lib/assistant/orchestrator/context.ex (consumer — orchestrator prompt)
 #   - lib/assistant/orchestrator/sub_agent.ex (consumer — sub-agent prompt)
 
 defmodule Assistant.Config.PromptLoader do
   @moduledoc """
-  Loads and serves system prompt templates from config/prompts/*.yaml.
+  Loads and serves system prompt templates from priv/config/prompts/*.yaml.
 
   Backed by ETS for fast concurrent reads. Templates are compiled once via
   EEx at load time and rendered per-call with runtime variables.
@@ -29,7 +29,7 @@ defmodule Assistant.Config.PromptLoader do
 
   ## Boot Behaviour
 
-  If `config/prompts/` is missing or empty, `init/1` logs a warning but
+  If `priv/config/prompts/` is missing or empty, `init/1` logs a warning but
   does NOT crash — the assistant can operate with hardcoded fallbacks.
   Individual malformed YAML files are skipped with a warning.
 
@@ -56,7 +56,6 @@ defmodule Assistant.Config.PromptLoader do
   require Logger
 
   @ets_table :assistant_prompts
-  @prompts_dir "config/prompts"
 
   # --- Public API (read from ETS, render with EEx) ---
 
@@ -64,7 +63,7 @@ defmodule Assistant.Config.PromptLoader do
   Renders a prompt template with the given variable bindings.
 
   The `name` corresponds to the YAML filename without extension
-  (e.g., `:orchestrator` for `config/prompts/orchestrator.yaml`).
+  (e.g., `:orchestrator` for `priv/config/prompts/orchestrator.yaml`).
 
   The `system:` key from the YAML is rendered by default.
 
@@ -168,7 +167,7 @@ defmodule Assistant.Config.PromptLoader do
 
   @impl true
   def init(opts) do
-    dir = Keyword.get(opts, :dir, @prompts_dir)
+    dir = Keyword.get(opts, :dir, prompts_dir())
     table = :ets.new(@ets_table, [:named_table, :set, :public, read_concurrency: true])
 
     load_all(dir, table)
@@ -265,6 +264,8 @@ defmodule Assistant.Config.PromptLoader do
   rescue
     ArgumentError -> {:error, :not_available}
   end
+
+  defp prompts_dir, do: Application.app_dir(:assistant, "priv/config/prompts")
 
   defp render_template(compiled_template, assigns) do
     try do

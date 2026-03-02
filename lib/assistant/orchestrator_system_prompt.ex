@@ -3,7 +3,7 @@ defmodule Assistant.OrchestratorSystemPrompt do
   File-backed custom system prompt fragment for the orchestrator.
   """
 
-  @default_path "config/orchestrator_system_prompt.md"
+  @default_rel_path "priv/config/orchestrator_system_prompt.md"
 
   @spec get_prompt() :: String.t()
   def get_prompt do
@@ -42,6 +42,10 @@ defmodule Assistant.OrchestratorSystemPrompt do
   end
 
   defp prompt_path do
-    Application.get_env(:assistant, :orchestrator_system_prompt_path, @default_path)
+    Application.get_env(
+      :assistant,
+      :orchestrator_system_prompt_path,
+      Application.app_dir(:assistant, @default_rel_path)
+    )
   end
 end

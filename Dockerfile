@@ -73,9 +73,6 @@ ENV MIX_ENV="prod"
 # Copy the release from the build stage
 COPY --from=builder --chown=nobody:root /app/_build/${MIX_ENV}/rel/assistant ./
 
-# Copy runtime config files (config.yaml, prompts/) needed by Config.Loader at boot
-COPY --from=builder --chown=nobody:root /app/config ./config
-
 USER nobody
 
 # Run migrations on startup, then start the server

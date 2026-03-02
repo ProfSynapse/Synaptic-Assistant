@@ -5,7 +5,7 @@ defmodule Assistant.ModelCatalog do
 
   alias Assistant.Config.Loader, as: ConfigLoader
 
-  @default_catalog_path "config/model_catalog.json"
+  @default_catalog_rel_path "priv/config/model_catalog.json"
 
   @type model_entry :: %{
           id: String.t(),
@@ -293,6 +293,10 @@ defmodule Assistant.ModelCatalog do
   end
 
   defp catalog_path do
-    Application.get_env(:assistant, :model_catalog_path, @default_catalog_path)
+    Application.get_env(
+      :assistant,
+      :model_catalog_path,
+      Application.app_dir(:assistant, @default_catalog_rel_path)
+    )
   end
 end

@@ -1,7 +1,7 @@
 # lib/assistant/orchestrator/nudger.ex — Centralized error→recommendation prompt system.
 #
 # Maps error atoms to short, actionable recovery hints loaded from
-# config/prompts/nudges.yaml via PromptLoader's ETS. Adding a new nudge
+# priv/config/prompts/nudges.yaml via PromptLoader's ETS. Adding a new nudge
 # requires zero code changes — just add a key to the YAML file.
 #
 # The Nudger is a plain module (not a GenServer). It reads compiled EEx
@@ -9,7 +9,7 @@
 # optional detail variables, and returns the hint string.
 #
 # Related files:
-#   - config/prompts/nudges.yaml (source of truth for nudge templates)
+#   - priv/config/prompts/nudges.yaml (source of truth for nudge templates)
 #   - lib/assistant/config/prompt_loader.ex (ETS loader)
 #   - lib/assistant/orchestrator/engine.ex (consumer — appends hints to errors)
 
@@ -18,14 +18,14 @@ defmodule Assistant.Orchestrator.Nudger do
   Centralized error recovery hint system.
 
   Maps error atoms (e.g., `:context_budget_exceeded`) to short actionable
-  recommendation strings loaded from `config/prompts/nudges.yaml`. Hints
+  recommendation strings loaded from `priv/config/prompts/nudges.yaml`. Hints
   are rendered as EEx templates with optional detail variables for
   dynamic content like token counts.
 
   ## Extensibility
 
   Adding a new nudge requires **zero code changes** — add a section key
-  to `config/prompts/nudges.yaml` and it's available immediately (or
+  to `priv/config/prompts/nudges.yaml` and it's available immediately (or
   after `PromptLoader.reload/0` if hot-reloading).
 
   ## Usage
