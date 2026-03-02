@@ -172,6 +172,23 @@ if secret = System.get_env("TELEGRAM_WEBHOOK_SECRET") do
   config :assistant, :telegram_webhook_secret, secret
 end
 
+# Slack
+if signing_secret = System.get_env("SLACK_SIGNING_SECRET") do
+  config :assistant, :slack_signing_secret, signing_secret
+end
+
+if client_id = System.get_env("SLACK_CLIENT_ID") do
+  config :assistant, :slack_client_id, client_id
+end
+
+if client_secret = System.get_env("SLACK_CLIENT_SECRET") do
+  config :assistant, :slack_client_secret, client_secret
+end
+
+if bot_token = System.get_env("SLACK_BOT_TOKEN") do
+  config :assistant, :slack_bot_token, bot_token
+end
+
 # Google Chat
 if webhook_url = System.get_env("GOOGLE_CHAT_WEBHOOK_URL") do
   config :assistant, :google_chat_webhook_url, webhook_url

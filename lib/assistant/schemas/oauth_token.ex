@@ -12,7 +12,7 @@ defmodule Assistant.Schemas.OAuthToken do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @providers ~w(google)
+  @providers ~w(google slack)
 
   schema "oauth_tokens" do
     field :provider, :string
@@ -22,6 +22,8 @@ defmodule Assistant.Schemas.OAuthToken do
     field :access_token, Assistant.Encrypted.Binary
     field :token_expires_at, :utc_datetime_usec
     field :scopes, :string
+    field :workspace_id, :string
+    field :workspace_name, :string
 
     belongs_to :user, Assistant.Schemas.User
 
@@ -29,7 +31,15 @@ defmodule Assistant.Schemas.OAuthToken do
   end
 
   @required_fields [:user_id, :provider, :refresh_token]
-  @optional_fields [:provider_uid, :provider_email, :access_token, :token_expires_at, :scopes]
+  @optional_fields [
+    :provider_uid,
+    :provider_email,
+    :access_token,
+    :token_expires_at,
+    :scopes,
+    :workspace_id,
+    :workspace_name
+  ]
 
   def changeset(token, attrs) do
     token
