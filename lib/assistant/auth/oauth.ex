@@ -38,6 +38,8 @@ defmodule Assistant.Auth.OAuth do
       # Uses Goth.Token.fetch/1 stateless mode — no running process needed
   """
 
+  alias Assistant.IntegrationSettings
+
   require Logger
 
   @google_authorize_url "https://accounts.google.com/o/oauth2/v2/auth"
@@ -375,7 +377,7 @@ defmodule Assistant.Auth.OAuth do
   # --- Client Credentials ---
 
   defp fetch_client_id do
-    case Application.get_env(:assistant, :google_oauth_client_id) do
+    case IntegrationSettings.get(:google_oauth_client_id) do
       client_id when is_binary(client_id) and client_id != "" ->
         {:ok, client_id}
 
@@ -385,7 +387,7 @@ defmodule Assistant.Auth.OAuth do
   end
 
   defp fetch_client_secret do
-    case Application.get_env(:assistant, :google_oauth_client_secret) do
+    case IntegrationSettings.get(:google_oauth_client_secret) do
       client_secret when is_binary(client_secret) and client_secret != "" ->
         {:ok, client_secret}
 

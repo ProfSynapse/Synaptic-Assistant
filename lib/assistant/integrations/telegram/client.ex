@@ -30,6 +30,8 @@ defmodule Assistant.Integrations.Telegram.Client do
       )
   """
 
+  alias Assistant.IntegrationSettings
+
   require Logger
 
   @default_base_url "https://api.telegram.org"
@@ -194,7 +196,7 @@ defmodule Assistant.Integrations.Telegram.Client do
   end
 
   defp get_token do
-    case Application.get_env(:assistant, :telegram_bot_token) do
+    case IntegrationSettings.get(:telegram_bot_token) do
       nil ->
         Logger.error("telegram_bot_token not configured")
         {:error, :token_not_configured}

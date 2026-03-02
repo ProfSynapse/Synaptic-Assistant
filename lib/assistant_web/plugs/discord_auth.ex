@@ -38,6 +38,8 @@ defmodule AssistantWeb.Plugs.DiscordAuth do
 
   import Plug.Conn
 
+  alias Assistant.IntegrationSettings
+
   require Logger
 
   @behaviour Plug
@@ -49,7 +51,7 @@ defmodule AssistantWeb.Plugs.DiscordAuth do
 
   @impl true
   def call(conn, _opts) do
-    public_key_hex = Application.get_env(:assistant, :discord_public_key)
+    public_key_hex = IntegrationSettings.get(:discord_public_key)
 
     with {:ok, signature_hex} <- get_header(conn, "x-signature-ed25519"),
          {:ok, timestamp} <- get_header(conn, "x-signature-timestamp"),

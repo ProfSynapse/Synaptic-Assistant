@@ -39,6 +39,8 @@ defmodule AssistantWeb.Plugs.SlackAuth do
 
   import Plug.Conn
 
+  alias Assistant.IntegrationSettings
+
   require Logger
 
   @behaviour Plug
@@ -50,7 +52,7 @@ defmodule AssistantWeb.Plugs.SlackAuth do
 
   @impl true
   def call(conn, _opts) do
-    signing_secret = Application.get_env(:assistant, :slack_signing_secret)
+    signing_secret = IntegrationSettings.get(:slack_signing_secret)
 
     with {:ok, signature} <- get_header(conn, "x-slack-signature"),
          {:ok, timestamp} <- get_header(conn, "x-slack-request-timestamp"),

@@ -2,6 +2,7 @@ defmodule AssistantWeb.SettingsUserOAuthController do
   use AssistantWeb, :controller
 
   alias Assistant.Accounts
+  alias Assistant.IntegrationSettings
   alias AssistantWeb.SettingsUserAuth
 
   require Logger
@@ -73,7 +74,7 @@ defmodule AssistantWeb.SettingsUserOAuthController do
   end
 
   defp fetch_client_id do
-    case Application.get_env(:assistant, :google_oauth_client_id) do
+    case IntegrationSettings.get(:google_oauth_client_id) do
       client_id when is_binary(client_id) and client_id != "" ->
         {:ok, client_id}
 
@@ -83,7 +84,7 @@ defmodule AssistantWeb.SettingsUserOAuthController do
   end
 
   defp fetch_client_secret do
-    case Application.get_env(:assistant, :google_oauth_client_secret) do
+    case IntegrationSettings.get(:google_oauth_client_secret) do
       client_secret when is_binary(client_secret) and client_secret != "" ->
         {:ok, client_secret}
 

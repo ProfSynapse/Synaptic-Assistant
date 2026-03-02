@@ -32,6 +32,7 @@ defmodule Assistant.Channels.Slack do
   @behaviour Assistant.Channels.Adapter
 
   alias Assistant.Channels.Message
+  alias Assistant.IntegrationSettings
   alias Assistant.Integrations.Slack.Client
 
   @impl true
@@ -107,7 +108,7 @@ defmodule Assistant.Channels.Slack do
   def send_reply(channel_id, text, opts \\ []) do
     bot_token =
       Keyword.get(opts, :bot_token) ||
-        Application.get_env(:assistant, :slack_bot_token)
+        IntegrationSettings.get(:slack_bot_token)
 
     if is_nil(bot_token) do
       {:error, :bot_token_not_configured}

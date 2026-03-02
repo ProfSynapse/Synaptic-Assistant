@@ -27,6 +27,8 @@ defmodule Assistant.Integrations.Discord.Client do
       Discord.Client.get_gateway()
   """
 
+  alias Assistant.IntegrationSettings
+
   require Logger
 
   @default_base_url "https://discord.com/api/v10"
@@ -163,7 +165,7 @@ defmodule Assistant.Integrations.Discord.Client do
   end
 
   defp get_token do
-    case Application.get_env(:assistant, :discord_bot_token) do
+    case IntegrationSettings.get(:discord_bot_token) do
       nil ->
         Logger.error("discord_bot_token not configured")
         {:error, :token_not_configured}
