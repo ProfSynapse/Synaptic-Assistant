@@ -60,7 +60,7 @@ defmodule Assistant.Integrations.Google.AuthTest do
       user: user
     } do
       # Insert a token with nil access_token (triggers refresh path)
-      # but refresh will fail because Goth isn't configured for real calls
+      # but refresh will fail because Google rejects the fake refresh token
       {:ok, _} =
         TokenStore.upsert_google_token(user.id, %{
           refresh_token: "invalid-refresh-tok",
@@ -68,8 +68,8 @@ defmodule Assistant.Integrations.Google.AuthTest do
           token_expires_at: nil
         })
 
-      # user_token/1 will try to refresh. Without a real Goth setup, it should
-      # fail. The refresh failure is handled as :refresh_failed.
+      # user_token/1 will try to refresh. With a fake refresh token, Google
+      # rejects it. The refresh failure is handled as :refresh_failed.
       result = Auth.user_token(user.id)
       assert result in [{:error, :refresh_failed}, {:error, :not_connected}]
     end

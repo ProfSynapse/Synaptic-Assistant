@@ -163,7 +163,7 @@ defmodule Assistant.Scheduler.WorkflowWorkerTest do
 
     test "completes even when service account is not configured (channel posting fails gracefully)",
          %{workflow_path: path} do
-      # With Goth removed, Chat bot auth uses direct JWT signing via JOSE.
+      # Chat bot auth uses direct JWT signing via JOSE.
       # Without service account credentials configured, send_message returns
       # an error but the worker should still complete without crashing.
       job = %Oban.Job{args: %{"workflow_path" => path}}

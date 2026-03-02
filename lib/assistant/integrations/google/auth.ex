@@ -75,12 +75,16 @@ defmodule Assistant.Integrations.Google.Auth do
   alias Assistant.Auth.{OAuth, TokenStore}
   alias Assistant.IntegrationSettings
 
-  @google_token_url "https://oauth2.googleapis.com/token"
+  @default_google_token_url "https://oauth2.googleapis.com/token"
   @chat_bot_scope "https://www.googleapis.com/auth/chat.bot"
   @jwt_lifetime_seconds 3600
   @token_cache_table :google_service_token_cache
   # Refresh 5 minutes before expiry to avoid edge-case failures
   @token_refresh_margin_seconds 300
+
+  defp google_token_url do
+    Application.get_env(:assistant, :google_token_url, @default_google_token_url)
+  end
 
   # --- Service Account (Chat bot) ---
 
@@ -160,13 +164,15 @@ defmodule Assistant.Integrations.Google.Auth do
   Check whether Google OAuth2 client credentials are configured.
 
   Returns `true` if both `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET`
-  are set. Required for per-user OAuth2 flow.
+  are set to non-empty strings. Required for per-user OAuth2 flow.
   """
   @spec oauth_configured?() :: boolean()
   def oauth_configured? do
-    IntegrationSettings.get(:google_oauth_client_id) != nil and
-      IntegrationSettings.get(:google_oauth_client_secret) != nil
+    non_empty_string?(IntegrationSettings.get(:google_oauth_client_id)) and
+      non_empty_string?(IntegrationSettings.get(:google_oauth_client_secret))
   end
+
+  defp non_empty_string?(value), do: is_binary(value) and value != ""
 
   # --- Private: Service Account Token ---
 
@@ -285,17 +291,19 @@ defmodule Assistant.Integrations.Google.Auth do
   defp fetch_token_via_jwt(client_email, private_key_pem) do
     now = System.system_time(:second)
 
+    token_url = google_token_url()
+
     claims = %{
       "iss" => client_email,
       "scope" => @chat_bot_scope,
-      "aud" => @google_token_url,
+      "aud" => token_url,
       "iat" => now,
       "exp" => now + @jwt_lifetime_seconds
     }
 
     with {:ok, jwk} <- parse_private_key(private_key_pem),
          {:ok, signed_jwt} <- sign_jwt(jwk, claims),
-         {:ok, token, expires_in} <- exchange_jwt(signed_jwt) do
+         {:ok, token, expires_in} <- exchange_jwt(signed_jwt, token_url) do
       expires_at = now + expires_in
       cache_service_token(token, expires_at)
       {:ok, token}
@@ -308,7 +316,11 @@ defmodule Assistant.Integrations.Google.Auth do
       {:ok, jwk}
     rescue
       error ->
-        Logger.error("Failed to parse service account private key: #{inspect(error)}")
+        Logger.error("Failed to parse service account private key",
+          error_type: inspect(error.__struct__),
+          message: Exception.message(error)
+        )
+
         {:error, :invalid_private_key}
     end
   end
@@ -325,13 +337,13 @@ defmodule Assistant.Integrations.Google.Auth do
     end
   end
 
-  defp exchange_jwt(signed_jwt) do
+  defp exchange_jwt(signed_jwt, token_url) do
     body = %{
       "grant_type" => "urn:ietf:params:oauth:grant-type:jwt-bearer",
       "assertion" => signed_jwt
     }
 
-    case Req.post(@google_token_url, form: body) do
+    case Req.post(token_url, form: body) do
       {:ok, %Req.Response{status: 200, body: %{"access_token" => token} = resp_body}} ->
         expires_in = Map.get(resp_body, "expires_in", @jwt_lifetime_seconds)
         {:ok, token, expires_in}
@@ -339,7 +351,8 @@ defmodule Assistant.Integrations.Google.Auth do
       {:ok, %Req.Response{status: status, body: resp_body}} ->
         Logger.error("Google token exchange failed",
           status: status,
-          body: inspect(resp_body)
+          error: inspect(resp_body["error"]),
+          description: inspect(resp_body["error_description"])
         )
 
         {:error, {:token_exchange_failed, status}}
@@ -358,7 +371,7 @@ defmodule Assistant.Integrations.Google.Auth do
   defp ensure_token_cache do
     case :ets.whereis(@token_cache_table) do
       :undefined ->
-        :ets.new(@token_cache_table, [:set, :public, :named_table])
+        :ets.new(@token_cache_table, [:set, :protected, :named_table])
 
       _ref ->
         :ok

@@ -7,8 +7,8 @@
 #   3. Expired token → refresh attempted → error propagated or new token cached
 #
 # The refresh path goes through serialized_refresh → refresh_and_cache →
-# OAuth.refresh_access_token → Goth.Token.fetch (HTTP to Google). Since the
-# Goth HTTP call uses a hardcoded URL, we test the error propagation path
+# OAuth.refresh_access_token → Req.post to Google's token endpoint. Since the
+# token URL is a hardcoded module attribute, we test the error propagation path
 # (refresh_failed) which exercises the full codepath without needing Bypass.
 #
 # Related files:

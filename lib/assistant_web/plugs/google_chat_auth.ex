@@ -1,7 +1,7 @@
 # lib/assistant_web/plugs/google_chat_auth.ex — JWT verification for Google Chat webhooks.
 #
 # Phoenix Plug that verifies the Bearer JWT sent by Google Chat on every
-# webhook request. Uses JOSE (available transitively via goth) to verify
+# webhook request. Uses JOSE to verify
 # RS256 signatures against Google's public X.509 certificates.
 #
 # Certificates are cached in an ETS table with a 1-hour TTL to avoid

@@ -9,9 +9,9 @@
 #   - Error handling for invalid keys, missing credentials
 #   - configured?/0 edge cases
 #
-# NOTE: The token exchange HTTP call (Req.post to Google's token endpoint) uses
-# a hardcoded module attribute URL, so we cannot intercept it with Bypass.
-# Instead we test the pure-functional layers (credential parsing, JWT signing,
+# NOTE: The token exchange URL is configurable via :google_token_url app env,
+# so we can intercept it with Bypass for full end-to-end tests.
+# We also test the pure-functional layers (credential parsing, JWT signing,
 # ETS caching) directly. The HTTP error propagation is tested via the
 # service_token/0 → :not_configured path and the Chat integration test.
 #
@@ -543,6 +543,51 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
     after
       Application.delete_env(:assistant, :google_oauth_client_id)
       Application.delete_env(:assistant, :google_oauth_client_secret)
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # service_token/0 — Bypass HTTP success
+  # ---------------------------------------------------------------
+
+  describe "service_token/0 — Bypass HTTP success" do
+    test "returns access token from mocked Google token endpoint" do
+      # Generate RSA key pair for JWT signing
+      jwk = JOSE.JWK.generate_key({:rsa, 2048})
+      {_type, pem} = JOSE.JWK.to_pem(jwk)
+
+      # Build service account JSON with valid credentials
+      sa_json = Jason.encode!(%{
+        "client_email" => @test_client_email,
+        "private_key" => pem
+      })
+
+      Application.put_env(:assistant, :google_service_account_json, sa_json)
+
+      # Start Bypass and point the configurable token URL to it
+      bypass = Bypass.open()
+      Application.put_env(:assistant, :google_token_url, "http://localhost:#{bypass.port}/token")
+
+      on_exit(fn ->
+        Application.delete_env(:assistant, :google_token_url)
+      end)
+
+      # Mock the Google token endpoint response
+      Bypass.expect_once(bypass, "POST", "/token", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{
+          "access_token" => "bypass-token",
+          "expires_in" => 3600,
+          "token_type" => "Bearer"
+        }))
+      end)
+
+      # Clear ETS cache to force a fresh token fetch
+      clear_ets_cache()
+
+      # Call service_token and verify we get the Bypass token
+      assert {:ok, "bypass-token"} = Auth.service_token()
     end
   end
 
