@@ -34,7 +34,7 @@ defmodule Assistant.Schemas.SyncedFile do
   @foreign_key_type :binary_id
 
   @sync_statuses ~w(synced local_ahead remote_ahead conflict error)
-  @local_formats ~w(md csv txt json)
+  @local_formats ~w(md csv txt json bin)
 
   schema "synced_files" do
     field :drive_file_id, :string
@@ -50,6 +50,7 @@ defmodule Assistant.Schemas.SyncedFile do
     field :last_synced_at, :utc_datetime_usec
     field :sync_error, :string
     field :drive_id, :string
+    field :file_size, :integer
 
     belongs_to :user, Assistant.Schemas.User
     has_many :sync_history, Assistant.Schemas.SyncHistoryEntry
@@ -74,7 +75,8 @@ defmodule Assistant.Schemas.SyncedFile do
     :sync_status,
     :last_synced_at,
     :sync_error,
-    :drive_id
+    :drive_id,
+    :file_size
   ]
 
   def changeset(synced_file, attrs) do
@@ -102,7 +104,8 @@ defmodule Assistant.Schemas.SyncedFile do
       :sync_status,
       :last_synced_at,
       :sync_error,
-      :drive_file_name
+      :drive_file_name,
+      :file_size
     ])
     |> validate_inclusion(:sync_status, @sync_statuses)
     |> check_constraint(:sync_status, name: :valid_sync_status)

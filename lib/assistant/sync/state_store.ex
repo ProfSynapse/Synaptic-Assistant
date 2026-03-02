@@ -295,9 +295,17 @@ defmodule Assistant.Sync.StateStore do
   """
   @spec folder_in_scope?(binary(), String.t() | nil, String.t()) :: SyncScope.t() | nil
   def folder_in_scope?(user_id, drive_id, folder_id) do
-    # Check folder-specific scope first, then fall back to entire-drive scope
-    get_scope(user_id, drive_id, folder_id) ||
-      get_scope(user_id, drive_id, nil)
+    # Single query: match either folder-specific scope or entire-drive scope.
+    # Order by folder_id DESC NULLS LAST so folder-specific matches are preferred.
+    query =
+      SyncScope
+      |> where([s], s.user_id == ^user_id)
+      |> where_drive_id(drive_id)
+      |> where([s], s.folder_id == ^folder_id or is_nil(s.folder_id))
+      |> order_by([s], [desc_nulls_last: s.folder_id])
+      |> limit(1)
+
+    Repo.one(query)
   end
 
   # -------------------------------------------------------------------

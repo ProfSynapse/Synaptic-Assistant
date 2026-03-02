@@ -148,14 +148,16 @@ defmodule Assistant.Integrations.Google.Drive.Changes do
   defp list_all_changes_loop(access_token, page_token, opts, acc) do
     case list_changes(access_token, page_token, opts) do
       {:ok, %{changes: changes, new_start_page_token: new_token}} when is_binary(new_token) ->
-        {:ok, %{changes: acc ++ changes, new_start_page_token: new_token}}
+        all_changes = [changes | acc] |> Enum.reverse() |> List.flatten()
+        {:ok, %{changes: all_changes, new_start_page_token: new_token}}
 
       {:ok, %{changes: changes, next_page_token: next_token}} when is_binary(next_token) ->
-        list_all_changes_loop(access_token, next_token, opts, acc ++ changes)
+        list_all_changes_loop(access_token, next_token, opts, [changes | acc])
 
       {:ok, %{changes: changes}} ->
         # Should not happen — one of the tokens should always be present
-        {:ok, %{changes: acc ++ changes, new_start_page_token: page_token}}
+        all_changes = [changes | acc] |> Enum.reverse() |> List.flatten()
+        {:ok, %{changes: all_changes, new_start_page_token: page_token}}
 
       {:error, _} = error ->
         error

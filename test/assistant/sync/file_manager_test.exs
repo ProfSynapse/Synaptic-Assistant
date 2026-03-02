@@ -112,6 +112,21 @@ defmodule Assistant.Sync.FileManagerTest do
     test "rejects ../ in build_path" do
       assert {:error, :path_not_allowed} = FileManager.build_path(@user_a, "../escape")
     end
+
+    test "rejects user_id containing forward slash" do
+      assert {:error, :path_not_allowed} =
+               FileManager.write_file("../evil-user", "test.md", "hack")
+    end
+
+    test "rejects user_id containing backslash" do
+      assert {:error, :path_not_allowed} =
+               FileManager.write_file("evil\\user", "test.md", "hack")
+    end
+
+    test "rejects user_id containing .." do
+      assert {:error, :path_not_allowed} =
+               FileManager.write_file("user..escape", "test.md", "hack")
+    end
   end
 
   # ---------------------------------------------------------------

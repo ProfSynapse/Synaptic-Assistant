@@ -72,6 +72,24 @@ defmodule Assistant.Sync.Workers.SyncPollWorkerTest do
   end
 
   # ---------------------------------------------------------------
+  # perform/1 — per-user job path
+  # ---------------------------------------------------------------
+
+  describe "perform/1 per-user dispatch" do
+    test "per-user job returns :ok even with auth failure", %{user: user} do
+      {:ok, _} =
+        StateStore.upsert_cursor(%{
+          user_id: user.id,
+          drive_id: nil,
+          start_page_token: "per-user-token"
+        })
+
+      # Direct per-user job — auth will fail but should not crash
+      assert :ok = SyncPollWorker.perform(%Oban.Job{args: %{"user_id" => user.id}})
+    end
+  end
+
+  # ---------------------------------------------------------------
   # Scope filtering (DB-level verification)
   # ---------------------------------------------------------------
 

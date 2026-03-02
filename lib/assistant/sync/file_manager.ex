@@ -254,30 +254,55 @@ defmodule Assistant.Sync.FileManager do
   # 3. Expand and verify within user's workspace
   # 4. Reject symlinks
   defp resolve_path(user_id, relative_path) do
-    if Path.type(relative_path) == :absolute or String.contains?(relative_path, "..") do
-      {:error, :path_not_allowed}
-    else
-      user_dir = user_workspace_dir(user_id) |> Path.expand()
-      resolved = Path.join(user_dir, relative_path) |> Path.expand()
+    cond do
+      String.contains?(user_id, ["/", "\\", ".."]) ->
+        {:error, :path_not_allowed}
 
-      cond do
-        not String.starts_with?(resolved, user_dir) ->
-          {:error, :path_not_allowed}
+      Path.type(relative_path) == :absolute or String.contains?(relative_path, "..") ->
+        {:error, :path_not_allowed}
 
-        contains_symlink?(resolved) ->
-          {:error, :path_not_allowed}
+      true ->
+        user_dir = user_workspace_dir(user_id) |> Path.expand()
+        # Build the joined path WITHOUT expand (which resolves symlinks)
+        joined = Path.join(user_dir, relative_path)
+        resolved = Path.expand(joined)
 
-        true ->
-          {:ok, resolved}
-      end
+        cond do
+          not String.starts_with?(resolved, user_dir) ->
+            {:error, :path_not_allowed}
+
+          # Check for symlinks within the user's workspace. Only scan from
+          # user_dir downward — system paths above it may contain OS-level
+          # symlinks (e.g., /var → /private/var on macOS) that are not threats.
+          contains_symlink_below?(user_dir, relative_path) ->
+            {:error, :path_not_allowed}
+
+          true ->
+            {:ok, resolved}
+        end
     end
   end
 
-  defp contains_symlink?(path) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: :symlink}} -> true
-      _ -> false
-    end
+  # Check for symlinks at each path component within the user's workspace.
+  # Walks from user_dir through each component of relative_path, checking
+  # intermediate directories too (not just the final target). This prevents
+  # symlink-based escapes through intermediate dirs the user might create.
+  # We only scan within user_dir — system paths above it may contain
+  # OS-level symlinks (e.g., /var → /private/var on macOS).
+  defp contains_symlink_below?(user_dir, relative_path) do
+    relative_path
+    |> Path.split()
+    |> Enum.reduce_while(user_dir, fn component, acc ->
+      current = Path.join(acc, component)
+
+      case File.lstat(current) do
+        {:ok, %File.Stat{type: :symlink}} -> {:halt, true}
+        {:ok, _} -> {:cont, current}
+        {:error, :enoent} -> {:cont, current}
+        {:error, _} -> {:cont, current}
+      end
+    end)
+    |> is_boolean()
   end
 
   defp list_files_recursive(dir) do

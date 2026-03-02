@@ -30,6 +30,7 @@ defmodule Assistant.Sync.ChangeDetector do
   """
 
   alias Assistant.Schemas.SyncedFile
+  alias Assistant.Sync.Helpers
 
   @type conflict_result :: :no_conflict | :remote_updated | :conflict
 
@@ -53,7 +54,7 @@ defmodule Assistant.Sync.ChangeDetector do
   def detect_conflict(nil, _remote_change), do: :remote_updated
 
   def detect_conflict(%SyncedFile{} = synced_file, remote_change) do
-    remote_modified = parse_remote_time(remote_change.modified_time)
+    remote_modified = Helpers.parse_time(remote_change.modified_time)
     local_synced_at = synced_file.remote_modified_at
 
     cond do
@@ -150,19 +151,6 @@ defmodule Assistant.Sync.ChangeDetector do
   defp local_was_modified?(%SyncedFile{local_checksum: local, remote_checksum: remote}) do
     local != remote
   end
-
-  # Parse remote time — may be a DateTime, an ISO8601 string, or nil
-  defp parse_remote_time(nil), do: nil
-  defp parse_remote_time(%DateTime{} = dt), do: dt
-
-  defp parse_remote_time(time_string) when is_binary(time_string) do
-    case DateTime.from_iso8601(time_string) do
-      {:ok, dt, _offset} -> dt
-      {:error, _} -> nil
-    end
-  end
-
-  defp parse_remote_time(_), do: nil
 
   defp format_timestamp(%DateTime{} = dt) do
     Calendar.strftime(dt, "%Y%m%dT%H%M%SZ")

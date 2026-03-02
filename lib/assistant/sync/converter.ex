@@ -220,8 +220,7 @@ defmodule Assistant.Sync.Converter do
   defp format_from_mime(mime_type) do
     case Map.get(@mime_to_format, mime_type) do
       nil ->
-        # For unknown binary formats, default to txt
-        if String.starts_with?(mime_type, "text/"), do: "txt", else: "txt"
+        if String.starts_with?(mime_type, "text/"), do: "txt", else: "bin"
 
       format ->
         format

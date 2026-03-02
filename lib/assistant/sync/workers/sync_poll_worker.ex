@@ -41,16 +41,25 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
 
   alias Assistant.Integrations.Google.Auth
   alias Assistant.Integrations.Google.Drive.Changes
-  alias Assistant.Sync.{ChangeDetector, Converter, FileManager, StateStore}
+  alias Assistant.Sync.{ChangeDetector, Converter, FileManager, Helpers, StateStore}
 
   require Logger
 
   @impl Oban.Worker
-  def perform(%Oban.Job{}) do
+  def perform(%Oban.Job{args: %{"user_id" => user_id}}) do
+    # Per-user job dispatched by the cron dispatcher below
+    poll_user(user_id)
+    :ok
+  end
+
+  def perform(%Oban.Job{args: _args}) do
+    # Cron dispatcher: enqueue individual per-user jobs for parallel execution
     users_with_cursors = list_active_sync_users()
 
     Enum.each(users_with_cursors, fn user_id ->
-      poll_user(user_id)
+      %{user_id: user_id}
+      |> __MODULE__.new(queue: :sync)
+      |> Oban.insert()
     end)
 
     :ok
@@ -147,9 +156,12 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
 
   # -- Update Handler --
 
+  @max_file_size Application.compile_env(:assistant, :sync_max_file_size, 50_000_000)
+
   defp handle_update(user_id, access_token, drive_id, synced_file, change) do
     with {:ok, {content, format}} <- Converter.convert(access_token, change.file_id, change.mime_type),
-         relative_path <- build_relative_path(change, format),
+         :ok <- check_file_size(content, change),
+         relative_path <- build_relative_path(change, drive_id, format),
          {:ok, _full_path} <- FileManager.write_file(user_id, relative_path, content) do
       content_checksum = FileManager.checksum(content)
       now = DateTime.utc_now()
@@ -161,14 +173,15 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
         drive_mime_type: change.mime_type,
         local_path: relative_path,
         local_format: format,
-        remote_modified_at: parse_time(change.modified_time),
+        remote_modified_at: Helpers.parse_time(change.modified_time),
         local_modified_at: now,
         remote_checksum: content_checksum,
         local_checksum: content_checksum,
         sync_status: "synced",
         last_synced_at: now,
         sync_error: nil,
-        drive_id: drive_id
+        drive_id: drive_id,
+        file_size: byte_size(content)
       }
 
       result =
@@ -180,11 +193,9 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
 
       case result do
         {:ok, saved_file} ->
-          operation = if synced_file, do: "download", else: "download"
-
           StateStore.create_history_entry(%{
             synced_file_id: saved_file.id,
-            operation: operation,
+            operation: "download",
             details: %{"message" => "Synced #{change.name} (#{format})"}
           })
 
@@ -328,7 +339,7 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
     })
   end
 
-  defp build_relative_path(change, format) do
+  defp build_relative_path(change, drive_id, format) do
     # Sanitize the file name — replace unsafe characters
     safe_name =
       (change.name || "untitled")
@@ -336,20 +347,23 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
       |> String.slice(0, 200)
 
     base = Path.rootname(safe_name)
-    "#{base}.#{format}"
+    drive_prefix = if drive_id, do: drive_id, else: "my_drive"
+    parent_folder = first_parent(change) || "root"
+
+    Path.join([drive_prefix, parent_folder, "#{base}.#{format}"])
   end
 
-  defp parse_time(nil), do: nil
-  defp parse_time(%DateTime{} = dt), do: dt
+  defp check_file_size(content, change) do
+    size = byte_size(content)
 
-  defp parse_time(time_string) when is_binary(time_string) do
-    case DateTime.from_iso8601(time_string) do
-      {:ok, dt, _offset} -> dt
-      {:error, _} -> nil
+    if size > @max_file_size do
+      Logger.warning("SyncPollWorker: skipping #{change.file_id} (#{change.name}), " <>
+        "file size #{size} bytes exceeds max #{@max_file_size}")
+      {:error, :file_too_large}
+    else
+      :ok
     end
   end
-
-  defp parse_time(_), do: nil
 
   defp record_error(user_id, change, message) do
     synced_file = StateStore.get_synced_file(user_id, change.file_id)
