@@ -97,12 +97,12 @@ defmodule Assistant.Integrations.Discord.Client do
              json: body,
              headers: [{"authorization", "Bot #{token}"}]
            ) do
+        {:ok, %Req.Response{status: 204}} ->
+          {:ok, :no_content}
+
         {:ok, %Req.Response{status: status, body: resp_body}}
         when status in 200..299 ->
           {:ok, resp_body}
-
-        {:ok, %Req.Response{status: 204}} ->
-          {:ok, :no_content}
 
         {:ok, %Req.Response{status: status, body: resp_body}} ->
           message = extract_error_message(resp_body)

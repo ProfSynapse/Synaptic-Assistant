@@ -155,7 +155,9 @@ defmodule Assistant.Channels.Discord do
   end
 
   # Build a globally-unique scoped ID: "discord:{guild_id}:{local_id}"
-  defp scope_id("", local_id), do: local_id
+  # nil or "" guild_id indicates a DM context — use "dm" as scope prefix.
+  defp scope_id(nil, local_id), do: "discord:dm:#{local_id}"
+  defp scope_id("", local_id), do: "discord:dm:#{local_id}"
   defp scope_id(guild_id, local_id), do: "discord:#{guild_id}:#{local_id}"
 
   # Extract raw channel_id from scoped "discord:guild:channel" format.

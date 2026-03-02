@@ -131,7 +131,7 @@ defmodule Assistant.Integrations.Discord.ClientTest do
   # ---------------------------------------------------------------
 
   describe "trigger_typing/1" do
-    test "sends typing indicator", %{bypass: bypass} do
+    test "sends typing indicator and handles 204 response", %{bypass: bypass} do
       Bypass.expect_once(bypass, "POST", "/channels/123456/typing", fn conn ->
         assert Plug.Conn.get_req_header(conn, "authorization") == ["Bot #{@bot_token}"]
 
@@ -139,7 +139,7 @@ defmodule Assistant.Integrations.Discord.ClientTest do
         |> Plug.Conn.resp(204, "")
       end)
 
-      assert {:ok, _} = Client.trigger_typing("123456")
+      assert {:ok, :no_content} = Client.trigger_typing("123456")
     end
   end
 

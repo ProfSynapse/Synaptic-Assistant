@@ -211,14 +211,21 @@ defmodule Assistant.Channels.DiscordTest do
   describe "normalize/1 graceful degradation" do
     test "handles missing guild_id (DM context)" do
       interaction =
-        build_slash_command(%{
-          "guild_id" => nil
-        })
-      |> Map.delete("guild_id")
+        build_slash_command()
+        |> Map.delete("guild_id")
 
       {:ok, msg} = Discord.normalize(interaction)
-      # Without guild_id, falls back to just channel_id
-      assert msg.space_id == "444555666"
+      # Missing guild_id falls back to "" which uses "dm" scope prefix
+      assert msg.space_id == "discord:dm:444555666"
+    end
+
+    test "handles nil guild_id (DM payload)" do
+      interaction = build_slash_command(%{"guild_id" => nil})
+
+      {:ok, msg} = Discord.normalize(interaction)
+      # Discord DMs send guild_id: null (nil in Elixir)
+      assert msg.space_id == "discord:dm:444555666"
+      assert msg.user_id == "discord:dm:777888999"
     end
 
     test "handles missing member (DM context uses top-level user)" do
@@ -239,7 +246,7 @@ defmodule Assistant.Channels.DiscordTest do
       }
 
       {:ok, msg} = Discord.normalize(interaction)
-      assert msg.user_id == "777888999"
+      assert msg.user_id == "discord:dm:777888999"
       assert msg.user_display_name == "dmuser"
     end
 
