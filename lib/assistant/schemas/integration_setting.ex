@@ -24,12 +24,12 @@ defmodule Assistant.Schemas.IntegrationSetting do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @required_fields [:key, :value, :group]
-  @optional_fields [:updated_by_id]
+  @required_fields [:key, :group]
+  @cast_fields [:key, :value, :group, :updated_by_id]
 
   def changeset(setting, attrs) do
     setting
-    |> cast(attrs, @required_fields ++ @optional_fields)
+    |> cast(attrs, @cast_fields)
     |> validate_required(@required_fields)
     |> validate_known_key()
     |> unique_constraint(:key)

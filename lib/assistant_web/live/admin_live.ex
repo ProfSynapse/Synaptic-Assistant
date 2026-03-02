@@ -474,7 +474,7 @@ defmodule AssistantWeb.AdminLive do
         {:noreply, put_flash(socket, :error, "Unknown integration key.")}
       else
         case IntegrationSettings.delete(String.to_existing_atom(key)) do
-          :ok ->
+          {:ok, _} ->
             {:noreply,
              socket
              |> put_flash(:info, "Integration setting reverted to environment variable.")

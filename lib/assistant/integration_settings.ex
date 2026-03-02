@@ -94,9 +94,7 @@ defmodule Assistant.IntegrationSettings do
   @spec put(atom(), String.t() | nil, binary() | nil) ::
           {:ok, IntegrationSetting.t()} | {:error, Ecto.Changeset.t() | term()}
   def put(key, value, admin_id \\ nil) when is_atom(key) do
-    unless Registry.known_key?(key) do
-      {:error, :unknown_key}
-    else
+    if Registry.known_key?(key) do
       key_str = Atom.to_string(key)
       group = Registry.definition_for_key(key) |> Map.get(:group)
 
@@ -135,6 +133,8 @@ defmodule Assistant.IntegrationSettings do
         {:error, reason} ->
           {:error, reason}
       end
+    else
+      {:error, :unknown_key}
     end
   end
 
@@ -144,36 +144,43 @@ defmodule Assistant.IntegrationSettings do
   Removes the row from the database, invalidates the ETS cache entry, and
   broadcasts a PubSub event.
   """
-  @spec delete(atom()) :: :ok | {:error, term()}
+  @spec delete(atom()) :: {:ok, :deleted} | {:ok, :not_found} | {:error, term()}
   def delete(key) when is_atom(key) do
-    key_str = Atom.to_string(key)
+    if Registry.known_key?(key) do
+      key_str = Atom.to_string(key)
 
-    result =
-      with_admin_transaction(fn ->
-        case Repo.get_by(IntegrationSetting, key: key_str) do
-          nil ->
-            :ok
+      result =
+        with_admin_transaction(fn ->
+          case Repo.get_by(IntegrationSetting, key: key_str) do
+            nil ->
+              :not_found
 
-          setting ->
-            case Repo.delete(setting) do
-              {:ok, _deleted} -> :ok
-              {:error, changeset} -> {:error, changeset}
-            end
-        end
-      end)
+            setting ->
+              case Repo.delete(setting) do
+                {:ok, _deleted} -> :deleted
+                {:error, changeset} -> {:error, changeset}
+              end
+          end
+        end)
 
-    case result do
-      {:ok, :ok} ->
-        Cache.invalidate(key)
-        broadcast_change(key)
-        Logger.info("Integration setting deleted (reverted to env var)", key: key_str)
-        :ok
+      case result do
+        {:ok, :deleted} ->
+          Cache.invalidate(key)
+          broadcast_change(key)
+          Logger.info("Integration setting deleted (reverted to env var)", key: key_str)
+          {:ok, :deleted}
 
-      {:ok, {:error, changeset}} ->
-        {:error, changeset}
+        {:ok, :not_found} ->
+          {:ok, :not_found}
 
-      {:error, reason} ->
-        {:error, reason}
+        {:ok, {:error, changeset}} ->
+          {:error, changeset}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    else
+      {:error, :unknown_key}
     end
   end
 

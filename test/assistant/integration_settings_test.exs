@@ -131,21 +131,63 @@ defmodule Assistant.IntegrationSettingsTest do
     end
   end
 
+  describe "concurrent put/3" do
+    test "multiple concurrent puts for the same key all succeed" do
+      tasks =
+        for i <- 1..10 do
+          Task.async(fn ->
+            IntegrationSettings.put(:hubspot_api_key, "concurrent_value_#{i}")
+          end)
+        end
+
+      results = Task.await_many(tasks, 10_000)
+
+      # All 10 puts should succeed (no crashes, no constraint violations)
+      for result <- results do
+        assert {:ok, %IntegrationSetting{}} = result
+      end
+
+      # Final state should be consistent — one of the 10 values persists
+      settle_cache()
+      final = IntegrationSettings.get(:hubspot_api_key)
+      assert final =~ ~r/^concurrent_value_\d+$/
+    end
+
+    test "concurrent puts for different keys all succeed independently" do
+      tasks = [
+        Task.async(fn -> IntegrationSettings.put(:hubspot_api_key, "hub_concurrent") end),
+        Task.async(fn -> IntegrationSettings.put(:slack_bot_token, "slack_concurrent") end),
+        Task.async(fn -> IntegrationSettings.put(:telegram_bot_token, "tg_concurrent") end)
+      ]
+
+      results = Task.await_many(tasks, 10_000)
+
+      for result <- results do
+        assert {:ok, %IntegrationSetting{}} = result
+      end
+
+      settle_cache()
+      assert IntegrationSettings.get(:hubspot_api_key) == "hub_concurrent"
+      assert IntegrationSettings.get(:slack_bot_token) == "slack_concurrent"
+      assert IntegrationSettings.get(:telegram_bot_token) == "tg_concurrent"
+    end
+  end
+
   describe "delete/1" do
     test "deleting a row reverts to env var fallback" do
       {:ok, _} = IntegrationSettings.put(:openrouter_api_key, "db-override")
       settle_cache()
       assert IntegrationSettings.get(:openrouter_api_key) == "db-override"
 
-      assert :ok = IntegrationSettings.delete(:openrouter_api_key)
+      assert {:ok, :deleted} = IntegrationSettings.delete(:openrouter_api_key)
       settle_cache()
 
       # Should fall back to env var from config/test.exs
       assert IntegrationSettings.get(:openrouter_api_key) == "test-openrouter-key"
     end
 
-    test "deleting a non-existent row is a no-op" do
-      assert :ok = IntegrationSettings.delete(:hubspot_api_key)
+    test "deleting a non-existent row returns {:ok, :not_found}" do
+      assert {:ok, :not_found} = IntegrationSettings.delete(:hubspot_api_key)
     end
 
     test "invalidates ETS cache on delete" do
@@ -258,6 +300,71 @@ defmodule Assistant.IntegrationSettingsTest do
       assert discord_app.masked_value == "123456789"
     end
 
+    test "saving empty string intentionally disables the integration" do
+      # Empty string is a valid value — it means "explicitly disabled".
+      # list_all/0 will show source: :db with a masked empty value.
+      {:ok, setting} = IntegrationSettings.put(:hubspot_api_key, "")
+      assert setting.key == "hubspot_api_key"
+    end
+
+    test "masks single-character secret value" do
+      {:ok, _} = IntegrationSettings.put(:hubspot_api_key, "X")
+      settle_cache()
+
+      all = IntegrationSettings.list_all()
+      hubspot = Enum.find(all, &(&1.key == :hubspot_api_key))
+      assert hubspot.masked_value == "*"
+    end
+
+    test "masks exactly 4-character secret value entirely" do
+      {:ok, _} = IntegrationSettings.put(:hubspot_api_key, "ABCD")
+      settle_cache()
+
+      all = IntegrationSettings.list_all()
+      hubspot = Enum.find(all, &(&1.key == :hubspot_api_key))
+      # <= 4 chars → fully masked with same length
+      assert hubspot.masked_value == "****"
+    end
+
+    test "masks 5-character secret value — boundary just above 4" do
+      {:ok, _} = IntegrationSettings.put(:hubspot_api_key, "ABCDE")
+      settle_cache()
+
+      all = IntegrationSettings.list_all()
+      hubspot = Enum.find(all, &(&1.key == :hubspot_api_key))
+      # > 4 chars → "****" + last 4
+      assert hubspot.masked_value == "****BCDE"
+    end
+
+    test "masks very long secret value (100+ characters)" do
+      long_value = String.duplicate("x", 96) <> "TAIL"
+      assert String.length(long_value) == 100
+
+      {:ok, _} = IntegrationSettings.put(:hubspot_api_key, long_value)
+      settle_cache()
+
+      all = IntegrationSettings.list_all()
+      hubspot = Enum.find(all, &(&1.key == :hubspot_api_key))
+      assert hubspot.masked_value == "****TAIL"
+    end
+
+    test "saving empty string for non-secret values intentionally disables" do
+      # Empty string is valid for non-secret fields too — means "explicitly disabled"
+      {:ok, setting} = IntegrationSettings.put(:discord_application_id, "")
+      assert setting.key == "discord_application_id"
+    end
+
+    test "does not mask very long non-secret value" do
+      long_value = String.duplicate("A", 200)
+      {:ok, _} = IntegrationSettings.put(:discord_application_id, long_value)
+      settle_cache()
+
+      all = IntegrationSettings.list_all()
+      discord_app = Enum.find(all, &(&1.key == :discord_application_id))
+      assert discord_app.is_secret == false
+      assert discord_app.masked_value == long_value
+    end
+
     test "each entry has label, help, and group" do
       all = IntegrationSettings.list_all()
 
@@ -333,7 +440,7 @@ defmodule Assistant.IntegrationSettingsTest do
       settle_cache()
       assert IntegrationSettings.get(:openrouter_api_key) == "db-override"
 
-      :ok = IntegrationSettings.delete(:openrouter_api_key)
+      {:ok, :deleted} = IntegrationSettings.delete(:openrouter_api_key)
       settle_cache()
       assert IntegrationSettings.get(:openrouter_api_key) == env_val
     end
@@ -345,7 +452,7 @@ defmodule Assistant.IntegrationSettingsTest do
       settle_cache()
       assert IntegrationSettings.get(:hubspot_api_key) == "temporary"
 
-      :ok = IntegrationSettings.delete(:hubspot_api_key)
+      {:ok, :deleted} = IntegrationSettings.delete(:hubspot_api_key)
       settle_cache()
       assert IntegrationSettings.get(:hubspot_api_key) == nil
     end
@@ -374,15 +481,14 @@ defmodule Assistant.IntegrationSettingsTest do
       assert %{key: _} = errors_on(changeset)
     end
 
-    test "invalid changeset — missing value" do
+    test "valid changeset — missing value (nil means use env var fallback)" do
       changeset =
         IntegrationSetting.changeset(%IntegrationSetting{}, %{
           key: "hubspot_api_key",
           group: "hubspot"
         })
 
-      refute changeset.valid?
-      assert %{value: _} = errors_on(changeset)
+      assert changeset.valid?
     end
 
     test "invalid changeset — unknown key" do
