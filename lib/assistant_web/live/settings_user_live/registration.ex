@@ -17,6 +17,7 @@ defmodule AssistantWeb.SettingsUserLive.Registration do
     <div class="sa-auth-shell sa-auth-shell-cloud">
       <header class="sa-auth-top">
         <img src={@logo_url} alt="Synaptic Assistant" class="sa-auth-logo-wide" />
+        <p class="sa-auth-wordmark" aria-hidden="true">Assistant</p>
       </header>
 
       <section class="sa-auth-card sa-auth-card-compact">

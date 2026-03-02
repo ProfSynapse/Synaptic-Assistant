@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@700;800&display=swap");
 
 /* Force dark mode to selector strategy so Petal's dark: styles only apply
    when an ancestor has class="dark". Since this app never adds that class,
@@ -93,7 +94,7 @@ select.pc-text-input {
 }
 
 /* Brand fonts */
-@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700;800&display=swap");
 
 /* ============================================================
    Synaptic Assistant custom styles (sa-* namespace)
@@ -237,6 +238,30 @@ a {
   width: min(360px, 74vw);
   height: auto;
   object-fit: contain;
+}
+
+.sa-auth-wordmark {
+  font-family: "Montserrat", sans-serif;
+  font-weight: 700;
+  font-size: clamp(1.4rem, 3.2vw, 1.8rem);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  width: min(360px, 74vw);
+  text-align: center;
+  background: linear-gradient(90deg, #00a99d, #29abe2, #93278f, #29abe2, #00a99d);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: sa-gradient-flow 6s linear infinite;
+  margin: 0;
+  line-height: 1;
+}
+
+@keyframes sa-gradient-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
 }
 
 .sa-auth-brand-copy {
@@ -1592,6 +1617,11 @@ a {
 
   .sa-auth-logo-wide {
     width: min(280px, 72vw);
+  }
+
+  .sa-auth-wordmark {
+    width: min(280px, 72vw);
+    font-size: clamp(1.1rem, 2.8vw, 1.4rem);
   }
 
   .sa-memory-filter-card {
