@@ -1036,6 +1036,12 @@ defmodule Assistant.Accounts do
 
   Returns the decrypted API key string, or nil if the user has no linked
   settings_user or no OpenRouter key stored.
+
+  Fallback: if no settings_user is directly linked to the given user_id
+  and exactly ONE settings_user in the system has an OpenRouter key,
+  returns that key. This handles single-admin setups where the
+  settings_user was linked to a "settings" pseudo-user instead of the
+  actual chat user.
   """
   @spec openrouter_key_for_user(String.t()) :: String.t() | nil
   def openrouter_key_for_user(user_id) when is_binary(user_id) do
@@ -1046,7 +1052,7 @@ defmodule Assistant.Accounts do
                select: su.openrouter_api_key
              )
            ) do
-        nil -> nil
+        nil -> sole_settings_user_key(:openrouter_api_key)
         "" -> nil
         key when is_binary(key) -> key
       end
@@ -1119,6 +1125,8 @@ defmodule Assistant.Accounts do
 
   Returns the decrypted API key string, or nil if the user has no linked
   settings_user or no OpenAI key stored.
+
+  Uses the same single-admin fallback as `openrouter_key_for_user/1`.
   """
   @spec openai_key_for_user(String.t()) :: String.t() | nil
   def openai_key_for_user(user_id) when is_binary(user_id) do
@@ -1129,7 +1137,7 @@ defmodule Assistant.Accounts do
                select: su.openai_api_key
              )
            ) do
-        nil -> nil
+        nil -> sole_settings_user_key(:openai_api_key)
         "" -> nil
         key when is_binary(key) -> key
       end
@@ -1149,29 +1157,75 @@ defmodule Assistant.Accounts do
     - `:refresh_token` — OAuth refresh token (oauth mode only)
     - `:account_id` — ChatGPT account/org id (oauth mode only)
     - `:expires_at` — UTC expiry timestamp when available
+
+  Uses the same single-admin fallback as `openrouter_key_for_user/1`.
   """
   @spec openai_credentials_for_user(String.t()) :: map() | nil
   def openai_credentials_for_user(user_id) when is_binary(user_id) do
-    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id),
-         %{} = row <-
-           Repo.one(
-             from(su in SettingsUser,
-               where: su.user_id == ^cast_user_id,
-               select: %{
-                 auth_type: su.openai_auth_type,
-                 access_token: su.openai_api_key,
-                 refresh_token: su.openai_refresh_token,
-                 account_id: su.openai_account_id,
-                 expires_at: su.openai_expires_at
-               }
-             )
-           ),
-         true <- is_binary(row.access_token) and row.access_token != "" do
-      row
+    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id) do
+      row =
+        Repo.one(
+          from(su in SettingsUser,
+            where: su.user_id == ^cast_user_id,
+            select: %{
+              auth_type: su.openai_auth_type,
+              access_token: su.openai_api_key,
+              refresh_token: su.openai_refresh_token,
+              account_id: su.openai_account_id,
+              expires_at: su.openai_expires_at
+            }
+          )
+        )
+
+      cond do
+        is_map(row) and is_binary(row.access_token) and row.access_token != "" ->
+          row
+
+        true ->
+          sole_settings_user_credentials(:openai)
+      end
     else
-      _ -> nil
+      :error -> nil
     end
   end
 
   def openai_credentials_for_user(_), do: nil
+
+  # Single-admin fallback: if exactly ONE settings_user has a non-null
+  # value for the given key field, return it. This handles the case
+  # where the settings_user is linked to a "settings" pseudo-user
+  # instead of the actual chat user. Safe for single-user deployments.
+  defp sole_settings_user_key(key_field) when key_field in [:openrouter_api_key, :openai_api_key] do
+    query =
+      from(su in SettingsUser,
+        where: not is_nil(field(su, ^key_field)),
+        select: field(su, ^key_field)
+      )
+
+    case Repo.all(query) do
+      [key] when is_binary(key) and key != "" -> key
+      _ -> nil
+    end
+  end
+
+  # Single-admin fallback for full OpenAI credentials. Returns the
+  # credential map if exactly ONE settings_user has a non-null OpenAI key.
+  defp sole_settings_user_credentials(:openai) do
+    query =
+      from(su in SettingsUser,
+        where: not is_nil(su.openai_api_key),
+        select: %{
+          auth_type: su.openai_auth_type,
+          access_token: su.openai_api_key,
+          refresh_token: su.openai_refresh_token,
+          account_id: su.openai_account_id,
+          expires_at: su.openai_expires_at
+        }
+      )
+
+    case Repo.all(query) do
+      [%{access_token: token} = row] when is_binary(token) and token != "" -> row
+      _ -> nil
+    end
+  end
 end
