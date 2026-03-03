@@ -596,6 +596,7 @@ a {
 .sa-brand-mark {
   width: 34px;
   height: 34px;
+  flex-shrink: 0;
   border-radius: 50%;
   background: radial-gradient(circle at 30% 30%, var(--sa-blue), var(--sa-aqua));
   color: #093642;
@@ -607,6 +608,10 @@ a {
 .sa-sidebar-nav {
   display: grid;
   gap: 6px;
+}
+
+.sa-sidebar-footer {
+  margin-top: auto;
 }
 
 .sa-sidebar-link {

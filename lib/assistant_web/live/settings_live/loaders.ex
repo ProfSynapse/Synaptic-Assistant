@@ -243,6 +243,21 @@ defmodule AssistantWeb.SettingsLive.Loaders do
 
   @non_ai_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
+  def load_app_detail_settings(socket, app) do
+    settings_user = Context.current_settings_user(socket)
+
+    if settings_user && settings_user.is_admin do
+      all_settings = IntegrationSettings.list_all()
+
+      filtered =
+        Enum.filter(all_settings, fn setting -> setting.group == app.integration_group end)
+
+      assign(socket, :app_integration_settings, filtered)
+    else
+      assign(socket, :app_integration_settings, [])
+    end
+  end
+
   def load_apps_integration_settings(socket) do
     settings_user = Context.current_settings_user(socket)
 

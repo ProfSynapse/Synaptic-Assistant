@@ -81,11 +81,23 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:admin_settings_users, [])
     |> assign(:admin_users_with_keys, [])
     |> assign(:integration_settings, [])
+    |> assign(:current_app, nil)
+    |> assign(:app_integration_settings, [])
     |> Loaders.load_profile()
     |> Loaders.load_orchestrator_prompt()
   end
 
   def handle_params(socket, params) do
+    cond do
+      Map.has_key?(params, "app_id") ->
+        handle_app_detail(socket, params)
+
+      true ->
+        handle_section(socket, params)
+    end
+  end
+
+  defp handle_section(socket, params) do
     section = Data.normalize_section(Map.get(params, "section", "profile"))
 
     is_admin =
@@ -103,8 +115,26 @@ defmodule AssistantWeb.SettingsLive.State do
 
       socket
       |> assign(:section, section)
+      |> assign(:current_app, nil)
       |> assign(:help_topic, Data.selected_help_article(section, help_topic))
       |> Loaders.load_section_data(section)
+    end
+  end
+
+  defp handle_app_detail(socket, params) do
+    app_id = Map.get(params, "app_id")
+
+    case Data.find_app(app_id) do
+      nil ->
+        socket
+        |> put_flash(:error, "App not found.")
+        |> push_navigate(to: "/settings/apps")
+
+      app ->
+        socket
+        |> assign(:section, "apps")
+        |> assign(:current_app, app)
+        |> Loaders.load_app_detail_settings(app)
     end
   end
 end

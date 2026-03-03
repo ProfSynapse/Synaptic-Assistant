@@ -13,7 +13,7 @@ defmodule AssistantWeb.Components.SettingsPage.Help do
           <h2>Help Cards</h2>
         </div>
         <.form for={to_form(%{}, as: :help)} phx-change="search_help" id="help-search-form">
-          <.input name="help[q]" value={@help_query} placeholder="Search help..." />
+          <.field name="help[q]" label="Search" label_class="sr-only" value={@help_query} placeholder="Search help..." no_margin />
         </.form>
 
         <div class="sa-card-grid">

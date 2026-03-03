@@ -73,34 +73,10 @@ defmodule AssistantWeb.SettingsLive.Events do
     end
   end
 
-  def handle_event("open_add_app_modal", _params, socket) do
-    {:noreply, assign(socket, :apps_modal_open, true)}
-  end
-
-  def handle_event("close_add_app_modal", _params, socket) do
-    {:noreply, assign(socket, :apps_modal_open, false)}
-  end
-
   def handle_event("close_modal", _params, socket) do
     {:noreply,
      socket
-     |> assign(:model_modal_open, false)
-     |> assign(:apps_modal_open, false)}
-  end
-
-  def handle_event("add_catalog_app", %{"id" => app_id}, socket) do
-    app_name =
-      Data.app_catalog()
-      |> Enum.find(&(&1.id == app_id))
-      |> case do
-        nil -> "App"
-        app -> app.name
-      end
-
-    {:noreply,
-     socket
-     |> assign(:apps_modal_open, false)
-     |> put_flash(:info, "#{app_name} added to your approved app connections list.")}
+     |> assign(:model_modal_open, false)}
   end
 
   def handle_event("connect_google", _params, socket) do
@@ -915,15 +891,19 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   defp reload_integration_settings(socket) do
     section = socket.assigns[:section]
+    current_app = socket.assigns[:current_app]
 
-    case section do
-      "admin" ->
+    cond do
+      current_app != nil ->
+        Loaders.load_app_detail_settings(socket, current_app)
+
+      section == "admin" ->
         assign(socket, :integration_settings, IntegrationSettings.list_all())
 
-      "apps" ->
+      section == "apps" ->
         Loaders.load_apps_integration_settings(socket)
 
-      _ ->
+      true ->
         socket
     end
   end

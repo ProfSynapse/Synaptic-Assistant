@@ -51,14 +51,6 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "GOOGLE_OAUTH_CLIENT_SECRET",
           label: "OAuth Client Secret",
           help: "Same page as Client ID"
-        },
-        %{
-          key: :google_service_account_json,
-          secret: true,
-          env: "GOOGLE_APPLICATION_CREDENTIALS",
-          label: "Service Account JSON",
-          help:
-            "Service account JSON key for Google Chat bot. Create at console.cloud.google.com/iam-admin/serviceaccounts"
         }
       ]
     },

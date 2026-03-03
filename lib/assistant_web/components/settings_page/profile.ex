@@ -18,20 +18,22 @@ defmodule AssistantWeb.Components.SettingsPage.Profile do
           phx-hook="ProfileTimezone"
         >
           <div class="sa-profile-grid">
-            <.input
+            <.field
               name="profile[display_name]"
               label="Full Name"
               value={@profile["display_name"]}
               placeholder="Jane Doe"
               phx-debounce="500"
+              no_margin
             />
-            <.input
+            <.field
               type="email"
               name="profile[email]"
               label="Email"
               value={@profile["email"]}
               placeholder="jane@company.com"
               phx-debounce="500"
+              no_margin
             />
           </div>
           <input

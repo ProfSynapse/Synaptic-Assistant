@@ -59,11 +59,12 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
             </p>
             <div :if={@openrouter_key_form_open} style="margin-top: 0.75rem;">
               <.form for={@openrouter_key_form} id="openrouter-key-form" phx-submit="save_openrouter_api_key">
-                <.input
+                <.field
                   type="password"
                   field={@openrouter_key_form[:api_key]}
                   label="OpenRouter API key"
                   required
+                  no_margin
                 />
                 <button type="submit" class="sa-btn secondary">Validate & Connect</button>
               </.form>
@@ -111,7 +112,7 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
             </p>
             <div :if={@openai_key_form_open} style="margin-top: 0.75rem;">
               <.form for={@openai_key_form} id="openai-key-form" phx-submit="save_openai_api_key">
-                <.input type="password" field={@openai_key_form[:api_key]} label="OpenAI API key" required />
+                <.field type="password" field={@openai_key_form[:api_key]} label="OpenAI API key" required no_margin />
                 <button type="submit" class="sa-btn secondary">Validate & Connect</button>
               </.form>
             </div>
@@ -180,20 +181,22 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
           phx-change="filter_active_models"
         >
           <div class="sa-model-default-select">
-            <.input
+            <.field
               type="text"
               field={@active_model_filter_form[:q]}
               label="Search active models"
               placeholder="Search by name, id, or provider..."
+              no_margin
             />
           </div>
           <div class="sa-model-default-select">
-            <.input
+            <.field
               type="select"
               name="active_models[provider]"
               label="Provider"
               value={@active_model_provider}
               options={@active_model_provider_options}
+              no_margin
             />
           </div>
         </.form>
@@ -251,11 +254,12 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
           on_cancel={JS.push("close_model_modal")}
         >
           <.form for={@model_library_form} id="model-library-form" phx-change="search_model_library">
-            <.input
+            <.field
               type="text"
               field={@model_library_form[:q]}
               label="Search OpenRouter models"
               placeholder="Search by model name or id (for example gpt-oss, claude, gemini...)"
+              no_margin
             />
           </.form>
 
