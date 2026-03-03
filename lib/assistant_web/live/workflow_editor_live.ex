@@ -176,7 +176,7 @@ defmodule AssistantWeb.WorkflowEditorLive do
           phx-change="save_metadata"
           class="sa-card"
         >
-          <.input name="workflow[description]" label="Description" value={@workflow.description} />
+          <.field name="workflow[description]" label="Description" value={@workflow.description} no_margin />
 
           <div class="sa-schedule-toggle" style="margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
             <label class="sa-switch">
@@ -199,43 +199,47 @@ defmodule AssistantWeb.WorkflowEditorLive do
 
           <div :if={has_schedule(assigns)} class="sa-schedule-row">
             <div class="sa-model-default-select">
-              <.input
+              <.field
                 type="select"
                 name="workflow[recurrence]"
                 label="Schedule"
                 options={@recurrence_options}
                 value={recurrence(assigns)}
+                no_margin
               />
             </div>
             <div class="sa-model-default-select">
-              <.input name="workflow[time]" type="time" label="Time" value={schedule_time(assigns)} />
+              <.field name="workflow[time]" type="time" label="Time" value={schedule_time(assigns)} no_margin />
             </div>
             <div :if={recurrence(assigns) == "weekly"} class="sa-model-default-select">
-              <.input
+              <.field
                 type="select"
                 name="workflow[day_of_week]"
                 label="Day"
                 options={@weekday_options}
                 value={day_of_week(assigns)}
+                no_margin
               />
             </div>
-            <.input
+            <.field
               :if={recurrence(assigns) == "monthly"}
               type="text"
               name="workflow[day_of_month]"
               label="Day of Month"
               value={day_of_month(assigns)}
+              no_margin
             />
-            <.input
+            <.field
               :if={recurrence(assigns) == "custom"}
               type="text"
               name="workflow[custom_cron]"
               label="Custom Cron"
               value={custom_cron(assigns)}
+              no_margin
             />
           </div>
 
-          <.input name="workflow[channel]" label="Channel" value={@workflow.channel} />
+          <.field name="workflow[channel]" label="Channel" value={@workflow.channel} no_margin />
 
           <section class="sa-tool-permissions">
             <h2>Tools</h2>
