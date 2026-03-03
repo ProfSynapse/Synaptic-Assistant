@@ -7,6 +7,24 @@ tags:
   - entities
   - knowledge-graph
   - retrieval
+parameters:
+  - name: "entity_name"
+    type: "string"
+    required: true
+    description: "Name of the entity to query"
+  - name: "relation_types"
+    type: "array"
+    items: "string"
+    required: false
+    description: "Filter by relation type(s)"
+  - name: "include_closed"
+    type: "boolean"
+    required: false
+    description: "Include closed (historical) relations (default: false)"
+  - name: "depth"
+    type: "integer"
+    required: false
+    description: "Graph traversal depth: 1 = direct, 2 = two hops (default: 1, max: 3)"
 ---
 
 # memory.query_entity_graph

@@ -6,6 +6,28 @@ tags:
   - memory
   - search
   - retrieval
+parameters:
+  - name: "query"
+    type: "string"
+    required: true
+    description: "Natural language search query"
+  - name: "limit"
+    type: "integer"
+    required: false
+    description: "Maximum results to return (default: 10, max: 50)"
+  - name: "topics"
+    type: "array"
+    items: "string"
+    required: false
+    description: "Filter by topic labels"
+  - name: "min_confidence"
+    type: "float"
+    required: false
+    description: "Minimum confidence threshold (0.0-1.0, default: 0.3)"
+  - name: "time_range"
+    type: "object"
+    required: false
+    description: "Filter by creation time: {after: ISO8601, before: ISO8601}"
 ---
 
 # memory.search_memories

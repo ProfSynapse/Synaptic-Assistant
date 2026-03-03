@@ -8,6 +8,31 @@ tags:
   - generation
   - openrouter
   - write
+parameters:
+  - name: "prompt"
+    type: "string"
+    required: true
+    description: "Natural language image prompt"
+  - name: "model"
+    type: "string"
+    required: false
+    description: "Explicit OpenRouter model ID (for example openai/gpt-5-image-mini)"
+  - name: "n"
+    type: "integer"
+    required: false
+    description: "Number of images to generate (1-4, default 1)"
+  - name: "size"
+    type: "string"
+    required: false
+    description: "Provider-specific size, e.g. 1024x1024"
+  - name: "aspect_ratio"
+    type: "string"
+    required: false
+    description: "Provider-specific aspect ratio, e.g. 16:9"
+  - name: "aspect"
+    type: "string"
+    required: false
+    description: "Alias for aspect_ratio"
 ---
 
 # images.generate

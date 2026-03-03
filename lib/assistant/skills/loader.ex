@@ -167,6 +167,7 @@ defmodule Assistant.Skills.Loader do
         tags: frontmatter["tags"] || [],
         author: frontmatter["author"],
         timezone: frontmatter["timezone"],
+        parameters: parse_parameters(frontmatter["parameters"]),
         body: body,
         path: path
       }
@@ -184,6 +185,25 @@ defmodule Assistant.Skills.Loader do
       path: path
     }
   end
+
+  defp parse_parameters(nil), do: []
+  defp parse_parameters(params) when is_list(params) do
+    Enum.map(params, fn param when is_map(param) ->
+      base = %{
+        name: param["name"],
+        type: param["type"] || "string",
+        required: param["required"] == true,
+        description: param["description"] || ""
+      }
+
+      if param["items"] do
+        Map.put(base, :items, param["items"])
+      else
+        base
+      end
+    end)
+  end
+  defp parse_parameters(_), do: []
 
   @doc false
   def derive_domain(file_path, skills_root) do

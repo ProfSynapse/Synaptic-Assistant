@@ -6,6 +6,23 @@ tags:
   - files
   - update
   - drive
+parameters:
+  - name: "id"
+    type: "string"
+    required: true
+    description: "The Google Drive file ID to update"
+  - name: "search"
+    type: "string"
+    required: true
+    description: "Text to find in the file"
+  - name: "replace"
+    type: "string"
+    required: true
+    description: "Replacement text (use \"\" for deletion)"
+  - name: "all"
+    type: "flag"
+    required: false
+    description: "Replace all occurrences (default: replace first only)"
 ---
 
 # files.update

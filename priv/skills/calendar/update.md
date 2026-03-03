@@ -7,6 +7,39 @@ tags:
   - calendar
   - write
   - events
+parameters:
+  - name: "id"
+    type: "string"
+    required: true
+    description: "Event ID to update"
+  - name: "title"
+    type: "string"
+    required: false
+    description: "New event title"
+  - name: "start"
+    type: "string"
+    required: false
+    description: "New start time (RFC 3339 or \"YYYY-MM-DD HH:MM\")"
+  - name: "end"
+    type: "string"
+    required: false
+    description: "New end time (RFC 3339 or \"YYYY-MM-DD HH:MM\")"
+  - name: "description"
+    type: "string"
+    required: false
+    description: "New event description"
+  - name: "location"
+    type: "string"
+    required: false
+    description: "New event location"
+  - name: "attendees"
+    type: "string"
+    required: false
+    description: "New comma-separated attendee emails (replaces existing)"
+  - name: "calendar"
+    type: "string"
+    required: false
+    description: "Calendar ID (default \"primary\")"
 ---
 
 # calendar.update

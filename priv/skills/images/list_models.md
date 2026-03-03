@@ -6,6 +6,11 @@ tags:
   - images
   - models
   - read
+parameters:
+  - name: "tier"
+    type: "string"
+    required: false
+    description: "Filter to one tier: primary, balanced, fast, cheap"
 ---
 
 # images.list_models

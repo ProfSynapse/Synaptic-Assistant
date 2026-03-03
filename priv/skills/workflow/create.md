@@ -7,6 +7,27 @@ tags:
   - workflow
   - write
   - scheduled
+parameters:
+  - name: "name"
+    type: "string"
+    required: true
+    description: "Workflow name (lowercase, hyphens/underscores allowed)"
+  - name: "description"
+    type: "string"
+    required: true
+    description: "One-line description of the workflow"
+  - name: "prompt"
+    type: "string"
+    required: true
+    description: "The prompt body sent to the agent"
+  - name: "cron"
+    type: "string"
+    required: false
+    description: "Cron expression for scheduling (e.g., \"0 8 * * *\")"
+  - name: "channel"
+    type: "string"
+    required: false
+    description: "Google Chat space name for result delivery (e.g., \"spaces/ABC\")"
 ---
 
 # workflow.create

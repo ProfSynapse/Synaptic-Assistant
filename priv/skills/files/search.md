@@ -7,6 +7,23 @@ tags:
   - read
   - search
   - drive
+parameters:
+  - name: "query"
+    type: "string"
+    required: false
+    description: "Search text matched against file names"
+  - name: "type"
+    type: "string"
+    required: false
+    description: "File type filter: \"doc\", \"sheet\", \"slides\", \"pdf\", \"folder\", \"image\", \"video\""
+  - name: "folder"
+    type: "string"
+    required: false
+    description: "Parent folder ID to scope the search"
+  - name: "limit"
+    type: "integer"
+    required: false
+    description: "Max results to return (default 20, max 100)"
 ---
 
 # files.search

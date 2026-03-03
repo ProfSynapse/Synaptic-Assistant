@@ -6,6 +6,15 @@ tags:
   - files
   - read
   - drive
+parameters:
+  - name: "id"
+    type: "string"
+    required: true
+    description: "The Google Drive file ID"
+  - name: "format"
+    type: "string"
+    required: false
+    description: "Export MIME type for Workspace files (default: \"text/plain\")"
 ---
 
 # files.read

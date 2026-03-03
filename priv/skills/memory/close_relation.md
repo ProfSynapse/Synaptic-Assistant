@@ -7,6 +7,19 @@ tags:
   - entities
   - knowledge-graph
   - write
+parameters:
+  - name: "relation_id"
+    type: "string"
+    required: true
+    description: "UUID of the relation to close"
+  - name: "reason"
+    type: "string"
+    required: false
+    description: "Brief explanation for closing (stored in provenance)"
+  - name: "replacement"
+    type: "object"
+    required: false
+    description: "New relation to open: {relation_type, attributes}"
 ---
 
 # memory.close_relation

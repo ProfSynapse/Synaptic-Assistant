@@ -7,6 +7,19 @@ tags:
   - entities
   - knowledge-graph
   - write
+parameters:
+  - name: "text"
+    type: "string"
+    required: true
+    description: "The text to analyze for entity extraction"
+  - name: "source_conversation_id"
+    type: "string"
+    required: false
+    description: "UUID of the originating conversation for provenance"
+  - name: "context_hint"
+    type: "string"
+    required: false
+    description: "Optional hint about the domain/context of the text"
 ---
 
 # memory.extract_entities

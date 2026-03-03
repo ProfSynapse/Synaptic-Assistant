@@ -6,6 +6,35 @@ tags:
   - tasks
   - read
   - search
+parameters:
+  - name: "query"
+    type: "string"
+    required: false
+    description: "Full-text search query across title and description"
+  - name: "status"
+    type: "string"
+    required: false
+    description: "Filter by status: \"todo\", \"in_progress\", \"blocked\", \"done\", \"cancelled\""
+  - name: "priority"
+    type: "string"
+    required: false
+    description: "Filter by priority: \"low\", \"medium\", \"high\", \"urgent\""
+  - name: "assignee"
+    type: "string"
+    required: false
+    description: "Filter by assignee user ID"
+  - name: "tags"
+    type: "string"
+    required: false
+    description: "Comma-separated tags to filter by (all must match)"
+  - name: "due-before"
+    type: "string"
+    required: false
+    description: "ISO 8601 date; return tasks due before this date"
+  - name: "due-after"
+    type: "string"
+    required: false
+    description: "ISO 8601 date; return tasks due after this date"
 ---
 
 # tasks.search

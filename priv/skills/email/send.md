@@ -7,6 +7,23 @@ tags:
   - write
   - send
   - gmail
+parameters:
+  - name: "to"
+    type: "string"
+    required: true
+    description: "Recipient email address"
+  - name: "subject"
+    type: "string"
+    required: true
+    description: "Email subject line"
+  - name: "body"
+    type: "string"
+    required: true
+    description: "Email body text (may be multiline)"
+  - name: "cc"
+    type: "string"
+    required: false
+    description: "CC recipient email address"
 ---
 
 # email.send
