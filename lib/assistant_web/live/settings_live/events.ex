@@ -710,6 +710,46 @@ defmodule AssistantWeb.SettingsLive.Events do
     end
   end
 
+  def handle_event("save_user_openrouter_key", %{"user_id" => user_id, "api_key" => api_key}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      api_key = String.trim(api_key)
+
+      if api_key == "" do
+        {:noreply, put_flash(socket, :error, "API key cannot be blank.")}
+      else
+        case Accounts.admin_set_openrouter_key(user_id, api_key) do
+          {:ok, _user} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "OpenRouter API key saved.")
+             |> assign(:admin_users_with_keys, Accounts.list_settings_users_for_admin())}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Unable to save API key.")}
+        end
+      end
+    end
+  end
+
+  def handle_event("delete_user_openrouter_key", %{"id" => user_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      case Accounts.admin_clear_openrouter_key(user_id) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "OpenRouter API key removed.")
+           |> assign(:admin_users_with_keys, Accounts.list_settings_users_for_admin())}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to remove API key.")}
+      end
+    end
+  end
+
   def handle_event("save_profile", %{"profile" => params}, socket) do
     Profile.save_profile(socket, params, flash?: true)
   end

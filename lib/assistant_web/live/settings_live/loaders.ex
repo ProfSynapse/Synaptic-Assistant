@@ -225,6 +225,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         allowlist_form: blank_form,
         allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
         admin_settings_users: Accounts.list_admin_settings_users(),
+        admin_users_with_keys: Accounts.list_settings_users_for_admin(),
         integration_settings: IntegrationSettings.list_all()
       )
     else
@@ -234,6 +235,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         allowlist_form: to_form(%{}, as: "allowlist_entry"),
         allowlist_entries: [],
         admin_settings_users: [],
+        admin_users_with_keys: [],
         integration_settings: []
       )
     end

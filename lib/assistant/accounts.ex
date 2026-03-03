@@ -791,6 +791,64 @@ defmodule Assistant.Accounts do
   def openrouter_connected?(%SettingsUser{openrouter_api_key: key}) when is_binary(key), do: true
   def openrouter_connected?(_), do: false
 
+  ## Admin per-user key management
+
+  @doc """
+  Lists all settings_users with summary info for admin key management.
+
+  Returns a list of maps with :id, :email, :display_name,
+  :has_openrouter_key (boolean), and :has_linked_user (boolean).
+  The actual API key value is never exposed.
+  """
+  def list_settings_users_for_admin do
+    from(su in SettingsUser,
+      order_by: [asc: su.email],
+      select: %{
+        id: su.id,
+        email: su.email,
+        display_name: su.display_name,
+        has_openrouter_key: not is_nil(su.openrouter_api_key),
+        has_linked_user: not is_nil(su.user_id)
+      }
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Sets an OpenRouter API key for a settings_user by ID (admin-provisioned).
+
+  Returns `{:ok, settings_user}` or `{:error, :not_found}`.
+  """
+  def admin_set_openrouter_key(settings_user_id, api_key)
+      when is_binary(settings_user_id) and is_binary(api_key) do
+    case Repo.get(SettingsUser, settings_user_id) do
+      nil ->
+        {:error, :not_found}
+
+      %SettingsUser{} = settings_user ->
+        settings_user
+        |> SettingsUser.openrouter_api_key_changeset(api_key)
+        |> Repo.update()
+    end
+  end
+
+  @doc """
+  Clears the OpenRouter API key for a settings_user by ID (admin action).
+
+  Returns `{:ok, settings_user}` or `{:error, :not_found}`.
+  """
+  def admin_clear_openrouter_key(settings_user_id) when is_binary(settings_user_id) do
+    case Repo.get(SettingsUser, settings_user_id) do
+      nil ->
+        {:error, :not_found}
+
+      %SettingsUser{} = settings_user ->
+        settings_user
+        |> SettingsUser.openrouter_api_key_changeset(nil)
+        |> Repo.update()
+    end
+  end
+
   @doc """
   Looks up the per-user OpenRouter API key via the chat user_id bridge.
 
