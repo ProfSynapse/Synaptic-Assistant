@@ -42,7 +42,20 @@ defmodule Assistant.DataCase do
   """
   def setup_sandbox(tags) do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Assistant.Repo, shared: not tags[:async])
+
+    # Allow long-lived GenServers that make DB queries to use this test's
+    # sandbox connection. Without this, their Repo calls (e.g., Cache.warm())
+    # use a non-sandboxed connection that conflicts with the sandbox owner.
+    allow_sandbox_access(pid, Assistant.IntegrationSettings.Cache)
+
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+  end
+
+  defp allow_sandbox_access(pid, server_name) do
+    case Process.whereis(server_name) do
+      nil -> :ok
+      server_pid -> Ecto.Adapters.SQL.Sandbox.allow(Assistant.Repo, pid, server_pid)
+    end
   end
 
   @doc """

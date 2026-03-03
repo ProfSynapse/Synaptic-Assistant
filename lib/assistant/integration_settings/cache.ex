@@ -139,12 +139,18 @@ defmodule Assistant.IntegrationSettings.Cache do
 
   @impl true
   def handle_info(%{key: key}, state) when is_atom(key) do
-    # Re-warm specific key from DB instead of just deleting.
-    # This ensures the cache stays populated after remote writes,
-    # especially for keys without env var fallback.
-    case warm_single_key(Atom.to_string(key), state.table) do
-      :ok -> :ok
-      :not_found -> :ets.delete(state.table, key)
+    if sandbox_mode?() do
+      # In test mode with SQL Sandbox, skip DB re-warm to avoid sandbox
+      # connection conflicts. Just invalidate; tests control ETS directly.
+      :ets.delete(state.table, key)
+    else
+      # Re-warm specific key from DB instead of just deleting.
+      # This ensures the cache stays populated after remote writes,
+      # especially for keys without env var fallback.
+      case warm_single_key(Atom.to_string(key), state.table) do
+        :ok -> :ok
+        :not_found -> :ets.delete(state.table, key)
+      end
     end
 
     {:noreply, state}
@@ -155,6 +161,13 @@ defmodule Assistant.IntegrationSettings.Cache do
   end
 
   # --- Internal ---
+
+  # Returns true when the Repo is running in SQL Sandbox mode (test env).
+  # Used to skip DB re-warming in PubSub handlers, preventing sandbox
+  # connection conflicts that cascade into test failures.
+  defp sandbox_mode? do
+    Application.get_env(:assistant, Assistant.Repo)[:pool] == Ecto.Adapters.SQL.Sandbox
+  end
 
   defp do_warm(table) do
     alias Assistant.Repo
@@ -209,9 +222,15 @@ defmodule Assistant.IntegrationSettings.Cache do
       end
     end)
     |> case do
-      {:ok, nil} -> :not_found
-      {:ok, {key_s, value}} -> insert_cached_key(table, key_s, value); :ok
-      {:error, _} -> :not_found
+      {:ok, nil} ->
+        :not_found
+
+      {:ok, {key_s, value}} ->
+        insert_cached_key(table, key_s, value)
+        :ok
+
+      {:error, _} ->
+        :not_found
     end
   rescue
     _ -> :not_found
