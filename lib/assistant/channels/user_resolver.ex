@@ -22,7 +22,9 @@ defmodule Assistant.Channels.UserResolver do
 
   - Platform IDs are validated against per-channel regex patterns before DB insert
   - Cross-channel identity linking is admin-only via `link_identity/4`
-  - TODO: Allowlist check before auto-creation (v1 skips this)
+  - User allowlist: configurable via `Application.get_env(:assistant, :user_allowlist, :open)`.
+    When `:open` (default), all users are auto-created. When a list of external IDs,
+    only listed users are allowed through.
   """
 
   import Ecto.Query
@@ -145,10 +147,19 @@ defmodule Assistant.Channels.UserResolver do
   end
 
   defp create_user_and_resolve(channel, external_id, metadata) do
-    # TODO: Allowlist check — for v1, all users are allowed.
-    # When implemented, check allowlist before creating the user and
-    # return {:error, :not_allowed} if the user is not on the list.
+    if not is_allowed?(channel, external_id) do
+      Logger.warning("User not on allowlist, rejecting auto-creation",
+        channel: channel,
+        external_id: external_id
+      )
 
+      {:error, :not_allowed}
+    else
+      do_create_user_and_resolve(channel, external_id, metadata)
+    end
+  end
+
+  defp do_create_user_and_resolve(channel, external_id, metadata) do
     display_name = Map.get(metadata, :display_name) || Map.get(metadata, "display_name")
     space_id = Map.get(metadata, :space_id) || Map.get(metadata, "space_id")
     channel_str = to_string(channel)
@@ -163,6 +174,12 @@ defmodule Assistant.Channels.UserResolver do
 
       case %User{} |> User.changeset(user_attrs) |> Repo.insert() do
         {:ok, user} ->
+          Logger.info("Auto-created user",
+            user_id: user.id,
+            external_id: external_id,
+            channel: channel_str
+          )
+
           # Create the identity row
           identity_attrs = %{
             user_id: user.id,
@@ -208,6 +225,16 @@ defmodule Assistant.Channels.UserResolver do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # Checks user allowlist configuration.
+  # :open (default) — all users allowed.
+  # List of external IDs — only listed users allowed.
+  defp is_allowed?(_channel, external_id) do
+    case Application.get_env(:assistant, :user_allowlist, :open) do
+      :open -> true
+      allowlist when is_list(allowlist) -> external_id in allowlist
     end
   end
 end

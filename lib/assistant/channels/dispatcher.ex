@@ -46,6 +46,7 @@ defmodule Assistant.Channels.Dispatcher do
   @error_message "I encountered an error processing your message. Please try again."
   @engine_error_message "I encountered an error starting the conversation engine. Please try again."
   @resolve_error_message "I couldn't identify your account. Please contact an administrator."
+  @not_allowed_message "Your account is not authorized to use this assistant. Please contact an administrator."
 
   @doc """
   Dispatch a normalized message for async processing.
@@ -80,18 +81,39 @@ defmodule Assistant.Channels.Dispatcher do
   # --- Async Processing (runs inside the spawned task) ---
 
   defp process_and_reply(adapter, message, _opts) do
+    # F8: Set correlation ID for all log lines in this message's processing
+    Logger.metadata(correlation_id: message.id)
+
+    # M7+F1: Telemetry — dispatch start
+    start_time = System.monotonic_time()
+    metadata = %{channel: message.channel, message_id: message.id}
+
+    :telemetry.execute(
+      [:assistant, :channels, :dispatch, :start],
+      %{system_time: System.system_time()},
+      metadata
+    )
+
     # Step 1: Resolve platform identity to DB user + perpetual conversation
     case UserResolver.resolve(message.channel, message.user_id, %{
            display_name: message.user_display_name,
            space_id: message.space_id
          }) do
       {:ok, %{user_id: user_id, conversation_id: conversation_id}} ->
+        resolve_time = System.monotonic_time()
+
+        :telemetry.execute(
+          [:assistant, :channels, :dispatch, :resolve],
+          %{duration: resolve_time - start_time},
+          Map.put(metadata, :user_id, user_id)
+        )
+
         # Build origin for reply routing (hot path — no DB lookup needed)
         origin = build_origin(adapter, message)
 
         case ensure_engine_started(user_id, conversation_id, message) do
           :ok ->
-            handle_engine_response(origin, user_id, message)
+            handle_engine_response(origin, user_id, message, start_time, metadata)
 
           {:error, reason} ->
             Logger.error(
@@ -100,8 +122,19 @@ defmodule Assistant.Channels.Dispatcher do
               user_id: user_id
             )
 
+            emit_error_telemetry(start_time, metadata, :engine_start_failed)
             ReplyRouter.reply(origin, @engine_error_message)
         end
+
+      {:error, :not_allowed} ->
+        Logger.warning("User not on allowlist, message rejected",
+          channel: message.channel,
+          external_id: message.user_id
+        )
+
+        emit_error_telemetry(start_time, metadata, :not_allowed)
+        reply_opts = build_reply_opts(message)
+        adapter.send_reply(message.space_id, @not_allowed_message, reply_opts)
 
       {:error, :invalid_platform_id} ->
         Logger.warning("Rejected message with invalid platform ID",
@@ -109,6 +142,7 @@ defmodule Assistant.Channels.Dispatcher do
           external_id: message.user_id
         )
 
+        emit_error_telemetry(start_time, metadata, :invalid_platform_id)
         reply_opts = build_reply_opts(message)
         adapter.send_reply(message.space_id, @resolve_error_message, reply_opts)
 
@@ -118,6 +152,7 @@ defmodule Assistant.Channels.Dispatcher do
           external_id: message.user_id
         )
 
+        emit_error_telemetry(start_time, metadata, reason)
         reply_opts = build_reply_opts(message)
         adapter.send_reply(message.space_id, @error_message, reply_opts)
     end
@@ -136,12 +171,30 @@ defmodule Assistant.Channels.Dispatcher do
       end
   end
 
-  defp handle_engine_response(origin, user_id, message) do
+  defp handle_engine_response(origin, user_id, message, start_time, metadata) do
+    engine_start = System.monotonic_time()
+
     # Engine is now registered by user_id UUID
     case Engine.send_message(user_id, message.content) do
       {:ok, response_text} ->
+        engine_time = System.monotonic_time()
+
+        :telemetry.execute(
+          [:assistant, :channels, :dispatch, :engine],
+          %{duration: engine_time - engine_start},
+          Map.put(metadata, :user_id, user_id)
+        )
+
         case ReplyRouter.reply(origin, response_text) do
           :ok ->
+            reply_time = System.monotonic_time()
+
+            :telemetry.execute(
+              [:assistant, :channels, :dispatch, :reply],
+              %{duration: reply_time - start_time},
+              Map.put(metadata, :user_id, user_id)
+            )
+
             Logger.debug("Channel reply sent",
               user_id: user_id,
               channel: origin.channel,
@@ -154,6 +207,8 @@ defmodule Assistant.Channels.Dispatcher do
               channel: origin.channel,
               space_id: origin.space_id
             )
+
+            emit_error_telemetry(start_time, Map.put(metadata, :user_id, user_id), :reply_failed)
         end
 
       {:error, reason} ->
@@ -162,8 +217,18 @@ defmodule Assistant.Channels.Dispatcher do
           channel: origin.channel
         )
 
+        emit_error_telemetry(start_time, Map.put(metadata, :user_id, user_id), :engine_failed)
         ReplyRouter.reply(origin, @error_message)
     end
+  end
+
+  # Emits the error telemetry event with duration and reason.
+  defp emit_error_telemetry(start_time, metadata, reason) do
+    :telemetry.execute(
+      [:assistant, :channels, :dispatch, :error],
+      %{duration: System.monotonic_time() - start_time},
+      Map.put(metadata, :reason, reason)
+    )
   end
 
   # --- Helpers ---

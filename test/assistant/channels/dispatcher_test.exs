@@ -21,38 +21,31 @@ defmodule Assistant.Channels.DispatcherTest do
   defmodule EtsMockAdapter do
     @moduledoc false
 
-    # Writes to the ETS table whose name is stored in :persistent_term under
-    # the key {:dispatcher_test_table, node()}. Since tests run async: false,
-    # only one test is active at a time. The persistent_term is updated in setup
-    # before each test and cleared in on_exit. Tasks from a prior test that
-    # outlive their test will write to a now-deleted table (caught and ignored).
+    # Uses a shared ETS table :dispatcher_test_replies that lives for the entire
+    # test module. Cross-test pollution from stale async tasks is prevented by
+    # each test using a unique space_id and find_reply_for/2 to locate its
+    # specific reply. The table is never deleted between tests — stale writes
+    # from prior tests' async tasks are harmless because find_reply_for/2
+    # ignores entries with non-matching space_ids.
 
     def send_reply(space_id, text, opts \\ []) do
-      table = :persistent_term.get({:dispatcher_test_table, node()}, nil)
-
-      if table do
-        try do
-          :ets.insert(table, {space_id, text, opts, self()})
-        rescue
-          ArgumentError -> :ok
-        end
+      try do
+        :ets.insert(:dispatcher_test_replies, {space_id, text, opts, self()})
+      rescue
+        # Table may not exist yet during module compilation test
+        ArgumentError -> :ok
       end
 
       :ok
     end
   end
 
-  setup do
-    # Generate a unique table name per test to prevent cross-test ETS pollution.
-    # Async tasks from prior tests that outlive their test will write to a
-    # now-deleted table, failing silently, rather than polluting this test's table.
-    table_name = :"dispatcher_test_replies_#{System.unique_integer([:positive, :monotonic])}"
-    table = :ets.new(table_name, [:named_table, :public, :bag])
-    :persistent_term.put({:dispatcher_test_table, node()}, table_name)
+  setup_all do
+    # Create the ETS table once for the entire test module.
+    # Never deleted between tests — stale async task writes are harmless.
+    table = :ets.new(:dispatcher_test_replies, [:named_table, :public, :bag])
 
     on_exit(fn ->
-      :persistent_term.put({:dispatcher_test_table, node()}, nil)
-
       try do
         :ets.delete(table)
       rescue
@@ -60,7 +53,7 @@ defmodule Assistant.Channels.DispatcherTest do
       end
     end)
 
-    {:ok, ets_table: table_name}
+    :ok
   end
 
   # ---------------------------------------------------------------
@@ -82,22 +75,43 @@ defmodule Assistant.Channels.DispatcherTest do
     struct!(Message, attrs)
   end
 
-  # Waits for at least `count` entries in the per-test ETS table, with timeout.
-  defp await_ets_replies(count \\ 1, timeout_ms \\ 2_000) do
-    table = :persistent_term.get({:dispatcher_test_table, node()})
+  # Waits for the spawned task to fully exit after we've received the reply.
+  # Prevents Ecto sandbox ownership errors from DB-touching tasks that haven't
+  # fully cleaned up by the time on_exit revokes the shared sandbox.
+  defp await_task_exit({_space_id, _text, _opts, pid}, timeout_ms \\ 1_000) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+    after
+      timeout_ms ->
+        Process.demonitor(ref, [:flush])
+        :ok
+    end
+  end
+
+  # Polls the ETS table until a reply with the given space_id appears.
+  # Returns the matching tuple {space_id, text, opts, pid} or fails on timeout.
+  defp await_reply_for(space_id, timeout_ms \\ 2_000) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 
     Stream.repeatedly(fn ->
-      replies = :ets.tab2list(table)
-      if length(replies) >= count, do: {:done, replies}, else: {:wait, nil}
+      case :ets.match_object(:dispatcher_test_replies, {space_id, :_, :_, :_}) do
+        [match | _] -> {:found, match}
+        [] -> {:wait, nil}
+      end
     end)
     |> Enum.reduce_while(nil, fn
-      {:done, replies}, _acc ->
-        {:halt, replies}
+      {:found, match}, _acc ->
+        {:halt, match}
 
       {:wait, _}, _acc ->
         if System.monotonic_time(:millisecond) > deadline do
-          {:halt, :ets.tab2list(table)}
+          all = :ets.tab2list(:dispatcher_test_replies)
+
+          flunk(
+            "Timed out waiting for reply with space_id #{space_id}, table has: #{inspect(all)}"
+          )
         else
           Process.sleep(50)
           {:cont, nil}
@@ -105,12 +119,42 @@ defmodule Assistant.Channels.DispatcherTest do
     end)
   end
 
-  # Finds a reply by space_id in the ETS replies list. Avoids hd(replies)
-  # which can pick up stale replies from prior tests' async tasks.
-  defp find_reply_for(replies, space_id) do
-    reply = Enum.find(replies, fn {sid, _, _, _} -> sid == space_id end)
-    assert reply != nil, "Expected reply with space_id #{space_id}, got: #{inspect(replies)}"
-    reply
+  # Waits for at least `count` entries matching the given space_ids.
+  # Used by the concurrent dispatch test to wait for multiple specific replies.
+  defp await_replies_for(space_ids, timeout_ms \\ 3_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    expected = MapSet.new(space_ids)
+
+    Stream.repeatedly(fn ->
+      matches =
+        Enum.flat_map(space_ids, fn sid ->
+          :ets.match_object(:dispatcher_test_replies, {sid, :_, :_, :_})
+        end)
+
+      found = MapSet.new(matches, fn {sid, _, _, _} -> sid end)
+
+      if MapSet.subset?(expected, found) do
+        {:done, matches}
+      else
+        {:wait, nil}
+      end
+    end)
+    |> Enum.reduce_while(nil, fn
+      {:done, matches}, _acc ->
+        {:halt, matches}
+
+      {:wait, _}, _acc ->
+        if System.monotonic_time(:millisecond) > deadline do
+          all = :ets.tab2list(:dispatcher_test_replies)
+
+          flunk(
+            "Timed out waiting for replies with space_ids #{inspect(space_ids)}, table has: #{inspect(all)}"
+          )
+        else
+          Process.sleep(50)
+          {:cont, nil}
+        end
+    end)
   end
 
   # ---------------------------------------------------------------
@@ -119,6 +163,8 @@ defmodule Assistant.Channels.DispatcherTest do
 
   describe "module compilation" do
     test "Dispatcher module is loaded and exports dispatch/2 and dispatch/3" do
+      # Ensure the module is loaded (may not be loaded yet if no call has been made)
+      Code.ensure_loaded!(Dispatcher)
       assert function_exported?(Dispatcher, :dispatch, 2)
       assert function_exported?(Dispatcher, :dispatch, 3)
     end
@@ -143,10 +189,7 @@ defmodule Assistant.Channels.DispatcherTest do
 
       assert {:ok, :dispatched} = Dispatcher.dispatch(EtsMockAdapter, message)
 
-      replies = await_ets_replies()
-      assert length(replies) >= 1
-
-      {_space_id, text, _opts, _pid} = find_reply_for(replies, space)
+      {_space_id, text, _opts, _pid} = await_reply_for(space)
       # Should be the resolve error message
       assert text =~ "couldn't identify"
     end
@@ -160,18 +203,16 @@ defmodule Assistant.Channels.DispatcherTest do
     test "invalid platform ID sends resolve error reply via adapter" do
       space = "invalid-pid-#{System.unique_integer([:positive])}"
 
-      message = build_test_message(%{
-        channel: :telegram,
-        user_id: "abc-not-numeric",
-        space_id: space
-      })
+      message =
+        build_test_message(%{
+          channel: :telegram,
+          user_id: "abc-not-numeric",
+          space_id: space
+        })
 
       {:ok, :dispatched} = Dispatcher.dispatch(EtsMockAdapter, message)
 
-      replies = await_ets_replies()
-      assert length(replies) >= 1
-
-      {_space_id, text, _opts, _pid} = find_reply_for(replies, space)
+      {_space_id, text, _opts, _pid} = await_reply_for(space)
       assert text =~ "couldn't identify"
     end
 
@@ -194,15 +235,15 @@ defmodule Assistant.Channels.DispatcherTest do
 
       # Wait for the async task to complete. The engine attempt will fail
       # (no valid LLM key in test env) and Dispatcher sends an error reply.
-      replies = await_ets_replies(1, 5_000)
-
-      # Strong assertion: a reply was sent back through the adapter
-      assert length(replies) >= 1
-
-      {_space_id, text, _opts, _pid} = find_reply_for(replies, space)
+      reply = await_reply_for(space, 5_000)
+      {_space_id, text, _opts, _pid} = reply
       assert is_binary(text)
       # The reply should be one of the error messages (engine or processing)
       assert text =~ "error" or text =~ "Error" or text =~ "encountered"
+
+      # Wait for the spawned task to fully exit so the Ecto sandbox isn't
+      # revoked while the task is still mid-DB-operation.
+      await_task_exit(reply)
     end
 
     test "user resolution DB error sends generic error reply" do
@@ -215,13 +256,14 @@ defmodule Assistant.Channels.DispatcherTest do
 
       assert {:ok, :dispatched} = Dispatcher.dispatch(EtsMockAdapter, message)
 
-      # Wait for async processing
-      replies = await_ets_replies(1, 5_000)
-
       # A reply should always be sent — no silent failures
-      assert length(replies) >= 1
-      {_space_id, text, _opts, _pid} = find_reply_for(replies, space)
+      reply = await_reply_for(space, 5_000)
+      {_space_id, text, _opts, _pid} = reply
       assert is_binary(text)
+
+      # Wait for the spawned task to fully exit so the Ecto sandbox isn't
+      # revoked while the task is still mid-DB-operation.
+      await_task_exit(reply)
     end
   end
 
@@ -235,18 +277,16 @@ defmodule Assistant.Channels.DispatcherTest do
       # with the original message's space_id
       space = "space-#{System.unique_integer([:positive])}"
 
-      message = build_test_message(%{
-        user_id: "invalid!id",
-        space_id: space,
-        channel: :telegram
-      })
+      message =
+        build_test_message(%{
+          user_id: "invalid!id",
+          space_id: space,
+          channel: :telegram
+        })
 
       {:ok, :dispatched} = Dispatcher.dispatch(EtsMockAdapter, message)
 
-      replies = await_ets_replies()
-      assert length(replies) >= 1
-
-      {reply_space_id, _text, _opts, _pid} = find_reply_for(replies, space)
+      {reply_space_id, _text, _opts, _pid} = await_reply_for(space)
       assert reply_space_id == space
     end
 
@@ -254,33 +294,34 @@ defmodule Assistant.Channels.DispatcherTest do
       # Slack has a different ID format. Invalid Slack ID triggers error path.
       space = "C0TEST-#{System.unique_integer([:positive])}"
 
-      message = build_test_message(%{
-        channel: :slack,
-        user_id: "invalid-slack-id",
-        space_id: space
-      })
+      message =
+        build_test_message(%{
+          channel: :slack,
+          user_id: "invalid-slack-id",
+          space_id: space
+        })
 
       {:ok, :dispatched} = Dispatcher.dispatch(EtsMockAdapter, message)
 
-      replies = await_ets_replies()
-      assert length(replies) >= 1
-
-      {_space_id, text, _opts, _pid} = find_reply_for(replies, space)
+      {_space_id, text, _opts, _pid} = await_reply_for(space)
       assert is_binary(text)
     end
 
     test "message content is preserved through dispatch" do
       # Even when dispatch fails (invalid ID), the message struct is intact
-      message = build_test_message(%{
-        user_id: "bad;id",
-        content: "This is my specific message content"
-      })
+      space = "content-#{System.unique_integer([:positive])}"
+
+      message =
+        build_test_message(%{
+          user_id: "bad;id",
+          space_id: space,
+          content: "This is my specific message content"
+        })
 
       {:ok, :dispatched} = Dispatcher.dispatch(EtsMockAdapter, message)
 
       # The dispatch spawns successfully — content isn't lost
-      replies = await_ets_replies()
-      assert length(replies) >= 1
+      {_space_id, _text, _opts, _pid} = await_reply_for(space)
     end
   end
 
@@ -290,12 +331,14 @@ defmodule Assistant.Channels.DispatcherTest do
 
   describe "dispatch/2 — concurrent dispatch" do
     test "multiple concurrent dispatches for different users don't interfere" do
-      # Dispatch messages from multiple "users" (all invalid IDs for simplicity)
+      # Use unique prefix to avoid collision with other tests
+      prefix = "concurrent-#{System.unique_integer([:positive])}"
+
       messages =
         for i <- 1..5 do
           build_test_message(%{
             user_id: "invalid;#{i}",
-            space_id: "space-#{i}"
+            space_id: "#{prefix}-#{i}"
           })
         end
 
@@ -304,13 +347,12 @@ defmodule Assistant.Channels.DispatcherTest do
 
       assert Enum.all?(results, fn result -> result == {:ok, :dispatched} end)
 
-      # Wait for all replies
-      replies = await_ets_replies(5, 3_000)
-      assert length(replies) == 5
+      # Wait for all replies using specific space_ids
+      expected_spaces = Enum.map(1..5, &"#{prefix}-#{&1}")
+      replies = await_replies_for(expected_spaces)
 
       # Each space_id should appear exactly once
       reply_spaces = Enum.map(replies, fn {space_id, _text, _opts, _pid} -> space_id end)
-      expected_spaces = Enum.map(1..5, &"space-#{&1}")
       assert Enum.sort(reply_spaces) == Enum.sort(expected_spaces)
     end
   end
@@ -323,36 +365,32 @@ defmodule Assistant.Channels.DispatcherTest do
     test "thread_id is passed through to reply opts for threaded messages" do
       space = "threaded-#{System.unique_integer([:positive])}"
 
-      message = build_test_message(%{
-        user_id: "not;valid",
-        space_id: space,
-        thread_id: "thread-abc-123"
-      })
+      message =
+        build_test_message(%{
+          user_id: "not;valid",
+          space_id: space,
+          thread_id: "thread-abc-123"
+        })
 
       {:ok, :dispatched} = Dispatcher.dispatch(EtsMockAdapter, message)
 
-      replies = await_ets_replies()
-      assert length(replies) >= 1
-
-      {_space_id, _text, opts, _pid} = find_reply_for(replies, space)
+      {_space_id, _text, opts, _pid} = await_reply_for(space)
       assert Keyword.get(opts, :thread_name) == "thread-abc-123"
     end
 
     test "non-threaded messages have no thread_name in opts" do
       space = "unthreaded-#{System.unique_integer([:positive])}"
 
-      message = build_test_message(%{
-        user_id: "not;valid",
-        space_id: space,
-        thread_id: nil
-      })
+      message =
+        build_test_message(%{
+          user_id: "not;valid",
+          space_id: space,
+          thread_id: nil
+        })
 
       {:ok, :dispatched} = Dispatcher.dispatch(EtsMockAdapter, message)
 
-      replies = await_ets_replies()
-      assert length(replies) >= 1
-
-      {_space_id, _text, opts, _pid} = find_reply_for(replies, space)
+      {_space_id, _text, opts, _pid} = await_reply_for(space)
       assert Keyword.get(opts, :thread_name) == nil
     end
   end
@@ -373,9 +411,8 @@ defmodule Assistant.Channels.DispatcherTest do
       assert Process.alive?(self())
 
       # Wait for the spawned task to complete
-      replies = await_ets_replies()
-      assert length(replies) >= 1
-      assert find_reply_for(replies, space) != nil
+      {reply_space, _text, _opts, _pid} = await_reply_for(space)
+      assert reply_space == space
     end
 
     test "rapid sequential dispatches all return :dispatched" do

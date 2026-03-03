@@ -19,12 +19,30 @@ defmodule Assistant.Channels.ReplyRouter do
 
   - `reply/2,3` — Hot path: uses origin metadata from the inbound message,
     no DB lookup needed. Used by the Dispatcher for turn-based responses.
+    Includes retry with exponential backoff for transient failures.
 
   - `send_to/3,4` — Proactive messaging: looks up the user's identity for
     a specific channel in user_identities and sends via the adapter.
 
   - `broadcast/2,3` — Sends a message to ALL channels where a user has
     registered identities. Returns results per channel.
+
+  ## Future: Connection Pooling
+
+  For high-volume deployments, each adapter's HTTP client should be backed by
+  a connection pool (e.g., NimblePool or Finch pools). The pool would be
+  configured per adapter since each platform API has different concurrency
+  characteristics:
+
+    * Google Chat — moderate concurrency, rate-limited per space
+    * Telegram — high concurrency, per-bot rate limits (30 msg/sec)
+    * Slack — moderate, tier-based rate limits per method
+    * Discord — low-moderate, per-route rate limits with bucket headers
+
+  Implementation path: create a `ConnectionPool` module that wraps NimblePool
+  with per-adapter pool sizing. Configure via `config :assistant, :adapter_pools`.
+  Each adapter's `send_reply/3` would check out a connection from its pool
+  rather than opening a new HTTP connection per request.
   """
 
   import Ecto.Query
@@ -34,6 +52,13 @@ defmodule Assistant.Channels.ReplyRouter do
   alias Assistant.Schemas.UserIdentity
 
   require Logger
+
+  # Retry configuration for transient failures in reply/2.
+  # Backoff intervals in ms: 100ms → 500ms → 2000ms
+  @retry_backoffs [100, 500, 2000]
+
+  # Transient error reasons that justify a retry.
+  @transient_errors [:timeout, :econnrefused, :econnreset, :closed, :nxdomain]
 
   @doc """
   Replies to the originating channel using the origin metadata.
@@ -57,7 +82,9 @@ defmodule Assistant.Channels.ReplyRouter do
     adapter = origin.adapter
     reply_opts = build_reply_opts(origin, opts)
 
-    adapter.send_reply(origin.space_id, text, reply_opts)
+    with_retry(adapter, @retry_backoffs, fn ->
+      adapter.send_reply(origin.space_id, text, reply_opts)
+    end)
   end
 
   @doc """
@@ -120,8 +147,14 @@ defmodule Assistant.Channels.ReplyRouter do
 
     identities = list_user_identities(user_id)
 
+    delay_ms = Application.get_env(:assistant, :broadcast_delay_ms, 100)
+
     identities
-    |> Enum.flat_map(fn identity ->
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {identity, index} ->
+      # Delay between sends (not before the first one)
+      if index > 0 and delay_ms > 0, do: Process.sleep(delay_ms)
+
       case Map.get(adapter_by_string, identity.channel) do
         {channel_atom, adapter} ->
           space_id = identity.space_id || identity.external_id
@@ -140,6 +173,35 @@ defmodule Assistant.Channels.ReplyRouter do
   end
 
   # --- Private ---
+
+  # Retry helper with exponential backoff for transient errors.
+  # Permanent errors (e.g., :unauthorized, :not_found) are returned immediately.
+  defp with_retry(adapter, backoffs, fun)
+
+  defp with_retry(_adapter, [], fun) do
+    fun.()
+  end
+
+  defp with_retry(adapter, [delay | rest], fun) do
+    case fun.() do
+      :ok ->
+        :ok
+
+      {:error, reason} when reason in @transient_errors ->
+        Logger.warning("Transient error from adapter, retrying",
+          adapter: inspect(adapter),
+          error: inspect(reason),
+          remaining_retries: length(rest),
+          backoff_ms: delay
+        )
+
+        Process.sleep(delay)
+        with_retry(adapter, rest, fun)
+
+      other ->
+        other
+    end
+  end
 
   defp build_reply_opts(origin, opts) do
     base =

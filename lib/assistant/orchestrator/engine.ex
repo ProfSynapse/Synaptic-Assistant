@@ -69,6 +69,11 @@ defmodule Assistant.Orchestrator.Engine do
   # Number of recent messages to hydrate from DB on engine restart
   @hydrate_message_limit 50
 
+  # Max message size in bytes (~50K tokens). Rejects obviously oversized
+  # input before it enters the LLM loop. This is a per-message sanity
+  # check — the Engine's compaction system handles total context separately.
+  @max_message_bytes 200_000
+
   # --- Client API ---
 
   @doc """
@@ -114,7 +119,12 @@ defmodule Assistant.Orchestrator.Engine do
   """
   @spec send_message(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def send_message(user_id, message) do
-    GenServer.call(via_tuple(user_id), {:send_message, message}, :timer.seconds(120))
+    if byte_size(message) > @max_message_bytes do
+      {:error, :message_too_long}
+    else
+      timeout = Application.get_env(:assistant, :engine_call_timeout, 300_000)
+      GenServer.call(via_tuple(user_id), {:send_message, message}, timeout)
+    end
   end
 
   @doc """
@@ -841,35 +851,43 @@ defmodule Assistant.Orchestrator.Engine do
       Task.Supervisor.start_child(
         Assistant.Skills.TaskSupervisor,
         fn ->
-          db_messages =
-            Enum.map(new_messages, fn msg ->
-              base = %{role: msg[:role] || "assistant"}
+          try do
+            db_messages =
+              Enum.map(new_messages, fn msg ->
+                base = %{role: msg[:role] || "assistant"}
 
-              base =
-                if msg[:content], do: Map.put(base, :content, msg[:content]), else: base
+                base =
+                  if msg[:content], do: Map.put(base, :content, msg[:content]), else: base
 
-              base =
-                if msg[:tool_calls],
-                  do: Map.put(base, :tool_calls, msg[:tool_calls]),
-                  else: base
+                base =
+                  if msg[:tool_calls],
+                    do: Map.put(base, :tool_calls, msg[:tool_calls]),
+                    else: base
 
-              base =
-                if msg[:tool_call_id],
-                  do: Map.put(base, :tool_results, %{"tool_call_id" => msg[:tool_call_id]}),
-                  else: base
+                base =
+                  if msg[:tool_call_id],
+                    do: Map.put(base, :tool_results, %{"tool_call_id" => msg[:tool_call_id]}),
+                    else: base
 
-              base
-            end)
+                base
+              end)
 
-          case Store.batch_append_messages(conversation_id, db_messages) do
-            {:ok, _inserted} ->
-              Logger.debug("Persisted #{length(db_messages)} turn messages",
-                conversation_id: conversation_id
-              )
+            case Store.batch_append_messages(conversation_id, db_messages) do
+              {:ok, _inserted} ->
+                Logger.debug("Persisted #{length(db_messages)} turn messages",
+                  conversation_id: conversation_id
+                )
 
-            {:error, reason} ->
-              Logger.warning("Failed to persist turn messages: #{inspect(reason)}",
-                conversation_id: conversation_id
+              {:error, reason} ->
+                Logger.warning("Failed to persist turn messages: #{inspect(reason)}",
+                  conversation_id: conversation_id
+                )
+            end
+          rescue
+            error ->
+              Logger.error("Persist turn messages crashed: #{Exception.message(error)}",
+                conversation_id: conversation_id,
+                stacktrace: Exception.format_stacktrace(__STACKTRACE__)
               )
           end
         end
