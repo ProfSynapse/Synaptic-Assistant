@@ -10,8 +10,20 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       {"apps", "Apps & Connections"},
       {"workflows", "Workflows"},
       {"skills", "Skill Permissions"},
+      {"admin", "Admin"},
       {"help", "Help"}
     ]
+  end
+
+  @doc """
+  Returns nav items filtered by user role. Admin tab only shown to admins.
+  """
+  def nav_items_for(is_admin) do
+    if is_admin do
+      nav_items()
+    else
+      Enum.reject(nav_items(), fn {section, _label} -> section == "admin" end)
+    end
   end
 
   def icon_for(section) do
@@ -23,6 +35,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "apps" -> "hero-puzzle-piece"
       "workflows" -> "hero-command-line"
       "skills" -> "hero-wrench-screwdriver"
+      "admin" -> "hero-shield-check"
       "help" -> "hero-question-mark-circle"
     end
   end
@@ -36,6 +49,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "apps" -> "Apps & Connections"
       "workflows" -> "Workflows"
       "skills" -> "Skill Permissions"
+      "admin" -> "Admin"
       "help" -> "Help & Setup"
     end
   end

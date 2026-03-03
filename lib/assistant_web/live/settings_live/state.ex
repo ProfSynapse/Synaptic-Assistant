@@ -2,6 +2,7 @@ defmodule AssistantWeb.SettingsLive.State do
   @moduledoc false
 
   import Phoenix.Component, only: [assign: 3, assign_new: 3, to_form: 2]
+  import Phoenix.LiveView, only: [push_navigate: 2, put_flash: 3]
 
   alias AssistantWeb.SettingsLive.Data
   alias AssistantWeb.SettingsLive.Loaders
@@ -73,17 +74,36 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:help_articles, Data.help_articles())
     |> assign(:help_topic, nil)
     |> assign(:help_query, "")
+    |> assign(:managed_scopes, [])
+    |> assign(:can_bootstrap_admin, false)
+    |> assign(:allowlist_form, to_form(%{}, as: "allowlist_entry"))
+    |> assign(:allowlist_entries, [])
+    |> assign(:admin_settings_users, [])
+    |> assign(:integration_settings, [])
     |> Loaders.load_profile()
     |> Loaders.load_orchestrator_prompt()
   end
 
   def handle_params(socket, params) do
     section = Data.normalize_section(Map.get(params, "section", "profile"))
-    help_topic = Map.get(params, "topic")
 
-    socket
-    |> assign(:section, section)
-    |> assign(:help_topic, Data.selected_help_article(section, help_topic))
-    |> Loaders.load_section_data(section)
+    is_admin =
+      case socket.assigns[:current_scope] do
+        %{settings_user: %{is_admin: true}} -> true
+        _ -> false
+      end
+
+    if section == "admin" and not is_admin do
+      socket
+      |> put_flash(:error, "You do not have permission to access admin.")
+      |> push_navigate(to: "/settings")
+    else
+      help_topic = Map.get(params, "topic")
+
+      socket
+      |> assign(:section, section)
+      |> assign(:help_topic, Data.selected_help_article(section, help_topic))
+      |> Loaders.load_section_data(section)
+    end
   end
 end

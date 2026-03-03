@@ -5,6 +5,7 @@ defmodule AssistantWeb.Components.SettingsPage do
 
   alias AssistantWeb.Components.SettingsPage.Helpers
 
+  import AssistantWeb.Components.SettingsPage.Admin, only: [admin_section: 1]
   import AssistantWeb.Components.SettingsPage.Analytics, only: [analytics_section: 1]
   import AssistantWeb.Components.SettingsPage.Apps, only: [apps_section: 1]
   import AssistantWeb.Components.SettingsPage.Help, only: [help_section: 1]
@@ -15,6 +16,13 @@ defmodule AssistantWeb.Components.SettingsPage do
   import AssistantWeb.Components.SettingsPage.Workflows, only: [workflows_section: 1]
 
   def settings_page(assigns) do
+    is_admin =
+      case assigns[:current_scope] do
+        %{settings_user: %{is_admin: true}} -> true
+        _ -> false
+      end
+    assigns = assign(assigns, :is_admin, is_admin)
+
     ~H"""
     <div class="sa-settings-shell">
       <aside class={["sa-sidebar", @sidebar_collapsed && "is-collapsed"]}>
@@ -35,7 +43,7 @@ defmodule AssistantWeb.Components.SettingsPage do
 
         <nav class="sa-sidebar-nav">
           <.link
-            :for={{section, label} <- Helpers.nav_items()}
+            :for={{section, label} <- Helpers.nav_items_for(@is_admin)}
             navigate={if(section == "profile", do: ~p"/settings", else: ~p"/settings/#{section}")}
             class={["sa-sidebar-link", section == @section && "is-active"]}
             title={label}
@@ -68,6 +76,7 @@ defmodule AssistantWeb.Components.SettingsPage do
         <.apps_section :if={@section == "apps"} {assigns} />
         <.workflows_section :if={@section == "workflows"} {assigns} />
         <.skills_section :if={@section == "skills"} {assigns} />
+        <.admin_section :if={@section == "admin" and @is_admin} {assigns} />
         <.help_section :if={@section == "help"} {assigns} />
       </section>
     </div>

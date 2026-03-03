@@ -10,7 +10,7 @@ defmodule AssistantWeb.SettingsUserSessionController do
 
   def create(conn, %{"_action" => "setup_admin"} = params) do
     conn
-    |> put_session(:settings_user_return_to, ~p"/admin")
+    |> put_session(:settings_user_return_to, ~p"/settings/admin")
     |> create(params, "Admin account created. Welcome!")
   end
 

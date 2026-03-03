@@ -1,7 +1,7 @@
 defmodule AssistantWeb.SettingsLive.Data do
   @moduledoc false
 
-  @sections ~w(profile models analytics memory apps workflows skills help)
+  @sections ~w(profile models analytics memory apps workflows skills admin help)
 
   @app_catalog [
     %{

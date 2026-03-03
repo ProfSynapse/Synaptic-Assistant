@@ -6,11 +6,13 @@ defmodule AssistantWeb.SettingsLive.Events do
   import Phoenix.LiveView, only: [put_flash: 3, push_event: 3, push_navigate: 2, redirect: 2]
 
   alias Assistant.Accounts
+  alias Assistant.Accounts.SettingsUserAllowlistEntry
   alias Assistant.Auth.MagicLink
   alias Assistant.Auth.OAuth
   alias Assistant.Auth.TokenStore
   alias Assistant.ConnectedDrives
   alias Assistant.IntegrationSettings
+  alias Assistant.IntegrationSettings.Registry
   alias Assistant.Integrations.OpenAI
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.Google.Drive, as: GoogleDrive
@@ -27,6 +29,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias AssistantWeb.SettingsLive.Data
   alias AssistantWeb.SettingsLive.Loaders
   alias AssistantWeb.SettingsLive.Profile
+  alias AssistantWeb.SettingsUserAuth
 
   def handle_event("toggle_sidebar", _params, socket) do
     {:noreply, assign(socket, :sidebar_collapsed, !socket.assigns.sidebar_collapsed)}
@@ -534,6 +537,203 @@ defmodule AssistantWeb.SettingsLive.Events do
     {:noreply, assign(socket, :help_query, query)}
   end
 
+  # --- Admin event handlers (ported from AdminLive) ---
+
+  def handle_event("claim_bootstrap_admin", _params, socket) do
+    case Accounts.bootstrap_admin_access(socket.assigns.current_scope.settings_user) do
+      {:ok, _settings_user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Admin access claimed.")
+         |> reload_current_user_scope()
+         |> Loaders.load_admin()}
+
+      {:error, :bootstrap_closed} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Admin bootstrap is no longer available.")
+         |> push_navigate(to: "/settings")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to claim admin access.")}
+    end
+  end
+
+  def handle_event("validate_allowlist_entry", %{"allowlist_entry" => params}, socket) do
+    form =
+      %SettingsUserAllowlistEntry{}
+      |> Accounts.change_settings_user_allowlist_entry(params)
+      |> Map.put(:action, :validate)
+      |> to_form(as: "allowlist_entry")
+
+    {:noreply, assign(socket, :allowlist_form, form)}
+  end
+
+  def handle_event("save_allowlist_entry", %{"allowlist_entry" => params}, socket) do
+    case Accounts.upsert_settings_user_allowlist_entry(
+           params,
+           socket.assigns.current_scope.settings_user
+         ) do
+      {:ok, _entry} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Allow list entry saved.")
+         |> reload_current_user_scope()
+         |> Loaders.load_admin()}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:noreply, assign(socket, :allowlist_form, to_form(changeset, as: "allowlist_entry"))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to save allow list entry.")}
+    end
+  end
+
+  def handle_event("reset_allowlist_form", _params, socket) do
+    blank_form =
+      %SettingsUserAllowlistEntry{}
+      |> Accounts.change_settings_user_allowlist_entry(%{
+        active: true,
+        is_admin: false,
+        scopes: []
+      })
+      |> to_form(as: "allowlist_entry")
+
+    {:noreply, assign(socket, :allowlist_form, blank_form)}
+  end
+
+  def handle_event("edit_allowlist_entry", %{"id" => id}, socket) do
+    case Enum.find(socket.assigns.allowlist_entries, &(&1.id == id)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Allow list entry not found.")}
+
+      entry ->
+        {:noreply,
+         assign(
+           socket,
+           :allowlist_form,
+           to_form(Accounts.change_settings_user_allowlist_entry(entry), as: "allowlist_entry")
+         )}
+    end
+  end
+
+  def handle_event("toggle_allowlist_entry", %{"id" => id}, socket) do
+    case Enum.find(socket.assigns.allowlist_entries, &(&1.id == id)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Allow list entry not found.")}
+
+      entry ->
+        params = %{
+          email: entry.email,
+          active: !entry.active,
+          is_admin: entry.is_admin,
+          scopes: entry.scopes,
+          notes: entry.notes
+        }
+
+        case Accounts.upsert_settings_user_allowlist_entry(
+               params,
+               socket.assigns.current_scope.settings_user
+             ) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Allow list entry updated.")
+             |> reload_current_user_scope()
+             |> Loaders.load_admin()}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Unable to update allow list entry.")}
+        end
+    end
+  end
+
+  def handle_event("send_recovery_link", %{"id" => id}, socket) do
+    with %{} = user <- Enum.find(socket.assigns.admin_settings_users, &(&1.id == id)),
+         {:ok, _email} <-
+           Accounts.admin_send_recovery_link(user, &login_url/1) do
+      {:noreply, put_flash(socket, :info, "Recovery magic link sent to #{user.email}.")}
+    else
+      nil ->
+        {:noreply, put_flash(socket, :error, "User not found.")}
+
+      {:error, :not_allowed} ->
+        {:noreply, put_flash(socket, :error, "User is not currently allow-listed.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to send recovery link.")}
+    end
+  end
+
+  def handle_event("force_password_reset", %{"id" => id}, socket) do
+    with %{} = user <- Enum.find(socket.assigns.admin_settings_users, &(&1.id == id)),
+         {:ok, _updated_user, expired_tokens, _email} <-
+           Accounts.admin_force_password_reset(user, &login_url/1) do
+      SettingsUserAuth.disconnect_sessions(expired_tokens)
+
+      {:noreply, put_flash(socket, :info, "Password reset initiated for #{user.email}.")}
+    else
+      nil ->
+        {:noreply, put_flash(socket, :error, "User not found.")}
+
+      {:error, :not_allowed} ->
+        {:noreply, put_flash(socket, :error, "User is not currently allow-listed.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to force password reset.")}
+    end
+  end
+
+  def handle_event("save_integration", %{"key" => key, "value" => value}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      unless Registry.known_key?(key) do
+        {:noreply, put_flash(socket, :error, "Unknown integration key.")}
+      else
+        value = String.trim(value)
+
+        if value == "" do
+          {:noreply, put_flash(socket, :error, "Value cannot be blank.")}
+        else
+          admin_id = socket.assigns.current_scope.settings_user.id
+
+          case IntegrationSettings.put(String.to_existing_atom(key), value, admin_id) do
+            {:ok, _setting} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "Integration setting saved.")
+               |> reload_integration_settings()}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Unable to save integration setting.")}
+          end
+        end
+      end
+    end
+  end
+
+  def handle_event("delete_integration", %{"key" => key}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      unless Registry.known_key?(key) do
+        {:noreply, put_flash(socket, :error, "Unknown integration key.")}
+      else
+        case IntegrationSettings.delete(String.to_existing_atom(key)) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Integration setting reverted to environment variable.")
+             |> reload_integration_settings()}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Unable to delete integration setting.")}
+        end
+      end
+    end
+  end
+
   def handle_event("save_profile", %{"profile" => params}, socket) do
     Profile.save_profile(socket, params, flash?: true)
   end
@@ -662,6 +862,30 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   def handle_event("close_memory", _params, socket) do
     {:noreply, assign(socket, :selected_memory, nil)}
+  end
+
+  defp login_url(token) do
+    AssistantWeb.Endpoint.url() <> "/settings_users/log-in/#{token}"
+  end
+
+  defp reload_current_user_scope(socket) do
+    current_user = Accounts.get_settings_user!(socket.assigns.current_scope.settings_user.id)
+    assign(socket, :current_scope, Assistant.Accounts.Scope.for_settings_user(current_user))
+  end
+
+  defp reload_integration_settings(socket) do
+    section = socket.assigns[:section]
+
+    case section do
+      "admin" ->
+        assign(socket, :integration_settings, IntegrationSettings.list_all())
+
+      "apps" ->
+        Loaders.load_apps_integration_settings(socket)
+
+      _ ->
+        socket
+    end
   end
 
   defp normalize_transcript_filters(params) when is_map(params) do

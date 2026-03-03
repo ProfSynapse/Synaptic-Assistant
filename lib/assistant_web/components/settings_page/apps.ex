@@ -7,6 +7,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
 
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
 
+  import AssistantWeb.Components.AdminIntegrations, only: [admin_integrations: 1]
   import AssistantWeb.Components.ConnectorCard, only: [connector_card: 1]
   import AssistantWeb.Components.DriveSettings, only: [drive_settings: 1]
 
@@ -78,6 +79,23 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
           </article>
         </div>
       </.modal>
+
+      <div
+        :if={@current_scope.settings_user.is_admin and @integration_settings != []}
+        class="sa-card"
+        style="margin-top: 1.5rem;"
+      >
+        <div>
+          <h2>Integration API Keys</h2>
+          <p>
+            Admin-managed API keys and tokens for connected services.
+            Values saved here override environment variables.
+          </p>
+        </div>
+        <div style="margin-top: 1rem;">
+          <.admin_integrations settings={@integration_settings} />
+        </div>
+      </div>
     </section>
     """
   end

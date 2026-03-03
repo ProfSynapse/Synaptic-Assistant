@@ -1,12 +1,15 @@
 defmodule AssistantWeb.SettingsLive.Loaders do
   @moduledoc false
 
-  import Phoenix.Component, only: [assign: 3, to_form: 2]
+  import Phoenix.Component, only: [assign: 2, assign: 3, to_form: 2]
 
+  alias Assistant.Accounts
+  alias Assistant.Accounts.SettingsUserAllowlistEntry
   alias Assistant.Analytics
   alias Assistant.Auth.TokenStore
   alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.ConnectedDrives
+  alias Assistant.IntegrationSettings
   alias Assistant.Integrations.OpenAI
   alias Assistant.Integrations.OpenRouter
   alias Assistant.MemoryExplorer
@@ -29,9 +32,15 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   def load_section_data(socket, "memory"), do: load_memory_dashboard(socket)
 
   def load_section_data(socket, "apps"),
-    do: socket |> load_google_status() |> load_openrouter_status() |> load_connected_drives()
+    do:
+      socket
+      |> load_google_status()
+      |> load_openrouter_status()
+      |> load_connected_drives()
+      |> load_apps_integration_settings()
 
   def load_section_data(socket, "skills"), do: load_skill_permissions(socket)
+  def load_section_data(socket, "admin"), do: load_admin(socket)
   def load_section_data(socket, _section), do: socket
 
   def reload_workflows(socket) do
@@ -194,6 +203,57 @@ defmodule AssistantWeb.SettingsLive.Loaders do
 
   def load_skill_permissions(socket) do
     assign(socket, :skills_permissions, SkillPermissions.list_permissions())
+  end
+
+  def load_admin(socket) do
+    settings_user = Context.current_settings_user(socket)
+    can_bootstrap = Accounts.admin_bootstrap_available?()
+
+    if settings_user && settings_user.is_admin do
+      blank_form =
+        %SettingsUserAllowlistEntry{}
+        |> Accounts.change_settings_user_allowlist_entry(%{
+          active: true,
+          is_admin: false,
+          scopes: []
+        })
+        |> to_form(as: "allowlist_entry")
+
+      assign(socket,
+        managed_scopes: Accounts.managed_access_scopes(),
+        can_bootstrap_admin: can_bootstrap,
+        allowlist_form: blank_form,
+        allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
+        admin_settings_users: Accounts.list_admin_settings_users(),
+        integration_settings: IntegrationSettings.list_all()
+      )
+    else
+      assign(socket,
+        can_bootstrap_admin: can_bootstrap,
+        managed_scopes: Accounts.managed_access_scopes(),
+        allowlist_form: to_form(%{}, as: "allowlist_entry"),
+        allowlist_entries: [],
+        admin_settings_users: [],
+        integration_settings: []
+      )
+    end
+  end
+
+  @non_ai_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
+
+  def load_apps_integration_settings(socket) do
+    settings_user = Context.current_settings_user(socket)
+
+    if settings_user && settings_user.is_admin do
+      all_settings = IntegrationSettings.list_all()
+
+      filtered =
+        Enum.filter(all_settings, fn setting -> setting.group in @non_ai_groups end)
+
+      assign(socket, :integration_settings, filtered)
+    else
+      assign(socket, :integration_settings, [])
+    end
   end
 
   def load_google_status(socket) do
