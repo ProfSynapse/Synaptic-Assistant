@@ -10,6 +10,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.ConnectedDrives
   alias Assistant.IntegrationSettings
+  alias Assistant.IntegrationSettings.ConnectionValidator
   alias Assistant.Integrations.OpenAI
   alias Assistant.Integrations.OpenRouter
   alias Assistant.MemoryExplorer
@@ -38,6 +39,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       |> load_openrouter_status()
       |> load_connected_drives()
       |> load_apps_integration_settings()
+      |> load_connection_status()
 
   def load_section_data(socket, "skills"), do: load_skill_permissions(socket)
   def load_section_data(socket, "admin"), do: load_admin(socket)
@@ -271,6 +273,19 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     else
       assign(socket, :integration_settings, [])
     end
+  end
+
+  def load_connection_status(socket) do
+    user_id =
+      case Context.current_settings_user(socket) do
+        %{user_id: uid} when not is_nil(uid) -> uid
+        _ -> nil
+      end
+
+    results = ConnectionValidator.validate_all(user_id)
+    assign(socket, :connection_status, results)
+  rescue
+    _ -> assign(socket, :connection_status, %{})
   end
 
   def load_google_status(socket) do

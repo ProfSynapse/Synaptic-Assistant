@@ -81,6 +81,7 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:admin_settings_users, [])
     |> assign(:admin_users_with_keys, [])
     |> assign(:integration_settings, [])
+    |> assign(:connection_status, %{})
     |> assign(:current_app, nil)
     |> assign(:app_integration_settings, [])
     |> Loaders.load_profile()
