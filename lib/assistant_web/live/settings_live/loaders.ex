@@ -3,6 +3,8 @@ defmodule AssistantWeb.SettingsLive.Loaders do
 
   import Phoenix.Component, only: [assign: 2, assign: 3, to_form: 2]
 
+  require Logger
+
   alias Assistant.Accounts
   alias Assistant.Accounts.SettingsUserAllowlistEntry
   alias Assistant.Analytics
@@ -276,16 +278,24 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   end
 
   def load_connection_status(socket) do
-    user_id =
-      case Context.current_settings_user(socket) do
-        %{user_id: uid} when not is_nil(uid) -> uid
-        _ -> nil
-      end
+    settings_user = Context.current_settings_user(socket)
 
-    results = ConnectionValidator.validate_all(user_id)
-    assign(socket, :connection_status, results)
+    if settings_user && settings_user.is_admin do
+      user_id =
+        case settings_user do
+          %{user_id: uid} when not is_nil(uid) -> uid
+          _ -> nil
+        end
+
+      results = ConnectionValidator.validate_all(user_id)
+      assign(socket, :connection_status, results)
+    else
+      assign(socket, :connection_status, %{})
+    end
   rescue
-    _ -> assign(socket, :connection_status, %{})
+    e ->
+      Logger.warning("Connection validation failed: #{Exception.message(e)}")
+      assign(socket, :connection_status, %{})
   end
 
   def load_google_status(socket) do

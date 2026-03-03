@@ -76,7 +76,7 @@ defmodule Assistant.IntegrationSettings.ConnectionValidator do
           rescue
             error ->
               Logger.warning("Connection validation failed for #{group}",
-                error: inspect(error)
+                error: Exception.message(error)
               )
 
               :not_connected

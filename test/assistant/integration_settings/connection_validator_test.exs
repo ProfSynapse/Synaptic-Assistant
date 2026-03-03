@@ -13,10 +13,12 @@
 #   - test/assistant/integrations/telegram/client_test.exs (pattern reference)
 
 defmodule Assistant.IntegrationSettings.ConnectionValidatorTest do
-  use ExUnit.Case, async: false
+  use Assistant.DataCase, async: false
 
+  alias Assistant.Auth.TokenStore
   alias Assistant.IntegrationSettings.Cache
   alias Assistant.IntegrationSettings.ConnectionValidator
+  alias Assistant.Schemas.User
 
   @token_cache_table :google_service_token_cache
 
@@ -41,7 +43,9 @@ defmodule Assistant.IntegrationSettings.ConnectionValidatorTest do
       elevenlabs_api_key: Application.get_env(:assistant, :elevenlabs_api_key),
       elevenlabs_api_base_url: Application.get_env(:assistant, :elevenlabs_api_base_url),
       google_service_account_json:
-        Application.get_env(:assistant, :google_service_account_json)
+        Application.get_env(:assistant, :google_service_account_json),
+      google_oauth_client_id: Application.get_env(:assistant, :google_oauth_client_id),
+      google_oauth_client_secret: Application.get_env(:assistant, :google_oauth_client_secret)
     }
 
     # Point all base URLs to Bypass
@@ -313,9 +317,52 @@ defmodule Assistant.IntegrationSettings.ConnectionValidatorTest do
       assert results["google_workspace"] == :not_configured
     end
 
-    # Note: Full user_token tests require DB fixtures for oauth_tokens.
-    # The validator correctly dispatches to Auth.user_token/1 which returns
-    # :not_connected for unknown user IDs — we verify that path here.
+    test "returns :connected when user has valid OAuth token", %{bypass: bypass} do
+      user = insert_test_user()
+      insert_valid_google_token(user.id)
+
+      # Stub bypass for any parallel validators that may fire
+      Bypass.stub(bypass, :any, :any, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(503, Jason.encode!(%{"error" => "stub"}))
+      end)
+
+      results = ConnectionValidator.validate_all(user.id)
+      assert results["google_workspace"] == :connected
+    end
+
+    test "returns :not_configured when user has no OAuth token row", %{bypass: bypass} do
+      user = insert_test_user()
+
+      Bypass.stub(bypass, :any, :any, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(503, Jason.encode!(%{"error" => "stub"}))
+      end)
+
+      results = ConnectionValidator.validate_all(user.id)
+      assert results["google_workspace"] == :not_configured
+    end
+
+    test "returns :not_connected when token is expired and refresh fails", %{bypass: bypass} do
+      user = insert_test_user()
+      insert_expired_google_token(user.id)
+
+      # Ensure OAuth client credentials are NOT configured so refresh fails.
+      # Auth.OAuth.refresh_access_token needs client_id + client_secret.
+      Application.delete_env(:assistant, :google_oauth_client_id)
+      Application.delete_env(:assistant, :google_oauth_client_secret)
+
+      Bypass.stub(bypass, :any, :any, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(503, Jason.encode!(%{"error" => "stub"}))
+      end)
+
+      results = ConnectionValidator.validate_all(user.id)
+      assert results["google_workspace"] == :not_connected
+    end
   end
 
   # ---------------------------------------------------------------
@@ -409,5 +456,73 @@ defmodule Assistant.IntegrationSettings.ConnectionValidatorTest do
       results = ConnectionValidator.validate_all(nil)
       assert results["elevenlabs"] == :not_connected
     end
+
+    test "returns :not_connected when validator exceeds timeout" do
+      Application.put_env(:assistant, :elevenlabs_api_key, "el-slow-key")
+
+      # Point ElevenLabs at a separate Bypass that sleeps beyond the 5s
+      # Task.async_stream timeout. We use a dedicated Bypass (not the shared
+      # one) so its teardown doesn't affect other validators' Bypass port.
+      slow_bypass = Bypass.open()
+
+      Application.put_env(
+        :assistant,
+        :elevenlabs_api_base_url,
+        "http://localhost:#{slow_bypass.port}"
+      )
+
+      # Use stub (not expect) — Bypass won't fail verification when the
+      # connection is killed by Task.async_stream's on_timeout: :kill_task.
+      # Trap exits so the handler process exits cleanly instead of propagating
+      # shutdown to the test process.
+      Bypass.stub(slow_bypass, "GET", "/v1/user", fn conn ->
+        Process.flag(:trap_exit, true)
+
+        receive do
+          {:EXIT, _, _} -> :ok
+        after
+          6_000 -> :ok
+        end
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{"ok" => true}))
+      end)
+
+      results = ConnectionValidator.validate_all(nil)
+      assert results["elevenlabs"] == :not_connected
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # Test helpers — DB fixtures for Google Workspace tests
+  # ---------------------------------------------------------------
+
+  defp insert_test_user do
+    %User{}
+    |> User.changeset(%{
+      external_id: "test-google-user-#{System.unique_integer([:positive])}",
+      channel: "google_chat",
+      display_name: "Test User"
+    })
+    |> Repo.insert!()
+  end
+
+  defp insert_valid_google_token(user_id) do
+    TokenStore.upsert_google_token(user_id, %{
+      refresh_token: "fake-refresh-token",
+      access_token: "fake-valid-access-token",
+      token_expires_at: DateTime.add(DateTime.utc_now(), 3600, :second),
+      provider_email: "test@example.com"
+    })
+  end
+
+  defp insert_expired_google_token(user_id) do
+    TokenStore.upsert_google_token(user_id, %{
+      refresh_token: "fake-refresh-token",
+      access_token: "fake-expired-access-token",
+      token_expires_at: DateTime.add(DateTime.utc_now(), -3600, :second),
+      provider_email: "test@example.com"
+    })
   end
 end
