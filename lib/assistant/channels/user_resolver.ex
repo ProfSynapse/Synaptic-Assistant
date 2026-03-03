@@ -143,16 +143,39 @@ defmodule Assistant.Channels.UserResolver do
       from ui in UserIdentity,
         where: ui.channel == ^channel_str and ui.external_id == ^external_id
 
-    query =
+    exact_query =
       if space_id do
         from ui in query, where: ui.space_id == ^space_id
       else
         from ui in query, where: is_nil(ui.space_id)
       end
 
-    case Repo.one(query) do
-      nil -> {:error, :not_found}
-      identity -> {:ok, identity}
+    case Repo.one(exact_query) do
+      nil when space_id != nil ->
+        # Fallback: look for a backfilled row with NULL space_id and self-heal it.
+        # This handles the migration case where existing identities have space_id = NULL
+        # but dispatchers now pass real space_id values.
+        fallback_query = from ui in query, where: is_nil(ui.space_id)
+
+        case Repo.one(fallback_query) do
+          nil ->
+            {:error, :not_found}
+
+          identity ->
+            Logger.info("Backfilling space_id for identity #{identity.id}: #{space_id}")
+
+            identity
+            |> Ecto.Changeset.change(%{space_id: space_id})
+            |> Repo.update!()
+
+            {:ok, %{identity | space_id: space_id}}
+        end
+
+      nil ->
+        {:error, :not_found}
+
+      identity ->
+        {:ok, identity}
     end
   end
 

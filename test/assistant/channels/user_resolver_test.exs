@@ -273,17 +273,23 @@ defmodule Assistant.Channels.UserResolverTest do
       assert found_b == user_b
     end
 
-    test "nil space_id resolves separately from non-nil space_id" do
-      # Create identity with no space_id (e.g., Telegram — no workspace concept)
+    test "nil space_id identity gets adopted by first real space_id (self-healing)" do
+      # Create identity with no space_id (e.g., backfilled migration row)
       {:ok, %{user_id: user_nil}} =
         UserResolver.resolve(:telegram, "777888999")
 
-      # Create identity with space_id (hypothetical — same channel but with space)
-      # This would be a different identity row due to COALESCE(space_id, '')
+      # Resolve with a real space_id — fallback matches the NULL row and backfills
       {:ok, %{user_id: user_spaced}} =
         UserResolver.resolve(:telegram, "777888999", %{space_id: "some_space"})
 
-      refute user_nil == user_spaced
+      # Same user — the NULL row was healed, not duplicated
+      assert user_nil == user_spaced
+
+      # A second different space_id creates a new user (no NULL row left to adopt)
+      {:ok, %{user_id: user_other}} =
+        UserResolver.resolve(:telegram, "777888999", %{space_id: "other_space"})
+
+      refute user_spaced == user_other
     end
 
     test "nil space_id backwards compatible — existing no-space lookups still work" do
@@ -293,6 +299,103 @@ defmodule Assistant.Channels.UserResolverTest do
       {:ok, %{user_id: found_id}} = UserResolver.resolve(:telegram, "111000222")
 
       assert user_id == found_id
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # P2: space_id fallback — self-healing backfilled NULL space_id rows
+  # ---------------------------------------------------------------
+
+  describe "resolve/3 — space_id fallback (self-healing)" do
+    test "matches existing identity with NULL space_id when message has real space_id" do
+      # Simulate a backfilled identity with NULL space_id
+      user = chat_user_fixture(%{channel: "telegram", external_id: "550011223"})
+      _identity = user_identity_fixture(user, %{space_id: nil})
+
+      # Create perpetual conversation so resolve returns it
+      now = DateTime.utc_now()
+
+      {:ok, conversation} =
+        %Conversation{}
+        |> Conversation.changeset(%{
+          channel: "unified",
+          user_id: user.id,
+          agent_type: "orchestrator",
+          status: "active",
+          started_at: now,
+          last_active_at: now
+        })
+        |> Repo.insert()
+
+      # Resolve with a real space_id — should find the NULL row via fallback
+      assert {:ok, %{user_id: found_user_id, conversation_id: found_conv_id}} =
+               UserResolver.resolve(:telegram, "550011223", %{space_id: "some_chat_id"})
+
+      assert found_user_id == user.id
+      assert found_conv_id == conversation.id
+    end
+
+    test "backfills space_id on the identity row after fallback match" do
+      user = chat_user_fixture(%{channel: "telegram", external_id: "660011223"})
+      identity = user_identity_fixture(user, %{space_id: nil})
+
+      assert is_nil(identity.space_id)
+
+      {:ok, _} =
+        UserResolver.resolve(:telegram, "660011223", %{space_id: "healed_space"})
+
+      # Reload identity from DB — space_id should be backfilled
+      updated = Repo.get!(UserIdentity, identity.id)
+      assert updated.space_id == "healed_space"
+    end
+
+    test "subsequent lookups use exact match after backfill (no fallback needed)" do
+      user = chat_user_fixture(%{channel: "telegram", external_id: "770011223"})
+      _identity = user_identity_fixture(user, %{space_id: nil})
+
+      # First call triggers fallback + backfill
+      {:ok, result1} =
+        UserResolver.resolve(:telegram, "770011223", %{space_id: "real_space"})
+
+      # Second call should find via exact match (space_id is now "real_space")
+      {:ok, result2} =
+        UserResolver.resolve(:telegram, "770011223", %{space_id: "real_space"})
+
+      assert result1.user_id == result2.user_id
+      assert result1.user_id == user.id
+    end
+
+    test "does not false-match when identities have different real space_ids" do
+      # Create identity with space_id "A"
+      {:ok, %{user_id: user_a}} =
+        UserResolver.resolve(:slack, "U0FALLBACK", %{space_id: "T0SPACEA"})
+
+      # Create identity with space_id "B" (different user)
+      {:ok, %{user_id: user_b}} =
+        UserResolver.resolve(:slack, "U0FALLBACK", %{space_id: "T0SPACEB"})
+
+      refute user_a == user_b
+
+      # Neither should trigger fallback — both have real space_ids
+      {:ok, %{user_id: found_a}} =
+        UserResolver.resolve(:slack, "U0FALLBACK", %{space_id: "T0SPACEA"})
+
+      {:ok, %{user_id: found_b}} =
+        UserResolver.resolve(:slack, "U0FALLBACK", %{space_id: "T0SPACEB"})
+
+      assert found_a == user_a
+      assert found_b == user_b
+    end
+
+    test "fallback does not fire when space_id is nil (exact nil match only)" do
+      # Create identity with NULL space_id
+      user = chat_user_fixture(%{channel: "telegram", external_id: "880011223"})
+      _identity = user_identity_fixture(user, %{space_id: nil})
+
+      # Resolve with nil space_id — should use exact nil match, not fallback
+      {:ok, %{user_id: found_id}} = UserResolver.resolve(:telegram, "880011223")
+
+      assert found_id == user.id
     end
   end
 
