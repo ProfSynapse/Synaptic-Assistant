@@ -104,7 +104,6 @@ defmodule AssistantWeb.Router do
 
     live_session :require_authenticated_settings_user,
       on_mount: [{AssistantWeb.SettingsUserAuth, :require_authenticated}] do
-      live "/admin", AdminLive, :index
       live "/", SettingsLive, :profile
       live "/settings", SettingsLive, :profile
       live "/settings/workflows/:name/edit", WorkflowEditorLive, :edit
