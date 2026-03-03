@@ -152,11 +152,6 @@ if app_id = System.get_env("DISCORD_APPLICATION_ID") do
   config :assistant, :discord_application_id, app_id
 end
 
-# Google Chat
-if webhook_url = System.get_env("GOOGLE_CHAT_WEBHOOK_URL") do
-  config :assistant, :google_chat_webhook_url, webhook_url
-end
-
 # HubSpot
 if api_key = System.get_env("HUBSPOT_API_KEY") do
   config :assistant, :hubspot_api_key, api_key

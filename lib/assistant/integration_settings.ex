@@ -42,6 +42,7 @@ defmodule Assistant.IntegrationSettings do
 
   alias Assistant.IntegrationSettings.Cache
   alias Assistant.IntegrationSettings.Registry
+  alias Assistant.Integrations.Telegram.WebhookManager
   alias Assistant.Repo
   alias Assistant.Schemas.IntegrationSetting
 
@@ -124,6 +125,7 @@ defmodule Assistant.IntegrationSettings do
         {:ok, {:ok, setting}} ->
           Cache.put(key, value)
           broadcast_change(key)
+          WebhookManager.maybe_sync(key)
           Logger.info("Integration setting updated", key: key_str, admin_id: admin_id)
           {:ok, setting}
 
@@ -167,6 +169,7 @@ defmodule Assistant.IntegrationSettings do
         {:ok, :deleted} ->
           Cache.invalidate(key)
           broadcast_change(key)
+          WebhookManager.maybe_sync(key)
           Logger.info("Integration setting deleted (reverted to env var)", key: key_str)
           {:ok, :deleted}
 
