@@ -3,6 +3,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
 
   def nav_items do
     [
+      {"admin", "Admin"},
       {"profile", "Profile"},
       {"models", "Models"},
       {"analytics", "Analytics"},
@@ -10,7 +11,6 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       {"apps", "Apps & Connections"},
       {"workflows", "Workflows"},
       {"skills", "Skill Permissions"},
-      {"admin", "Admin"},
       {"help", "Help"}
     ]
   end
@@ -31,11 +31,11 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "profile" -> "hero-user-circle"
       "models" -> "hero-cube"
       "analytics" -> "hero-chart-bar"
-      "memory" -> "hero-cpu-chip"
+      "memory" -> "hero-circle-stack"
       "apps" -> "hero-puzzle-piece"
       "workflows" -> "hero-command-line"
       "skills" -> "hero-wrench-screwdriver"
-      "admin" -> "hero-shield-check"
+      "admin" -> "hero-cog-6-tooth"
       "help" -> "hero-question-mark-circle"
     end
   end
