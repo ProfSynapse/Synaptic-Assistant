@@ -33,7 +33,7 @@ defmodule AssistantWeb.Components.SettingsPage.CardGrid do
         {@empty_message}
       </div>
 
-      <div :if={@items != []} class="sa-workflow-grid">
+      <div :if={@items != []} class="sa-card-grid">
         {render_slot(@card, @items)}
       </div>
     </div>

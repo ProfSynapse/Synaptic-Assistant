@@ -283,14 +283,22 @@ defmodule AssistantWeb.SettingsUserAuth do
   Plug for routes that require the settings_user to be authenticated.
   """
   def require_authenticated_settings_user(conn, _opts) do
-    if conn.assigns.current_scope && conn.assigns.current_scope.settings_user do
-      conn
-    else
-      conn
-      |> put_flash(:error, "You must log in to access this page.")
-      |> maybe_store_return_to()
-      |> redirect(to: ~p"/settings_users/log-in")
-      |> halt()
+    cond do
+      is_nil(conn.assigns.current_scope) or is_nil(conn.assigns.current_scope.settings_user) ->
+        conn
+        |> put_flash(:error, "You must log in to access this page.")
+        |> maybe_store_return_to()
+        |> redirect(to: ~p"/settings_users/log-in")
+        |> halt()
+
+      Accounts.settings_user_disabled?(conn.assigns.current_scope.settings_user) ->
+        conn
+        |> put_flash(:error, "Your account has been disabled.")
+        |> redirect(to: ~p"/settings_users/log-in")
+        |> halt()
+
+      true ->
+        conn
     end
   end
 

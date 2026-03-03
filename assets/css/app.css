@@ -763,7 +763,7 @@ a {
   gap: 12px;
 }
 
-.sa-workflow-grid {
+.sa-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;

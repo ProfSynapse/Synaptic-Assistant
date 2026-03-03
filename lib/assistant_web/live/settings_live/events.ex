@@ -710,56 +710,20 @@ defmodule AssistantWeb.SettingsLive.Events do
     end
   end
 
-  def handle_event("save_user_openrouter_key", %{"user_id" => user_id, "api_key" => api_key}, socket) do
-    unless socket.assigns.current_scope.settings_user.is_admin do
-      {:noreply, put_flash(socket, :error, "Not authorized.")}
-    else
-      api_key = String.trim(api_key)
-
-      if api_key == "" do
-        {:noreply, put_flash(socket, :error, "API key cannot be blank.")}
-      else
-        case Accounts.admin_set_openrouter_key(user_id, api_key) do
-          {:ok, _user} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "OpenRouter API key saved.")
-             |> Loaders.reload_admin_users()}
-
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Unable to save API key.")}
-        end
-      end
-    end
-  end
-
-  def handle_event("delete_user_openrouter_key", %{"id" => user_id}, socket) do
-    unless socket.assigns.current_scope.settings_user.is_admin do
-      {:noreply, put_flash(socket, :error, "Not authorized.")}
-    else
-      case Accounts.admin_clear_openrouter_key(user_id) do
-        {:ok, _user} ->
-          {:noreply,
-           socket
-           |> put_flash(:info, "OpenRouter API key removed.")
-           |> Loaders.reload_admin_users()}
-
-        {:error, _} ->
-          {:noreply, put_flash(socket, :error, "Unable to remove API key.")}
-      end
-    end
-  end
-
   # --- Admin user card management handlers ---
 
   def handle_event("search_admin_users", %{"query" => query}, socket) do
-    normalized = query |> to_string() |> String.trim()
-    all_users = socket.assigns[:admin_users_with_keys] || []
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      normalized = query |> to_string() |> String.trim()
+      all_users = socket.assigns[:admin_users_with_keys] || []
 
-    {:noreply,
-     socket
-     |> assign(:admin_user_search, normalized)
-     |> assign(:filtered_admin_users, Loaders.filter_admin_users(all_users, normalized))}
+      {:noreply,
+       socket
+       |> assign(:admin_user_search, normalized)
+       |> assign(:filtered_admin_users, Loaders.filter_admin_users(all_users, normalized))}
+    end
   end
 
   def handle_event("edit_admin_user", %{"id" => user_id}, socket) do
@@ -787,7 +751,9 @@ defmodule AssistantWeb.SettingsLive.Events do
       actor_id = socket.assigns.current_scope.settings_user.id
 
       case Accounts.toggle_user_disabled(user_id, actor_id) do
-        {:ok, _user} ->
+        {:ok, _user, expired_tokens} ->
+          SettingsUserAuth.disconnect_sessions(expired_tokens)
+
           {:noreply,
            socket
            |> put_flash(:info, "User status updated.")

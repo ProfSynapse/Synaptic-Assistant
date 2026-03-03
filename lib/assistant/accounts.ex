@@ -896,8 +896,11 @@ defmodule Assistant.Accounts do
   @doc """
   Toggles the disabled state for a settings_user.
 
-  When currently enabled, sets `disabled_at` to now.
+  When currently enabled, sets `disabled_at` to now and expires all session tokens.
   When currently disabled, clears `disabled_at` to nil.
+
+  Returns `{:ok, updated_user, expired_tokens}` on success (expired_tokens is
+  a list of `SettingsUserToken` structs suitable for `disconnect_sessions/1`).
 
   Guards:
   - Cannot disable yourself (`:cannot_disable_self`)
@@ -908,22 +911,54 @@ defmodule Assistant.Accounts do
     if settings_user_id == actor_settings_user_id do
       {:error, :cannot_disable_self}
     else
-      case Repo.get(SettingsUser, settings_user_id) do
-        nil ->
-          {:error, :not_found}
+      result =
+        Repo.transact(fn ->
+          case Repo.get(SettingsUser, settings_user_id) do
+            nil ->
+              {:error, :not_found}
 
-        %SettingsUser{} = settings_user ->
-          currently_disabled = SettingsUser.disabled?(settings_user)
+            %SettingsUser{} = settings_user ->
+              currently_disabled = SettingsUser.disabled?(settings_user)
 
-          if not currently_disabled and settings_user.is_admin and last_active_admin?() do
-            {:error, :last_admin}
-          else
-            new_disabled_at = if currently_disabled, do: nil, else: DateTime.utc_now(:second)
+              if not currently_disabled and settings_user.is_admin and last_active_admin?() do
+                {:error, :last_admin}
+              else
+                new_disabled_at = if currently_disabled, do: nil, else: DateTime.utc_now(:second)
 
-            settings_user
-            |> SettingsUser.disabled_changeset(new_disabled_at)
-            |> Repo.update()
+                with {:ok, updated_user} <-
+                       settings_user
+                       |> SettingsUser.disabled_changeset(new_disabled_at)
+                       |> Repo.update() do
+                  expired_tokens =
+                    if new_disabled_at do
+                      tokens =
+                        Repo.all(
+                          from(t in SettingsUserToken,
+                            where:
+                              t.settings_user_id == ^updated_user.id and t.context == "session"
+                          )
+                        )
+
+                      Repo.delete_all(
+                        from(t in SettingsUserToken,
+                          where: t.id in ^Enum.map(tokens, & &1.id)
+                        )
+                      )
+
+                      tokens
+                    else
+                      []
+                    end
+
+                  {:ok, {updated_user, expired_tokens}}
+                end
+              end
           end
+        end)
+
+      case result do
+        {:ok, {updated_user, expired_tokens}} -> {:ok, updated_user, expired_tokens}
+        error -> error
       end
     end
   end
@@ -942,17 +977,19 @@ defmodule Assistant.Accounts do
     if settings_user_id == actor_settings_user_id do
       {:error, :cannot_delete_self}
     else
-      case Repo.get(SettingsUser, settings_user_id) do
-        nil ->
-          {:error, :not_found}
+      Repo.transact(fn ->
+        case Repo.get(SettingsUser, settings_user_id) do
+          nil ->
+            {:error, :not_found}
 
-        %SettingsUser{} = settings_user ->
-          if settings_user.is_admin and last_active_admin?() do
-            {:error, :last_admin}
-          else
-            Repo.delete(settings_user)
-          end
-      end
+          %SettingsUser{} = settings_user ->
+            if settings_user.is_admin and last_active_admin?() do
+              {:error, :last_admin}
+            else
+              Repo.delete(settings_user)
+            end
+        end
+      end)
     end
   end
 
@@ -964,19 +1001,21 @@ defmodule Assistant.Accounts do
   """
   def toggle_admin_status(settings_user_id, is_admin)
       when is_binary(settings_user_id) and is_boolean(is_admin) do
-    case Repo.get(SettingsUser, settings_user_id) do
-      nil ->
-        {:error, :not_found}
+    Repo.transact(fn ->
+      case Repo.get(SettingsUser, settings_user_id) do
+        nil ->
+          {:error, :not_found}
 
-      %SettingsUser{} = settings_user ->
-        if not is_admin and settings_user.is_admin and last_active_admin?() do
-          {:error, :last_admin}
-        else
-          settings_user
-          |> Ecto.Changeset.change(is_admin: is_admin)
-          |> Repo.update()
-        end
-    end
+        %SettingsUser{} = settings_user ->
+          if not is_admin and settings_user.is_admin and last_active_admin?() do
+            {:error, :last_admin}
+          else
+            settings_user
+            |> Ecto.Changeset.change(is_admin: is_admin)
+            |> Repo.update()
+          end
+      end
+    end)
   end
 
   # Returns true when there is exactly one active (non-disabled) admin.

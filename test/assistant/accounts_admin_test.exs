@@ -49,23 +49,28 @@ defmodule Assistant.AccountsAdminTest do
   # ──────────────────────────────────────────────
 
   describe "toggle_user_disabled/2" do
-    test "disables an enabled user" do
+    test "disables an enabled user and returns expired tokens" do
       actor = settings_user_fixture()
       target = settings_user_fixture()
 
-      assert {:ok, updated} = Accounts.toggle_user_disabled(target.id, actor.id)
+      # Create a session token so we can verify it's expired
+      _token = Accounts.generate_settings_user_session_token(target)
+
+      assert {:ok, updated, expired_tokens} = Accounts.toggle_user_disabled(target.id, actor.id)
       assert not is_nil(updated.disabled_at)
       assert SettingsUser.disabled?(updated)
+      assert length(expired_tokens) == 1
     end
 
-    test "re-enables a disabled user" do
+    test "re-enables a disabled user with empty expired tokens" do
       actor = settings_user_fixture()
       target = disabled_fixture()
 
       assert SettingsUser.disabled?(target)
-      assert {:ok, updated} = Accounts.toggle_user_disabled(target.id, actor.id)
+      assert {:ok, updated, expired_tokens} = Accounts.toggle_user_disabled(target.id, actor.id)
       assert is_nil(updated.disabled_at)
       refute SettingsUser.disabled?(updated)
+      assert expired_tokens == []
     end
 
     test "returns :cannot_disable_self when actor and target are the same" do
@@ -94,7 +99,7 @@ defmodule Assistant.AccountsAdminTest do
 
       actor = settings_user_fixture()
 
-      assert {:ok, updated} = Accounts.toggle_user_disabled(admin1.id, actor.id)
+      assert {:ok, updated, _expired_tokens} = Accounts.toggle_user_disabled(admin1.id, actor.id)
       assert SettingsUser.disabled?(updated)
     end
 
@@ -110,7 +115,7 @@ defmodule Assistant.AccountsAdminTest do
 
       # Re-enable should work even if this is the only admin (they are disabled, so
       # re-enabling makes the system healthier)
-      assert {:ok, updated} = Accounts.toggle_user_disabled(disabled_admin.id, actor.id)
+      assert {:ok, updated, []} = Accounts.toggle_user_disabled(disabled_admin.id, actor.id)
       assert is_nil(updated.disabled_at)
     end
   end
