@@ -1,13 +1,16 @@
-# lib/assistant/orchestrator/engine.ex — GenServer per conversation.
+# lib/assistant/orchestrator/engine.ex — GenServer per user conversation.
 #
-# One Engine process per active conversation. Manages the LLM loop, sub-agent
-# dispatch, result collection, and circuit breaker enforcement. The Engine is
-# the only stateful component — LoopRunner and AgentScheduler are pure functions
-# that the Engine calls.
+# One Engine process per active user. Registered by user_id UUID in the
+# EngineRegistry. Manages the LLM loop, sub-agent dispatch, result collection,
+# and circuit breaker enforcement. The Engine is the only stateful component —
+# LoopRunner and AgentScheduler are pure functions that the Engine calls.
+#
+# Messages are persisted to DB at the end of each turn via async
+# batch_append_messages. On restart, the Engine hydrates from DB.
 #
 # Supervision: started under Assistant.Orchestrator.ConversationSupervisor
-# (a DynamicSupervisor) via start_conversation/2. Each Engine also starts
-# its own Task.Supervisor for sub-agent tasks.
+# (a DynamicSupervisor). Each Engine also starts its own Task.Supervisor
+# for sub-agent tasks.
 #
 # Related files:
 #   - lib/assistant/orchestrator/loop_runner.ex (pure LLM loop logic)
@@ -15,11 +18,15 @@
 #   - lib/assistant/orchestrator/agent_scheduler.ex (DAG + wave execution)
 #   - lib/assistant/orchestrator/nudger.ex (error→hint mapping from YAML)
 #   - lib/assistant/resilience/circuit_breaker.ex (four-level limits)
+#   - lib/assistant/memory/store.ex (batch message persistence)
 #   - lib/assistant/application.ex (supervision tree)
 
 defmodule Assistant.Orchestrator.Engine do
   @moduledoc """
-  GenServer per conversation managing the orchestration loop.
+  GenServer per user managing the orchestration loop.
+
+  Registered by `user_id` UUID in the EngineRegistry. Each user has one
+  Engine process and one perpetual conversation (conversation_id).
 
   ## Responsibilities
 
@@ -28,6 +35,8 @@ defmodule Assistant.Orchestrator.Engine do
     * Handle blocking waits (`get_agent_results` with `wait_any`/`wait_all`)
     * Enforce circuit breaker limits at turn and conversation level
     * Track dispatched agent state for result collection
+    * Persist all turn messages to DB asynchronously at turn end
+    * Hydrate from DB messages on restart
 
   ## Modes
 
@@ -47,6 +56,7 @@ defmodule Assistant.Orchestrator.Engine do
   use GenServer
 
   alias Assistant.Config.Loader, as: ConfigLoader
+  alias Assistant.Memory.Store
   alias Assistant.Orchestrator.{AgentScheduler, Context, Limits, LoopRunner, Nudger, SubAgent}
   alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults}
   alias Assistant.Resilience.CircuitBreaker
@@ -56,16 +66,27 @@ defmodule Assistant.Orchestrator.Engine do
 
   @default_mode :multi_agent
 
+  # Number of recent messages to hydrate from DB on engine restart
+  @hydrate_message_limit 50
+
+  # Max message size in bytes (~50K tokens). Rejects obviously oversized
+  # input before it enters the LLM loop. This is a per-message sanity
+  # check — the Engine's compaction system handles total context separately.
+  @max_message_bytes 200_000
+
   # --- Client API ---
 
   @doc """
-  Starts an Engine process for the given conversation.
+  Starts an Engine process for the given user.
+
+  The Engine is registered by `user_id` UUID in the EngineRegistry. Each
+  user has at most one running Engine process at a time.
 
   ## Parameters
 
-    * `conversation_id` - Unique identifier for the conversation
+    * `user_id` - User UUID (registration key in EngineRegistry)
     * `opts` - Options:
-      * `:user_id` - User identifier (default: "unknown")
+      * `:conversation_id` - Perpetual conversation UUID (required)
       * `:channel` - Channel identifier (default: "unknown")
       * `:mode` - `:multi_agent` or `:single_loop` (default: `:multi_agent`)
 
@@ -75,8 +96,8 @@ defmodule Assistant.Orchestrator.Engine do
     * `{:error, reason}` on failure
   """
   @spec start_link(String.t(), keyword()) :: GenServer.on_start()
-  def start_link(conversation_id, opts \\ []) do
-    GenServer.start_link(__MODULE__, {conversation_id, opts}, name: via_tuple(conversation_id))
+  def start_link(user_id, opts \\ []) do
+    GenServer.start_link(__MODULE__, {user_id, opts}, name: via_tuple(user_id))
   end
 
   @doc """
@@ -88,7 +109,7 @@ defmodule Assistant.Orchestrator.Engine do
 
   ## Parameters
 
-    * `conversation_id` - The conversation to send the message to
+    * `user_id` - The user UUID whose engine to send the message to
     * `message` - The user's message text
 
   ## Returns
@@ -97,16 +118,21 @@ defmodule Assistant.Orchestrator.Engine do
     * `{:error, reason}` — LLM failure, timeout, or engine not found
   """
   @spec send_message(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def send_message(conversation_id, message) do
-    GenServer.call(via_tuple(conversation_id), {:send_message, message}, :timer.seconds(120))
+  def send_message(user_id, message) do
+    if byte_size(message) > @max_message_bytes do
+      {:error, :message_too_long}
+    else
+      timeout = Application.get_env(:assistant, :engine_call_timeout, 300_000)
+      GenServer.call(via_tuple(user_id), {:send_message, message}, timeout)
+    end
   end
 
   @doc """
   Returns the current state of the engine for debugging/monitoring.
   """
   @spec get_state(String.t()) :: {:ok, map()} | {:error, :not_found}
-  def get_state(conversation_id) do
-    GenServer.call(via_tuple(conversation_id), :get_state)
+  def get_state(user_id) do
+    GenServer.call(via_tuple(user_id), :get_state)
   catch
     :exit, {:noproc, _} -> {:error, :not_found}
   end
@@ -114,8 +140,8 @@ defmodule Assistant.Orchestrator.Engine do
   # --- GenServer Callbacks ---
 
   @impl true
-  def init({conversation_id, opts}) do
-    user_id = Keyword.get(opts, :user_id, "unknown")
+  def init({user_id, opts}) do
+    conversation_id = Keyword.get(opts, :conversation_id)
     channel = Keyword.get(opts, :channel, "unknown")
     mode = Keyword.get(opts, :mode, @default_mode)
 
@@ -123,13 +149,16 @@ defmodule Assistant.Orchestrator.Engine do
     {:ok, agent_supervisor} =
       Task.Supervisor.start_link(max_children: 10)
 
+    # Hydrate recent messages from DB for conversation continuity
+    hydrated_messages = hydrate_messages(conversation_id)
+
     state = %{
       conversation_id: conversation_id,
       user_id: user_id,
       channel: channel,
       mode: mode,
       agent_supervisor: agent_supervisor,
-      messages: [],
+      messages: hydrated_messages,
       dispatched_agents: %{},
       agent_tasks: %{},
       turn_state: CircuitBreaker.new_turn_state(),
@@ -149,7 +178,8 @@ defmodule Assistant.Orchestrator.Engine do
       conversation_id: conversation_id,
       user_id: user_id,
       channel: channel,
-      mode: mode
+      mode: mode,
+      hydrated_messages: length(hydrated_messages)
     )
 
     {:ok, state}
@@ -178,12 +208,18 @@ defmodule Assistant.Orchestrator.Engine do
     user_msg = %{role: "user", content: message}
     state = Map.update!(state, :messages, &(&1 ++ [user_msg]))
 
+    # Track the message index before this turn to know which messages are new
+    pre_turn_message_count = length(state.messages) - 1
+
     # Run the orchestration loop
     case run_loop(state) do
       {:ok, response_text, final_state} ->
         # Append assistant response to history
         assistant_msg = %{role: "assistant", content: response_text}
         final_state = Map.update!(final_state, :messages, &(&1 ++ [assistant_msg]))
+
+        # Async: persist this turn's new messages to DB (non-blocking)
+        persist_turn_messages(final_state, pre_turn_message_count)
 
         # Broadcast token usage for ContextMonitor
         broadcast_token_usage(final_state)
@@ -758,7 +794,108 @@ defmodule Assistant.Orchestrator.Engine do
   defp truncate_for_export(text) when is_binary(text), do: String.slice(text, 0, 2_000) <> "..."
   defp truncate_for_export(other), do: inspect(other)
 
-  defp via_tuple(conversation_id) do
-    {:via, Registry, {Assistant.Orchestrator.EngineRegistry, conversation_id}}
+  # --- Message Persistence ---
+
+  # Hydrates recent messages from DB on engine startup for conversation continuity.
+  # Returns a list of message maps in the format the LLM loop expects.
+  defp hydrate_messages(nil), do: []
+
+  defp hydrate_messages(conversation_id) do
+    Store.list_messages(conversation_id, limit: @hydrate_message_limit, order: :asc)
+    |> Enum.map(&db_message_to_map/1)
+  rescue
+    error ->
+      Logger.warning("Failed to hydrate messages from DB: #{inspect(error)}",
+        conversation_id: conversation_id
+      )
+
+      []
+  end
+
+  # Converts a DB Message schema struct to the in-memory map format
+  # used by the LLM loop.
+  defp db_message_to_map(msg) do
+    base = %{role: msg.role}
+
+    base =
+      if msg.content do
+        Map.put(base, :content, msg.content)
+      else
+        base
+      end
+
+    base =
+      if msg.tool_calls do
+        Map.put(base, :tool_calls, msg.tool_calls)
+      else
+        base
+      end
+
+    base =
+      if msg.tool_results do
+        Map.put(base, :tool_call_id, msg.tool_results["tool_call_id"])
+      else
+        base
+      end
+
+    base
+  end
+
+  # Asynchronously persists the new messages from this turn to the DB.
+  # Runs in a separate task so it doesn't block the reply to the user.
+  defp persist_turn_messages(state, pre_turn_message_count) do
+    conversation_id = state.conversation_id
+    new_messages = Enum.drop(state.messages, pre_turn_message_count)
+
+    if new_messages != [] and conversation_id != nil do
+      Task.Supervisor.start_child(
+        Assistant.Skills.TaskSupervisor,
+        fn ->
+          try do
+            db_messages =
+              Enum.map(new_messages, fn msg ->
+                base = %{role: msg[:role] || "assistant"}
+
+                base =
+                  if msg[:content], do: Map.put(base, :content, msg[:content]), else: base
+
+                base =
+                  if msg[:tool_calls],
+                    do: Map.put(base, :tool_calls, msg[:tool_calls]),
+                    else: base
+
+                base =
+                  if msg[:tool_call_id],
+                    do: Map.put(base, :tool_results, %{"tool_call_id" => msg[:tool_call_id]}),
+                    else: base
+
+                base
+              end)
+
+            case Store.batch_append_messages(conversation_id, db_messages) do
+              {:ok, _inserted} ->
+                Logger.debug("Persisted #{length(db_messages)} turn messages",
+                  conversation_id: conversation_id
+                )
+
+              {:error, reason} ->
+                Logger.warning("Failed to persist turn messages: #{inspect(reason)}",
+                  conversation_id: conversation_id
+                )
+            end
+          rescue
+            error ->
+              Logger.error("Persist turn messages crashed: #{Exception.message(error)}",
+                conversation_id: conversation_id,
+                stacktrace: Exception.format_stacktrace(__STACKTRACE__)
+              )
+          end
+        end
+      )
+    end
+  end
+
+  defp via_tuple(user_id) do
+    {:via, Registry, {Assistant.Orchestrator.EngineRegistry, user_id}}
   end
 end

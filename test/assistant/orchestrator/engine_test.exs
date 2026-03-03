@@ -1,10 +1,7 @@
 # test/assistant/orchestrator/engine_test.exs — Integration tests for Engine startup.
 #
-# Bug 3 regression: Engine.start_link with a UUID conversation_id (from DB)
-# should start successfully. Previously, when the orchestrator started with
-# a real DB conversation_id, sub-agents would use a non-existent sub_conversation_id
-# for memory saves, causing FK violations. These tests verify the engine starts
-# correctly with DB-backed conversation IDs.
+# Verifies that Engine starts correctly when registered by user_id UUID,
+# carries the correct conversation_id in state, and hydrates from DB.
 
 defmodule Assistant.Orchestrator.EngineTest do
   use Assistant.DataCase, async: false
@@ -44,7 +41,7 @@ defmodule Assistant.Orchestrator.EngineTest do
 
     {:ok, conversation} =
       %Conversation{}
-      |> Conversation.changeset(%{channel: "test", user_id: user.id})
+      |> Conversation.changeset(%{channel: "unified", user_id: user.id})
       |> Repo.insert()
 
     {user, conversation}
@@ -62,35 +59,39 @@ defmodule Assistant.Orchestrator.EngineTest do
   end
 
   # ---------------------------------------------------------------
-  # Engine start with UUID conversation_id (Bug 3 regression)
+  # Engine start registered by user_id UUID
   # ---------------------------------------------------------------
 
-  describe "start_link with DB-backed conversation_id (Bug 3 regression)" do
-    test "starts successfully with a real UUID conversation_id" do
+  describe "start_link registered by user_id" do
+    test "starts successfully with user_id and conversation_id in opts" do
       {user, conversation} = create_user_and_conversation()
 
       result =
-        Engine.start_link(conversation.id,
-          user_id: user.id,
+        Engine.start_link(user.id,
+          conversation_id: conversation.id,
           channel: "test"
         )
 
       assert {:ok, pid} = result
       assert Process.alive?(pid)
 
-      # Engine should be registered with the conversation_id
+      # Engine should be registered with the user_id (not conversation_id)
       assert [{^pid, _}] =
-               Registry.lookup(Assistant.Orchestrator.EngineRegistry, conversation.id)
+               Registry.lookup(Assistant.Orchestrator.EngineRegistry, user.id)
 
       safe_stop(pid)
     end
 
-    test "engine state has correct conversation_id" do
+    test "engine state has correct user_id and conversation_id" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} =
+        Engine.start_link(user.id,
+          conversation_id: conversation.id,
+          channel: "test"
+        )
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
 
       assert state.conversation_id == conversation.id
       assert state.user_id == user.id
@@ -102,8 +103,13 @@ defmodule Assistant.Orchestrator.EngineTest do
     test "conversation_id in engine state exists in database" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, pid} =
+        Engine.start_link(user.id,
+          conversation_id: conversation.id,
+          channel: "test"
+        )
+
+      {:ok, state} = Engine.get_state(user.id)
 
       # The conversation_id in engine state should reference a real DB record
       assert {:ok, %Conversation{}} =

@@ -44,6 +44,9 @@ defmodule Assistant.Application do
         Assistant.Skills.Registry,
         Assistant.Skills.Watcher,
 
+        # Channel infrastructure (circuit breaker for adapter resilience)
+        Assistant.Channels.CircuitBreaker,
+
         # Orchestrator (process registries + DynamicSupervisor for per-conversation engines)
         {Registry, keys: :unique, name: Assistant.Orchestrator.EngineRegistry},
         {Registry, keys: :unique, name: Assistant.SubAgent.Registry},

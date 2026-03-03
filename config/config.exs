@@ -56,7 +56,8 @@ config :assistant, Oban,
     calendar: 3,
     scheduled: 5,
     oauth_replay: 5,
-    sync: 5
+    sync: 5,
+    maintenance: 3
   ],
   plugins: [
     {Oban.Plugins.Cron,
@@ -66,7 +67,9 @@ config :assistant, Oban,
        # Poll Drive Changes API for active sync users every 60 seconds
        {"* * * * *", Assistant.Sync.Workers.SyncPollWorker},
        # Prune sync history entries older than retention period (daily at 04:00 UTC)
-       {"0 4 * * *", Assistant.Sync.Workers.HistoryPruningWorker}
+       {"0 4 * * *", Assistant.Sync.Workers.HistoryPruningWorker},
+       # Archive stale conversations (inactive > 30 days) daily at 05:00 UTC
+       {"0 5 * * *", Assistant.Channels.ConversationArchiver}
      ]}
   ]
 

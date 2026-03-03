@@ -1,7 +1,14 @@
 defmodule Assistant.Schemas.User do
   @moduledoc """
-  User schema. Represents a human user identified by their external ID
-  and channel combination. Preferences stored as JSONB for flexibility.
+  User schema. Represents a human user.
+
+  With the unified conversation architecture, the authoritative identity mapping
+  lives in `user_identities`. The `external_id` and `channel` fields on this
+  table are retained for backward compatibility (existing callers still set them)
+  but are no longer required — a user's identity may exist only in
+  `user_identities` after cross-channel linking.
+
+  Preferences stored as JSONB for flexibility.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -16,6 +23,7 @@ defmodule Assistant.Schemas.User do
     field :timezone, :string, default: "UTC"
     field :preferences, :map, default: %{}
 
+    has_many :identities, Assistant.Schemas.UserIdentity
     has_many :conversations, Assistant.Schemas.Conversation
     has_many :tasks, Assistant.Schemas.Task, foreign_key: :assignee_id
     has_many :created_tasks, Assistant.Schemas.Task, foreign_key: :creator_id
@@ -28,13 +36,15 @@ defmodule Assistant.Schemas.User do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @required_fields [:external_id, :channel]
-  @optional_fields [:display_name, :timezone, :preferences]
+  # external_id and channel moved to optional: identity is now authoritative
+  # in user_identities. Existing callers still provide these fields — this
+  # change only relaxes the validation constraint.
+  @required_fields []
+  @optional_fields [:external_id, :channel, :display_name, :timezone, :preferences]
 
   def changeset(user, attrs) do
     user
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
-    |> unique_constraint([:external_id, :channel])
   end
 end

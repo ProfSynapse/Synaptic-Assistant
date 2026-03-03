@@ -205,13 +205,13 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(text_response("Hello! How can I help you?")))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
-      assert {:ok, response} = Engine.send_message(conversation.id, "Hello")
+      assert {:ok, response} = Engine.send_message(user.id, "Hello")
       assert response == "Hello! How can I help you?"
 
       # Verify state was updated
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.message_count >= 2
       assert state.iteration_count == 1
 
@@ -233,10 +233,10 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         ))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, _response} = Engine.send_message(conversation.id, "Count tokens")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, _response} = Engine.send_message(user.id, "Count tokens")
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.total_usage.prompt_tokens == 200
       assert state.total_usage.completion_tokens == 100
 
@@ -273,8 +273,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(response))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, response} = Engine.send_message(conversation.id, "What email skills do you have?")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, response} = Engine.send_message(user.id, "What email skills do you have?")
 
       assert response == "I found the email skills. How can I help?"
 
@@ -283,7 +283,7 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
       assert :counters.get(call_count, 1) >= 2
 
       # Verify iteration count reflects the loop
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.iteration_count == 2
 
       safe_stop(pid)
@@ -317,8 +317,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(response))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, response} = Engine.send_message(conversation.id, "What can you do?")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, response} = Engine.send_message(user.id, "What can you do?")
 
       assert response == "I can help with email and calendar."
       # At least 3 calls: two tool calls + text. May have more from
@@ -345,8 +345,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         }))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      result = Engine.send_message(conversation.id, "Hello")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      result = Engine.send_message(user.id, "Hello")
 
       assert {:error, {:api_error, 500, "Internal server error"}} = result
 
@@ -365,8 +365,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         }))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      result = Engine.send_message(conversation.id, "Hello")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      result = Engine.send_message(user.id, "Hello")
 
       assert {:error, {:rate_limited, 30}} = result
 
@@ -382,8 +382,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, "not valid json at all {{{")
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      result = Engine.send_message(conversation.id, "Hello")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      result = Engine.send_message(user.id, "Hello")
 
       # Req will fail to decode the JSON body, resulting in an error
       assert {:error, _reason} = result
@@ -404,8 +404,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         }))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      result = Engine.send_message(conversation.id, "Hello")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      result = Engine.send_message(user.id, "Hello")
 
       # Empty choices array should result in an error from parse_completion
       assert {:error, _reason} = result
@@ -435,8 +435,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         }))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      result = Engine.send_message(conversation.id, "Hello")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      result = Engine.send_message(user.id, "Hello")
 
       # nil content with no tool calls should return empty string via LoopRunner
       assert {:ok, ""} = result
@@ -467,13 +467,13 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         end
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       # First message fails
-      assert {:error, _} = Engine.send_message(conversation.id, "Hello")
+      assert {:error, _} = Engine.send_message(user.id, "Hello")
 
       # Second message succeeds — engine is still alive and functional
-      assert {:ok, "I'm back!"} = Engine.send_message(conversation.id, "Try again")
+      assert {:ok, "I'm back!"} = Engine.send_message(user.id, "Try again")
 
       safe_stop(pid)
     end
@@ -502,8 +502,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(response))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, response} = Engine.send_message(conversation.id, "Keep going")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, response} = Engine.send_message(user.id, "Keep going")
 
       # Should hit the max iteration limit and return the limit message
       assert response =~ "processing limit"
@@ -566,17 +566,17 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(response))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       # First turn
-      {:ok, _} = Engine.send_message(conversation.id, "My name is Alice")
+      {:ok, _} = Engine.send_message(user.id, "My name is Alice")
 
       # Second turn — should include prior history
-      {:ok, response} = Engine.send_message(conversation.id, "What is my name?")
+      {:ok, response} = Engine.send_message(user.id, "What is my name?")
       assert response == "Yes, your name is Alice!"
 
       # Verify message count grew
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.message_count >= 4  # user1, asst1, user2, asst2
 
       safe_stop(pid)
@@ -591,13 +591,13 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(text_response("OK")))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
-      {:ok, _} = Engine.send_message(conversation.id, "First")
-      {:ok, state1} = Engine.get_state(conversation.id)
+      {:ok, _} = Engine.send_message(user.id, "First")
+      {:ok, state1} = Engine.get_state(user.id)
 
-      {:ok, _} = Engine.send_message(conversation.id, "Second")
-      {:ok, state2} = Engine.get_state(conversation.id)
+      {:ok, _} = Engine.send_message(user.id, "Second")
+      {:ok, state2} = Engine.get_state(user.id)
 
       # iteration_count should reset to 1 for each turn (set in last completed turn)
       assert state1.iteration_count == 1
@@ -622,8 +622,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(text_response("OK")))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, state} = Engine.get_state(user.id)
 
       assert state.mode == :multi_agent
 
@@ -641,13 +641,13 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
       end)
 
       {:ok, pid} =
-        Engine.start_link(conversation.id,
-          user_id: user.id,
+        Engine.start_link(user.id,
+          conversation_id: conversation.id,
           channel: "test",
           mode: :single_loop
         )
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.mode == :single_loop
 
       safe_stop(pid)
@@ -673,8 +673,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(text_response("Verified")))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, _} = Engine.send_message(conversation.id, "Test structure")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, _} = Engine.send_message(user.id, "Test structure")
 
       # Get the first request (the one from send_message, not TurnClassifier)
       requests = Agent.get(agent, & &1) |> Enum.reverse()
@@ -723,8 +723,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(text_response("Authorized")))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, _} = Engine.send_message(conversation.id, "Check auth")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, _} = Engine.send_message(user.id, "Check auth")
 
       # Verify auth header was sent (check first captured header)
       headers = Agent.get(agent, & &1) |> Enum.reverse()
@@ -767,10 +767,10 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(response))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, _} = Engine.send_message(conversation.id, "Test usage")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, _} = Engine.send_message(user.id, "Test usage")
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       # Usage should be sum of both iterations: 100+200=300 prompt, 30+50=80 completion
       assert state.total_usage.prompt_tokens == 300
       assert state.total_usage.completion_tokens == 80
@@ -816,18 +816,18 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(text_response(response_text)))
       end)
 
-      {:ok, pid1} = Engine.start_link(conv1.id, user_id: user1.id, channel: "test")
-      {:ok, pid2} = Engine.start_link(conv2.id, user_id: user2.id, channel: "test")
+      {:ok, pid1} = Engine.start_link(user1.id, conversation_id: conv1.id, channel: "test")
+      {:ok, pid2} = Engine.start_link(user2.id, conversation_id: conv2.id, channel: "test")
 
-      {:ok, resp1} = Engine.send_message(conv1.id, "I am Alpha")
-      {:ok, resp2} = Engine.send_message(conv2.id, "I am Beta")
+      {:ok, resp1} = Engine.send_message(user1.id, "I am Alpha")
+      {:ok, resp2} = Engine.send_message(user2.id, "I am Beta")
 
       assert resp1 == "Response for Alpha"
       assert resp2 == "Response for Beta"
 
       # Verify they have independent state
-      {:ok, state1} = Engine.get_state(conv1.id)
-      {:ok, state2} = Engine.get_state(conv2.id)
+      {:ok, state1} = Engine.get_state(user1.id)
+      {:ok, state2} = Engine.get_state(user2.id)
       assert state1.conversation_id == conv1.id
       assert state2.conversation_id == conv2.id
       assert state1.conversation_id != state2.conversation_id
@@ -866,8 +866,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         |> Plug.Conn.resp(200, Jason.encode!(response))
       end)
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
-      {:ok, response} = Engine.send_message(conversation.id, "Do something")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
+      {:ok, response} = Engine.send_message(user.id, "Do something")
 
       assert response == "Sorry, I'll try a different approach."
       # At least 2 calls: tool call + text response. May have more from
