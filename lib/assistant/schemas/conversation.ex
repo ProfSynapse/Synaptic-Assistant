@@ -61,6 +61,9 @@ defmodule Assistant.Schemas.Conversation do
     |> validate_inclusion(:agent_type, @agent_types)
     |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:parent_conversation_id)
+    |> unique_constraint([:user_id, :agent_type],
+      name: :conversations_user_active_agent_unique
+    )
   end
 
   @doc """
