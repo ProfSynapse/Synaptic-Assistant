@@ -598,11 +598,7 @@ a {
   height: 34px;
   flex-shrink: 0;
   border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, var(--sa-blue), var(--sa-aqua));
-  color: #093642;
-  display: grid;
-  place-items: center;
-  font-weight: 700;
+  object-fit: cover;
 }
 
 .sa-sidebar-nav {

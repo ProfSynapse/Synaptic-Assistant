@@ -29,7 +29,7 @@ defmodule AssistantWeb.Components.SettingsPage do
       <aside class={["sa-sidebar", @sidebar_collapsed && "is-collapsed"]}>
         <div class="sa-sidebar-header">
           <div class="sa-sidebar-brand">
-            <div class="sa-brand-mark">A</div>
+            <img src="/images/aperture.png" alt="Synaptic Assistant" class="sa-brand-mark" />
             <span :if={!@sidebar_collapsed}>Synaptic Assistant</span>
           </div>
           <button
