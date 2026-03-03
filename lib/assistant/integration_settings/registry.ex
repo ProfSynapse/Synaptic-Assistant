@@ -166,11 +166,11 @@ defmodule Assistant.IntegrationSettings.Registry do
       label: "Google Chat",
       keys: [
         %{
-          key: :google_chat_webhook_url,
+          key: :google_cloud_project_number,
           secret: false,
-          env: "GOOGLE_CHAT_WEBHOOK_URL",
-          label: "Webhook URL",
-          help: "From Google Chat space → Manage webhooks"
+          env: "GOOGLE_CLOUD_PROJECT_NUMBER",
+          label: "Project Number",
+          help: "From Google Cloud Console → Dashboard → Project Info (numeric ID)"
         },
         %{
           key: :google_chat_enabled,

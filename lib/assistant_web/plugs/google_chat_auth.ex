@@ -29,12 +29,16 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
 
   ## Configuration
 
-  Requires `:google_cloud_project_number` in the `:assistant` app env:
+  Requires `:google_cloud_project_number` via IntegrationSettings (DB or env var fallback):
 
-      config :assistant, google_cloud_project_number: "1234567890"
+      # Via env var:
+      GOOGLE_CLOUD_PROJECT_NUMBER=1234567890
+      # Or via admin UI integration settings
   """
 
   import Plug.Conn
+
+  alias Assistant.IntegrationSettings
 
   require Logger
 
@@ -82,7 +86,7 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
   # --- JWT Verification ---
 
   defp verify_jwt(token) do
-    project_number = Application.get_env(:assistant, :google_cloud_project_number)
+    project_number = IntegrationSettings.get(:google_cloud_project_number)
 
     if is_nil(project_number) do
       Logger.error("google_cloud_project_number not configured")

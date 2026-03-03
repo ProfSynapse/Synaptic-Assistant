@@ -2,8 +2,7 @@
 #
 # Central notification dispatch: receives alerts via `notify/4`, deduplicates
 # them, matches against configured rules, and dispatches to appropriate
-# channels (Google Chat webhooks, etc.). Runs as a supervised singleton in
-# the application supervision tree.
+# channels. Runs as a supervised singleton in the application supervision tree.
 
 defmodule Assistant.Notifications.Router do
   @moduledoc """
@@ -20,14 +19,12 @@ defmodule Assistant.Notifications.Router do
 
   ## Fallback Behavior
 
-  If no rules are configured in the database, the router falls back to the
-  `:google_chat_webhook_url` application env, sending `:error` and `:critical`
-  alerts there.
+  If no rules are configured in the database, `:error` and `:critical` alerts
+  are logged at debug level and dropped.
   """
 
   use GenServer
 
-  alias Assistant.IntegrationSettings
   alias Assistant.Notifications.{Dedup, GoogleChat}
 
   require Logger
@@ -190,25 +187,11 @@ defmodule Assistant.Notifications.Router do
     Logger.warning("Unsupported notification channel type", type: type)
   end
 
-  # Falls back to the application env webhook for :error and :critical.
-  defp dispatch_fallback(severity, message) when severity in [:error, :critical] do
-    case IntegrationSettings.get(:google_chat_webhook_url) do
-      nil ->
-        Logger.debug("No fallback webhook configured, notification dropped",
-          severity: severity
-        )
-
-      url when is_binary(url) ->
-        case GoogleChat.send(url, message) do
-          :ok ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning("Failed to send fallback notification",
-              error: inspect(reason)
-            )
-        end
-    end
+  # No rule-based channels matched; log and drop.
+  defp dispatch_fallback(severity, _message) when severity in [:error, :critical] do
+    Logger.debug("No notification rules configured, notification dropped",
+      severity: severity
+    )
   end
 
   defp dispatch_fallback(_severity, _message), do: :ok

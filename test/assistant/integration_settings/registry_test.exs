@@ -54,9 +54,10 @@ defmodule Assistant.IntegrationSettings.RegistryTest do
       assert defn.secret == false
     end
 
-    test "google_chat_webhook_url is not secret" do
-      defn = Registry.definition_for_key(:google_chat_webhook_url)
+    test "google_cloud_project_number is not secret" do
+      defn = Registry.definition_for_key(:google_cloud_project_number)
       assert defn.secret == false
+      assert defn.group == "google_chat"
     end
 
     test "elevenlabs_voice_id is not secret" do
