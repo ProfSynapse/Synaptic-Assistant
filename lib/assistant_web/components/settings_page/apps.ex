@@ -1,9 +1,9 @@
 # lib/assistant_web/components/settings_page/apps.ex
 #
 # Apps & Connections section component for the settings page. Renders a grid of
-# integration cards, each showing connection status. OAuth services (Google)
-# show "Connected" when @google_connected is true. API-key services show
-# "Configured" when at least one key is set. All detail actions live on
+# integration cards with four status states: :connected (OAuth with token),
+# :configured (API keys set + enabled), :disabled (keys set but toggled off),
+# :not_set (nothing configured). All detail actions live on
 # /settings/apps/:app_id. Used by settings_page.ex.
 
 defmodule AssistantWeb.Components.SettingsPage.Apps do
@@ -94,25 +94,22 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
     group = app.integration_group
     configured = MapSet.member?(assigns.configured_groups, group)
 
-    enabled =
-      if app.connect_type == :oauth do
-        assigns.google_connected
-      else
-        # Default to enabled when configured; only disabled if explicitly toggled off
-        explicitly_disabled = MapSet.member?(assigns.disabled_groups, group)
-        configured and not explicitly_disabled
-      end
+    explicitly_disabled = MapSet.member?(assigns.disabled_groups, group)
 
-    # Three-state status:
-    # :connected — keys configured AND integration is enabled
-    # :configured — keys exist but integration has been explicitly disabled
+    # Four-state status:
+    # :connected — OAuth service with actual token (Google only)
+    # :configured — API keys set and integration enabled
+    # :disabled — API keys set but explicitly toggled off
     # :not_set — no keys configured at all
     status =
       cond do
-        configured and enabled -> :connected
-        configured -> :configured
+        app.connect_type == :oauth and assigns.google_connected -> :connected
+        configured and not explicitly_disabled -> :configured
+        configured -> :disabled
         true -> :not_set
       end
+
+    enabled = status in [:connected, :configured]
 
     assigns =
       assigns
@@ -143,7 +140,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
             />
             <span class="sa-switch-slider"></span>
           </label>
-          <.status_badge status={@status} />
+          <.status_icon status={@status} />
         </div>
       </div>
 
@@ -156,39 +153,39 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
     """
   end
 
-  defp status_badge(%{status: :connected} = assigns) do
+  defp status_icon(%{status: :connected} = assigns) do
     ~H"""
-    <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-      Connected
-    </span>
+    <.icon name="hero-check-circle" class="h-5 w-5 text-green-500" />
     """
   end
 
-  defp status_badge(%{status: :configured} = assigns) do
+  defp status_icon(%{status: :configured} = assigns) do
     ~H"""
-    <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-      Configured
-    </span>
+    <.icon name="hero-check-circle" class="h-5 w-5 text-green-500" />
     """
   end
 
-  defp status_badge(assigns) do
+  defp status_icon(%{status: :disabled} = assigns) do
     ~H"""
-    <span class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
-      Not Set
-    </span>
+    <.icon name="hero-x-circle" class="h-5 w-5 text-zinc-400" />
+    """
+  end
+
+  defp status_icon(assigns) do
+    ~H"""
+    <.icon name="hero-x-circle" class="h-5 w-5 text-red-400" />
     """
   end
 
   # --- Card action buttons ---
 
   # Configured or Connected — full-width "Settings" button
-  defp card_actions(%{status: status} = assigns) when status in [:connected, :configured] do
+  defp card_actions(%{status: status} = assigns) when status in [:connected, :configured, :disabled] do
     ~H"""
     <.link
       navigate={~p"/settings/apps/#{@app.id}"}
       class="sa-btn secondary"
-      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none;"
+      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none; box-sizing: border-box;"
     >
       <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Settings
     </.link>
@@ -201,7 +198,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
     <.link
       navigate={~p"/settings/apps/#{@app.id}"}
       class="sa-btn"
-      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none;"
+      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none; box-sizing: border-box;"
     >
       <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Set Up
     </.link>
