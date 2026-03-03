@@ -36,7 +36,7 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
         </div>
       </header>
 
-      <details class="sa-accordion" style="margin-top: 1.5rem;" open>
+      <details class="sa-accordion" style="margin-top: 1.5rem;">
         <summary>Setup Instructions</summary>
         <div class="sa-accordion-body">
           <ol class="sa-setup-steps">
