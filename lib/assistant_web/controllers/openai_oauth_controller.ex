@@ -294,37 +294,8 @@ defmodule AssistantWeb.OpenAIOAuthController do
     end
   end
 
-  defp ensure_linked_user(%{user_id: user_id}) when not is_nil(user_id), do: {:ok, user_id}
-
   defp ensure_linked_user(settings_user) do
-    user_attrs = %{
-      external_id: "settings:#{settings_user.id}",
-      channel: "settings",
-      display_name: settings_user.display_name
-    }
-
-    case %Assistant.Schemas.User{}
-         |> Assistant.Schemas.User.changeset(user_attrs)
-         |> Assistant.Repo.insert() do
-      {:ok, user} ->
-        link_settings_user(settings_user, user.id)
-
-      {:error, changeset} ->
-        case Assistant.Repo.get_by(Assistant.Schemas.User, external_id: user_attrs.external_id) do
-          nil -> {:error, changeset}
-          user -> link_settings_user(settings_user, user.id)
-        end
-    end
-  end
-
-  defp link_settings_user(settings_user, user_id) do
-    settings_user
-    |> Ecto.Changeset.change(user_id: user_id)
-    |> Assistant.Repo.update()
-    |> case do
-      {:ok, _} -> {:ok, user_id}
-      {:error, changeset} -> {:error, changeset}
-    end
+    AssistantWeb.SettingsLive.Context.ensure_linked_user(settings_user)
   end
 
   defp clear_oauth_session(conn) do

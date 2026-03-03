@@ -7,6 +7,7 @@ defmodule Assistant.Accounts do
   alias Assistant.Repo
 
   alias Assistant.Accounts.{
+    CrossChannelBridge,
     SettingsUser,
     SettingsUserAllowlistEntry,
     SettingsUserNotifier,
@@ -1036,6 +1037,9 @@ defmodule Assistant.Accounts do
 
   Returns the decrypted API key string, or nil if the user has no linked
   settings_user or no OpenRouter key stored.
+
+  Fallback chain: direct lookup by user_id → single-admin fallback
+  (see `CrossChannelBridge` for why this fallback exists).
   """
   @spec openrouter_key_for_user(String.t()) :: String.t() | nil
   def openrouter_key_for_user(user_id) when is_binary(user_id) do
@@ -1046,7 +1050,15 @@ defmodule Assistant.Accounts do
                select: su.openrouter_api_key
              )
            ) do
-        nil -> nil
+        nil ->
+          # Direct lookup failed — try single-admin fallback
+          case CrossChannelBridge.sole_key(:openrouter_api_key) do
+            nil -> nil
+            key ->
+              CrossChannelBridge.log_fallback(user_id, :openrouter_api_key)
+              key
+          end
+
         "" -> nil
         key when is_binary(key) -> key
       end
@@ -1119,6 +1131,9 @@ defmodule Assistant.Accounts do
 
   Returns the decrypted API key string, or nil if the user has no linked
   settings_user or no OpenAI key stored.
+
+  Fallback chain: direct lookup by user_id → single-admin fallback
+  (see `CrossChannelBridge` for why this fallback exists).
   """
   @spec openai_key_for_user(String.t()) :: String.t() | nil
   def openai_key_for_user(user_id) when is_binary(user_id) do
@@ -1129,7 +1144,15 @@ defmodule Assistant.Accounts do
                select: su.openai_api_key
              )
            ) do
-        nil -> nil
+        nil ->
+          # Direct lookup failed — try single-admin fallback
+          case CrossChannelBridge.sole_key(:openai_api_key) do
+            nil -> nil
+            key ->
+              CrossChannelBridge.log_fallback(user_id, :openai_api_key)
+              key
+          end
+
         "" -> nil
         key when is_binary(key) -> key
       end
@@ -1149,29 +1172,45 @@ defmodule Assistant.Accounts do
     - `:refresh_token` — OAuth refresh token (oauth mode only)
     - `:account_id` — ChatGPT account/org id (oauth mode only)
     - `:expires_at` — UTC expiry timestamp when available
+
+  Fallback chain: direct lookup by user_id → single-admin fallback
+  (see `CrossChannelBridge` for why this fallback exists).
   """
   @spec openai_credentials_for_user(String.t()) :: map() | nil
   def openai_credentials_for_user(user_id) when is_binary(user_id) do
-    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id),
-         %{} = row <-
-           Repo.one(
-             from(su in SettingsUser,
-               where: su.user_id == ^cast_user_id,
-               select: %{
-                 auth_type: su.openai_auth_type,
-                 access_token: su.openai_api_key,
-                 refresh_token: su.openai_refresh_token,
-                 account_id: su.openai_account_id,
-                 expires_at: su.openai_expires_at
-               }
-             )
-           ),
-         true <- is_binary(row.access_token) and row.access_token != "" do
-      row
+    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id) do
+      row =
+        Repo.one(
+          from(su in SettingsUser,
+            where: su.user_id == ^cast_user_id,
+            select: %{
+              auth_type: su.openai_auth_type,
+              access_token: su.openai_api_key,
+              refresh_token: su.openai_refresh_token,
+              account_id: su.openai_account_id,
+              expires_at: su.openai_expires_at
+            }
+          )
+        )
+
+      cond do
+        is_map(row) and is_binary(row.access_token) and row.access_token != "" ->
+          row
+
+        true ->
+          # Direct lookup failed — try single-admin fallback
+          case CrossChannelBridge.sole_credentials(:openai) do
+            nil -> nil
+            creds ->
+              CrossChannelBridge.log_fallback(user_id, :openai_credentials)
+              creds
+          end
+      end
     else
-      _ -> nil
+      :error -> nil
     end
   end
 
   def openai_credentials_for_user(_), do: nil
+
 end
