@@ -302,7 +302,7 @@ defmodule Assistant.Sync.StateStore do
       |> where([s], s.user_id == ^user_id)
       |> where_drive_id(drive_id)
       |> where([s], s.folder_id == ^folder_id or is_nil(s.folder_id))
-      |> order_by([s], [desc_nulls_last: s.folder_id])
+      |> order_by([s], desc_nulls_last: s.folder_id)
       |> limit(1)
 
     Repo.one(query)
@@ -357,8 +357,7 @@ defmodule Assistant.Sync.StateStore do
 
   defp conflict_target_for_scope(%{drive_id: _, folder_id: nil}),
     do:
-      {:unsafe_fragment,
-       ~s|(user_id, drive_id) WHERE drive_id IS NOT NULL AND folder_id IS NULL|}
+      {:unsafe_fragment, ~s|(user_id, drive_id) WHERE drive_id IS NOT NULL AND folder_id IS NULL|}
 
   defp conflict_target_for_scope(%{drive_id: _, folder_id: _}),
     do:

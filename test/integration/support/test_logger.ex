@@ -189,7 +189,8 @@ defmodule Assistant.Integration.TestLogger do
         "    #{@yellow}#{name}#{@reset}(#{args_str})"
       end)
 
-    content_line = if content, do: "  #{@bold}Content:#{@reset} #{truncate(content, 200)}\n", else: ""
+    content_line =
+      if content, do: "  #{@bold}Content:#{@reset} #{truncate(content, 200)}\n", else: ""
 
     content_line <>
       "  #{@bold}Tool Calls:#{@reset} (#{length(tool_calls)})\n" <>

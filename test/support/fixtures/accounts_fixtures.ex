@@ -41,6 +41,14 @@ defmodule Assistant.AccountsFixtures do
     settings_user
   end
 
+  def admin_settings_user_fixture(attrs \\ %{}) do
+    settings_user = settings_user_fixture(attrs)
+
+    settings_user
+    |> Ecto.Changeset.change(is_admin: true)
+    |> Assistant.Repo.update!()
+  end
+
   def settings_user_scope_fixture do
     settings_user = settings_user_fixture()
     settings_user_scope_fixture(settings_user)

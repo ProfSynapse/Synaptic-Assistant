@@ -64,10 +64,11 @@ defmodule Assistant.Integrations.Google.ChatAuthTest do
     end
 
     test "returns auth error when PEM is malformed" do
-      json = Jason.encode!(%{
-        "client_email" => "bot@project.iam.gserviceaccount.com",
-        "private_key" => "this-is-not-a-pem"
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => "bot@project.iam.gserviceaccount.com",
+          "private_key" => "this-is-not-a-pem"
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
 
@@ -173,9 +174,10 @@ defmodule Assistant.Integrations.Google.ChatAuthTest do
     test "thread_name option does not affect auth error propagation" do
       Application.delete_env(:assistant, :google_service_account_json)
 
-      result = Chat.send_message("spaces/AAAA_BBBB", "Hello",
-        thread_name: "spaces/AAAA_BBBB/threads/CCCC"
-      )
+      result =
+        Chat.send_message("spaces/AAAA_BBBB", "Hello",
+          thread_name: "spaces/AAAA_BBBB/threads/CCCC"
+        )
 
       assert {:error, :not_configured} = result
     end

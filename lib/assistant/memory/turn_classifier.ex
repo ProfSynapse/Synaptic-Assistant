@@ -97,10 +97,14 @@ defmodule Assistant.Memory.TurnClassifier do
          }},
         state
       ) do
-    # Run classification asynchronously to avoid blocking the GenServer
-    Task.Supervisor.start_child(Assistant.Skills.TaskSupervisor, fn ->
-      classify_and_dispatch(conversation_id, user_id, user_message, assistant_response)
-    end)
+    # Run classification asynchronously to avoid blocking the GenServer.
+    # Skip in test/sandbox mode — the spawned task outlives the sandbox owner,
+    # causing "owner exited" DB connection errors that poison the pool.
+    unless sandbox_mode?() do
+      Task.Supervisor.start_child(Assistant.Skills.TaskSupervisor, fn ->
+        classify_and_dispatch(conversation_id, user_id, user_message, assistant_response)
+      end)
+    end
 
     {:noreply, state}
   end
@@ -110,6 +114,13 @@ defmodule Assistant.Memory.TurnClassifier do
   end
 
   # --- Internal ---
+
+  # Returns true when the Repo is running in SQL Sandbox mode (test env).
+  # Used to skip async classification tasks that would outlive the sandbox
+  # owner and cause cascading DB connection failures.
+  defp sandbox_mode? do
+    Application.get_env(:assistant, Assistant.Repo)[:pool] == Ecto.Adapters.SQL.Sandbox
+  end
 
   defp classify_and_dispatch(conversation_id, user_id, user_message, assistant_response) do
     prompt =

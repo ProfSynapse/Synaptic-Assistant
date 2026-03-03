@@ -152,7 +152,12 @@ defmodule Assistant.Analytics.TrajectoryExporter do
   @spec trajectory_path(String.t(), String.t()) :: String.t()
   def trajectory_path(user_id, conversation_id) do
     base = Application.get_env(:assistant, :trajectories_base_path, @default_base_path)
-    Path.join([base, sanitize_path_segment(user_id), "#{sanitize_path_segment(conversation_id)}.jsonl"])
+
+    Path.join([
+      base,
+      sanitize_path_segment(user_id),
+      "#{sanitize_path_segment(conversation_id)}.jsonl"
+    ])
   end
 
   defp sanitize_path_segment(value) when is_binary(value) do

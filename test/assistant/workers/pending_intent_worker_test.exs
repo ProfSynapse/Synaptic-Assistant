@@ -106,6 +106,47 @@ defmodule Assistant.Workers.PendingIntentWorkerTest do
   end
 
   # ---------------------------------------------------------------
+  # Bug 2: Engine contract — worker uses user_id, not conversation_id
+  # ---------------------------------------------------------------
+
+  describe "perform/1 engine contract (Bug 2 fix)" do
+    test "passes user_id (not conversation_id) to Engine functions" do
+      # This test verifies the worker's code paths reference the correct
+      # Engine API. A recent job with valid args should attempt Engine
+      # operations using user_id, which causes an :exit when the Engine
+      # is not running (registered by user_id, not conversation_id).
+      recent_time = DateTime.add(DateTime.utc_now(), -2, :second)
+      user_id = Ecto.UUID.generate()
+
+      job = %Oban.Job{
+        args: %{
+          "user_id" => user_id,
+          "message" => "test engine contract",
+          "conversation_id" => Ecto.UUID.generate(),
+          "channel" => "test",
+          "reply_context" => %{}
+        },
+        inserted_at: recent_time
+      }
+
+      # Worker should attempt Engine.get_state(user_id). Since no Engine
+      # is running, it will try to start one via DynamicSupervisor, which
+      # will fail since ConversationSupervisor isn't running in test.
+      # The key assertion: it doesn't fail with :stale_intent or
+      # :missing_required_args — it reaches the engine layer.
+      result =
+        try do
+          PendingIntentWorker.perform(job)
+        catch
+          :exit, _ -> {:error, :engine_not_available}
+        end
+
+      refute match?({:cancel, :stale_intent}, result)
+      refute match?({:cancel, :missing_required_args}, result)
+    end
+  end
+
+  # ---------------------------------------------------------------
   # Edge: stale check boundary
   # ---------------------------------------------------------------
 

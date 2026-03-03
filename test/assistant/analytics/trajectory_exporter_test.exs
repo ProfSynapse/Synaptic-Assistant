@@ -85,8 +85,8 @@ defmodule Assistant.Analytics.TrajectoryExporterTest do
     test "sanitizes unsafe path segments" do
       path = TrajectoryExporter.trajectory_path("../evil", "../../etc/passwd")
       refute path =~ ".."
-      refute path =~ "/"
-      # Should replace slashes/dots with underscores
+      # Path.join adds forward slashes — that's expected.
+      # Sanitization removes ../ traversal and absolute paths, not path separators.
       assert path =~ "___evil"
     end
   end

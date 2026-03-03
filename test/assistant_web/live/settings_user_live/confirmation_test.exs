@@ -7,6 +7,8 @@ defmodule AssistantWeb.SettingsUserLive.ConfirmationTest do
   alias Assistant.Accounts
 
   setup do
+    admin_settings_user_fixture()
+
     %{
       unconfirmed_settings_user: unconfirmed_settings_user_fixture(),
       confirmed_settings_user: settings_user_fixture()
@@ -24,7 +26,7 @@ defmodule AssistantWeb.SettingsUserLive.ConfirmationTest do
         end)
 
       {:ok, _lv, html} = live(conn, ~p"/settings_users/log-in/#{token}")
-      assert html =~ "Confirm and stay logged in"
+      assert html =~ "Confirm and Stay Signed In"
     end
 
     test "renders login page for confirmed settings_user", %{
@@ -38,7 +40,7 @@ defmodule AssistantWeb.SettingsUserLive.ConfirmationTest do
 
       {:ok, _lv, html} = live(conn, ~p"/settings_users/log-in/#{token}")
       refute html =~ "Confirm my account"
-      assert html =~ "Keep me logged in on this device"
+      assert html =~ "Keep Me Signed In"
     end
 
     test "renders login page for already logged in settings_user", %{
@@ -54,7 +56,7 @@ defmodule AssistantWeb.SettingsUserLive.ConfirmationTest do
 
       {:ok, _lv, html} = live(conn, ~p"/settings_users/log-in/#{token}")
       refute html =~ "Confirm my account"
-      assert html =~ "Log in"
+      assert html =~ "Continue"
     end
 
     test "confirms the given token once", %{conn: conn, unconfirmed_settings_user: settings_user} do
@@ -71,7 +73,7 @@ defmodule AssistantWeb.SettingsUserLive.ConfirmationTest do
       conn = follow_trigger_action(form, conn)
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~
-               "SettingsUser confirmed successfully"
+               "Settings user confirmed successfully"
 
       assert Accounts.get_settings_user!(settings_user.id).confirmed_at
       # we are logged in now

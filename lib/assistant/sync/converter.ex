@@ -88,7 +88,9 @@ defmodule Assistant.Sync.Converter do
         {:ok, {content, "md"}}
 
       {:error, _} ->
-        Logger.warning("Converter: Docs markdown export failed for #{file_id}, falling back to plain text")
+        Logger.warning(
+          "Converter: Docs markdown export failed for #{file_id}, falling back to plain text"
+        )
 
         case export_file(conn, file_id, "text/plain") do
           {:ok, content} -> {:ok, {content, "txt"}}

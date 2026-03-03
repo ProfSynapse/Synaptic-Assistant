@@ -11,14 +11,32 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
   alias Assistant.Skills.Tasks.{Create, Search, Get, Update, Delete}
   alias Assistant.Skills.Result
   alias Assistant.TaskManager.Queries
+  alias Assistant.Schemas.{User, Conversation}
 
   @handlers [Create, Search, Get, Update, Delete]
 
-  defp build_context do
+  setup do
+    user =
+      %User{}
+      |> User.changeset(%{
+        external_id: "tasks-test-#{System.unique_integer([:positive])}",
+        channel: "test"
+      })
+      |> Repo.insert!()
+
+    conversation =
+      %Conversation{}
+      |> Conversation.changeset(%{channel: "test", user_id: user.id})
+      |> Repo.insert!()
+
+    %{user: user, conversation: conversation}
+  end
+
+  defp build_context(%{user: user, conversation: conversation}) do
     %Context{
-      conversation_id: Ecto.UUID.generate(),
+      conversation_id: conversation.id,
       execution_id: Ecto.UUID.generate(),
-      user_id: Ecto.UUID.generate()
+      user_id: user.id
     }
   end
 
@@ -36,6 +54,8 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
 
     test "all handlers export execute/2" do
       for handler <- @handlers do
+        Code.ensure_loaded!(handler)
+
         assert function_exported?(handler, :execute, 2),
                "#{inspect(handler)} should export execute/2"
       end
@@ -47,14 +67,14 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
   # ---------------------------------------------------------------
 
   describe "Create handler" do
-    test "returns error for missing --title flag" do
-      ctx = build_context()
+    test "returns error for missing --title flag", setup_ctx do
+      ctx = build_context(setup_ctx)
       assert {:ok, %Result{status: :error, content: content}} = Create.execute(%{}, ctx)
       assert content =~ "Missing required flag: --title"
     end
 
-    test "creates task with valid title" do
-      ctx = build_context()
+    test "creates task with valid title", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       assert {:ok, %Result{status: :ok, side_effects: [:task_created]} = result} =
                Create.execute(%{"title" => "Test task from handler"}, ctx)
@@ -64,8 +84,8 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert result.metadata[:short_id] != nil
     end
 
-    test "creates task with all optional flags" do
-      ctx = build_context()
+    test "creates task with all optional flags", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       flags = %{
         "title" => "Full task",
@@ -78,8 +98,8 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert content =~ "Full task"
     end
 
-    test "handles invalid due date gracefully" do
-      ctx = build_context()
+    test "handles invalid due date gracefully", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       flags = %{
         "title" => "Task with bad date",
@@ -96,8 +116,8 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
   # ---------------------------------------------------------------
 
   describe "Search handler" do
-    test "returns empty results for no matching tasks" do
-      ctx = build_context()
+    test "returns empty results for no matching tasks", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       assert {:ok, %Result{status: :ok, content: content}} =
                Search.execute(%{}, ctx)
@@ -106,11 +126,16 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert is_binary(content)
     end
 
-    test "finds tasks by status filter" do
-      ctx = build_context()
+    test "finds tasks by status filter", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       # Create a task first
-      {:ok, _task} = Queries.create_task(%{title: "Searchable task", status: "todo"})
+      {:ok, _task} =
+        Queries.create_task(%{
+          title: "Searchable task",
+          status: "todo",
+          creator_id: setup_ctx.user.id
+        })
 
       assert {:ok, %Result{status: :ok, metadata: %{count: count}}} =
                Search.execute(%{"status" => "todo"}, ctx)
@@ -118,8 +143,8 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert count >= 1
     end
 
-    test "returns metadata with count" do
-      ctx = build_context()
+    test "returns metadata with count", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       assert {:ok, %Result{status: :ok, metadata: metadata}} =
                Search.execute(%{}, ctx)
@@ -133,15 +158,15 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
   # ---------------------------------------------------------------
 
   describe "Get handler" do
-    test "returns error for missing task ID" do
-      ctx = build_context()
+    test "returns error for missing task ID", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       assert {:ok, %Result{status: :error, content: content}} = Get.execute(%{}, ctx)
       assert content =~ "Missing required argument"
     end
 
-    test "returns error for non-existent task" do
-      ctx = build_context()
+    test "returns error for non-existent task", setup_ctx do
+      ctx = build_context(setup_ctx)
       fake_id = Ecto.UUID.generate()
 
       assert {:ok, %Result{status: :error, content: content}} =
@@ -150,9 +175,9 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert content =~ "Task not found"
     end
 
-    test "returns task details for valid UUID" do
-      ctx = build_context()
-      {:ok, task} = Queries.create_task(%{title: "Gettable task"})
+    test "returns task details for valid UUID", setup_ctx do
+      ctx = build_context(setup_ctx)
+      {:ok, task} = Queries.create_task(%{title: "Gettable task", creator_id: setup_ctx.user.id})
 
       assert {:ok, %Result{status: :ok, content: content, metadata: metadata}} =
                Get.execute(%{"id" => task.id}, ctx)
@@ -162,9 +187,11 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert metadata[:short_id] == task.short_id
     end
 
-    test "accepts short_id via _positional flag" do
-      ctx = build_context()
-      {:ok, task} = Queries.create_task(%{title: "Positional task"})
+    test "accepts short_id via _positional flag", setup_ctx do
+      ctx = build_context(setup_ctx)
+
+      {:ok, task} =
+        Queries.create_task(%{title: "Positional task", creator_id: setup_ctx.user.id})
 
       assert {:ok, %Result{status: :ok, content: content}} =
                Get.execute(%{"_positional" => task.short_id}, ctx)
@@ -178,15 +205,15 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
   # ---------------------------------------------------------------
 
   describe "Update handler" do
-    test "returns error for missing task ID" do
-      ctx = build_context()
+    test "returns error for missing task ID", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       assert {:ok, %Result{status: :error, content: content}} = Update.execute(%{}, ctx)
       assert content =~ "Missing required argument: task ID"
     end
 
-    test "returns error for non-existent task" do
-      ctx = build_context()
+    test "returns error for non-existent task", setup_ctx do
+      ctx = build_context(setup_ctx)
       fake_id = Ecto.UUID.generate()
 
       assert {:ok, %Result{status: :error, content: content}} =
@@ -195,9 +222,9 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert content =~ "Task not found"
     end
 
-    test "returns error when no fields to update" do
-      ctx = build_context()
-      {:ok, task} = Queries.create_task(%{title: "No-change task"})
+    test "returns error when no fields to update", setup_ctx do
+      ctx = build_context(setup_ctx)
+      {:ok, task} = Queries.create_task(%{title: "No-change task", creator_id: setup_ctx.user.id})
 
       assert {:ok, %Result{status: :error, content: content}} =
                Update.execute(%{"id" => task.id}, ctx)
@@ -205,9 +232,9 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert content =~ "No fields to update"
     end
 
-    test "updates task status successfully" do
-      ctx = build_context()
-      {:ok, task} = Queries.create_task(%{title: "Updatable task"})
+    test "updates task status successfully", setup_ctx do
+      ctx = build_context(setup_ctx)
+      {:ok, task} = Queries.create_task(%{title: "Updatable task", creator_id: setup_ctx.user.id})
 
       assert {:ok, %Result{status: :ok, side_effects: [:task_updated]} = result} =
                Update.execute(%{"id" => task.id, "status" => "in_progress"}, ctx)
@@ -222,15 +249,15 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
   # ---------------------------------------------------------------
 
   describe "Delete handler" do
-    test "returns error for missing task ID" do
-      ctx = build_context()
+    test "returns error for missing task ID", setup_ctx do
+      ctx = build_context(setup_ctx)
 
       assert {:ok, %Result{status: :error, content: content}} = Delete.execute(%{}, ctx)
       assert content =~ "Missing required argument: task ID"
     end
 
-    test "returns error for non-existent task" do
-      ctx = build_context()
+    test "returns error for non-existent task", setup_ctx do
+      ctx = build_context(setup_ctx)
       fake_id = Ecto.UUID.generate()
 
       assert {:ok, %Result{status: :error, content: content}} =
@@ -239,9 +266,9 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert content =~ "Task not found"
     end
 
-    test "soft-deletes (archives) a task" do
-      ctx = build_context()
-      {:ok, task} = Queries.create_task(%{title: "Deletable task"})
+    test "soft-deletes (archives) a task", setup_ctx do
+      ctx = build_context(setup_ctx)
+      {:ok, task} = Queries.create_task(%{title: "Deletable task", creator_id: setup_ctx.user.id})
 
       assert {:ok, %Result{status: :ok, side_effects: [:task_archived]} = result} =
                Delete.execute(%{"id" => task.id}, ctx)
@@ -251,9 +278,11 @@ defmodule Assistant.Skills.Tasks.HandlersTest do
       assert result.metadata[:task_id] == task.id
     end
 
-    test "uses custom reason when provided" do
-      ctx = build_context()
-      {:ok, task} = Queries.create_task(%{title: "Custom reason task"})
+    test "uses custom reason when provided", setup_ctx do
+      ctx = build_context(setup_ctx)
+
+      {:ok, task} =
+        Queries.create_task(%{title: "Custom reason task", creator_id: setup_ctx.user.id})
 
       assert {:ok, %Result{status: :ok, content: content}} =
                Delete.execute(%{"id" => task.id, "reason" => "superseded"}, ctx)

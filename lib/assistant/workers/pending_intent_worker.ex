@@ -108,16 +108,18 @@ defmodule Assistant.Workers.PendingIntentWorker do
       mode: mode
     )
 
-    # Ensure the engine is running for this conversation
-    case ensure_engine_started(conversation_id, user_id, channel, mode) do
+    # Ensure the engine is running for this user (Engine is keyed by user_id,
+    # not conversation_id — conversation_id is passed via opts).
+    case ensure_engine_started(user_id, conversation_id, channel, mode) do
       :ok ->
-        case Engine.send_message(conversation_id, message) do
+        case Engine.send_message(user_id, message) do
           {:ok, response_text} ->
             deliver_reply(channel, response_text, reply_context)
             :ok
 
           {:error, reason} ->
             Logger.error("PendingIntentWorker: engine processing failed",
+              user_id: user_id,
               conversation_id: conversation_id,
               reason: inspect(reason)
             )
@@ -127,6 +129,7 @@ defmodule Assistant.Workers.PendingIntentWorker do
 
       {:error, reason} ->
         Logger.error("PendingIntentWorker: failed to start engine",
+          user_id: user_id,
           conversation_id: conversation_id,
           reason: inspect(reason)
         )
@@ -135,21 +138,21 @@ defmodule Assistant.Workers.PendingIntentWorker do
     end
   end
 
-  defp ensure_engine_started(conversation_id, user_id, channel, mode) do
-    case Engine.get_state(conversation_id) do
+  defp ensure_engine_started(user_id, conversation_id, channel, mode) do
+    case Engine.get_state(user_id) do
       {:ok, _state} ->
         :ok
 
       {:error, :not_found} ->
         opts = [
-          user_id: user_id,
+          conversation_id: conversation_id,
           channel: channel || "google_chat",
           mode: mode
         ]
 
         child_spec = %{
-          id: conversation_id,
-          start: {Engine, :start_link, [conversation_id, opts]},
+          id: user_id,
+          start: {Engine, :start_link, [user_id, opts]},
           restart: :temporary
         }
 

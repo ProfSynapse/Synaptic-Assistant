@@ -76,7 +76,10 @@ defmodule Assistant.Integrations.Telegram.ClientTest do
       Bypass.expect_once(bypass, "POST", "/bot#{@bot_token}/sendMessage", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(400, Jason.encode!(%{"ok" => false, "description" => "Bad Request: chat not found"}))
+        |> Plug.Conn.resp(
+          400,
+          Jason.encode!(%{"ok" => false, "description" => "Bad Request: chat not found"})
+        )
       end)
 
       assert {:error, {:api_error, 400, "Bad Request: chat not found"}} =
@@ -87,7 +90,10 @@ defmodule Assistant.Integrations.Telegram.ClientTest do
       Bypass.expect_once(bypass, "POST", "/bot#{@bot_token}/sendMessage", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(429, Jason.encode!(%{"ok" => false, "description" => "Too Many Requests: retry after 30"}))
+        |> Plug.Conn.resp(
+          429,
+          Jason.encode!(%{"ok" => false, "description" => "Too Many Requests: retry after 30"})
+        )
       end)
 
       assert {:error, {:api_error, 429, "Too Many Requests: retry after 30"}} =
@@ -159,10 +165,13 @@ defmodule Assistant.Integrations.Telegram.ClientTest do
       Bypass.expect_once(bypass, "GET", "/bot#{@bot_token}/getMe", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{
-          "ok" => true,
-          "result" => %{"id" => 123, "is_bot" => true, "first_name" => "TestBot"}
-        }))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "ok" => true,
+            "result" => %{"id" => 123, "is_bot" => true, "first_name" => "TestBot"}
+          })
+        )
       end)
 
       assert {:ok, %{"id" => 123, "is_bot" => true}} = Client.get_me()
@@ -187,7 +196,8 @@ defmodule Assistant.Integrations.Telegram.ClientTest do
         |> Plug.Conn.resp(200, Jason.encode!(%{"ok" => true, "result" => true}))
       end)
 
-      assert {:ok, true} = Client.set_webhook("https://example.com/webhook", secret_token: "my-secret")
+      assert {:ok, true} =
+               Client.set_webhook("https://example.com/webhook", secret_token: "my-secret")
     end
   end
 

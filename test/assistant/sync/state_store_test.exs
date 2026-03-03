@@ -125,21 +125,28 @@ defmodule Assistant.Sync.StateStoreTest do
     end
 
     test "list_cursors returns all cursors for user", %{user: user} do
-      {:ok, _} = StateStore.upsert_cursor(%{user_id: user.id, drive_id: nil, start_page_token: "t1"})
-      {:ok, _} = StateStore.upsert_cursor(%{user_id: user.id, drive_id: "d1", start_page_token: "t2"})
+      {:ok, _} =
+        StateStore.upsert_cursor(%{user_id: user.id, drive_id: nil, start_page_token: "t1"})
+
+      {:ok, _} =
+        StateStore.upsert_cursor(%{user_id: user.id, drive_id: "d1", start_page_token: "t2"})
 
       cursors = StateStore.list_cursors(user.id)
       assert length(cursors) == 2
     end
 
     test "delete_cursor removes cursor", %{user: user} do
-      {:ok, _} = StateStore.upsert_cursor(%{user_id: user.id, drive_id: nil, start_page_token: "t"})
+      {:ok, _} =
+        StateStore.upsert_cursor(%{user_id: user.id, drive_id: nil, start_page_token: "t"})
+
       assert {1, _} = StateStore.delete_cursor(user.id, nil)
       assert nil == StateStore.get_cursor(user.id, nil)
     end
 
     test "delete_cursor with non-nil drive_id", %{user: user} do
-      {:ok, _} = StateStore.upsert_cursor(%{user_id: user.id, drive_id: "d1", start_page_token: "t"})
+      {:ok, _} =
+        StateStore.upsert_cursor(%{user_id: user.id, drive_id: "d1", start_page_token: "t"})
+
       assert {1, _} = StateStore.delete_cursor(user.id, "d1")
       assert nil == StateStore.get_cursor(user.id, "d1")
     end
@@ -278,7 +285,12 @@ defmodule Assistant.Sync.StateStoreTest do
     end
 
     test "count_synced_files_by_status returns grouped counts", %{user: user} do
-      for {id, status} <- [{"c1", "synced"}, {"c2", "synced"}, {"c3", "conflict"}, {"c4", "error"}] do
+      for {id, status} <- [
+            {"c1", "synced"},
+            {"c2", "synced"},
+            {"c3", "conflict"},
+            {"c4", "error"}
+          ] do
         StateStore.create_synced_file(%{
           user_id: user.id,
           drive_file_id: id,
@@ -373,8 +385,17 @@ defmodule Assistant.Sync.StateStoreTest do
           sync_status: "synced"
         })
 
-      StateStore.create_history_entry(%{synced_file_id: file.id, operation: "download", details: %{"info" => "f1"}})
-      StateStore.create_history_entry(%{synced_file_id: file2.id, operation: "upload", details: %{"info" => "f2"}})
+      StateStore.create_history_entry(%{
+        synced_file_id: file.id,
+        operation: "download",
+        details: %{"info" => "f1"}
+      })
+
+      StateStore.create_history_entry(%{
+        synced_file_id: file2.id,
+        operation: "upload",
+        details: %{"info" => "f2"}
+      })
 
       history = StateStore.list_user_history(user.id)
       assert length(history) == 2
@@ -385,7 +406,8 @@ defmodule Assistant.Sync.StateStoreTest do
     end
 
     test "history entries have all valid operations", %{synced_file: file} do
-      valid_ops = ~w(download upload conflict_detect conflict_resolve delete_local trash untrash error)
+      valid_ops =
+        ~w(download upload conflict_detect conflict_resolve delete_local trash untrash error)
 
       for op <- valid_ops do
         assert {:ok, _} =
@@ -485,8 +507,19 @@ defmodule Assistant.Sync.StateStoreTest do
     end
 
     test "list_scopes filters by drive_id", %{user: user} do
-      StateStore.upsert_scope(%{user_id: user.id, drive_id: nil, folder_id: nil, folder_name: "P"})
-      StateStore.upsert_scope(%{user_id: user.id, drive_id: "d1", folder_id: nil, folder_name: "S"})
+      StateStore.upsert_scope(%{
+        user_id: user.id,
+        drive_id: nil,
+        folder_id: nil,
+        folder_name: "P"
+      })
+
+      StateStore.upsert_scope(%{
+        user_id: user.id,
+        drive_id: "d1",
+        folder_id: nil,
+        folder_name: "S"
+      })
 
       personal = StateStore.list_scopes(user.id, drive_id: :personal)
       assert length(personal) == 1

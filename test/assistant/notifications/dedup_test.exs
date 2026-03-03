@@ -10,12 +10,12 @@ defmodule Assistant.Notifications.DedupTest do
   alias Assistant.Notifications.Dedup
 
   setup do
-    # Stop the Router GenServer so it relinquishes ownership of the :notification_dedup ETS table.
-    # With :protected access, only the table owner can write. By stopping the Router and
-    # re-creating the table here, the test process becomes the owner for the duration of the test.
-    case Process.whereis(Assistant.Notifications.Router) do
-      nil -> :ok
-      pid -> GenServer.stop(pid, :normal, 5000)
+    # Detach Router from the supervisor to prevent restart cascades.
+    # GenServer.stop triggers supervisor auto-restart; repeated stops across
+    # tests exceed max_restarts and crash the entire supervision tree.
+    if Process.whereis(Assistant.Notifications.Router) && Process.whereis(Assistant.Supervisor) do
+      Supervisor.terminate_child(Assistant.Supervisor, Assistant.Notifications.Router)
+      Supervisor.delete_child(Assistant.Supervisor, Assistant.Notifications.Router)
     end
 
     # Delete any existing table and create a fresh one owned by the test process.
@@ -32,6 +32,11 @@ defmodule Assistant.Notifications.DedupTest do
         :ets.delete(:notification_dedup)
       rescue
         ArgumentError -> :ok
+      end
+
+      # Restore the supervised Router for other test modules (if supervisor is still alive)
+      if Process.whereis(Assistant.Supervisor) do
+        Supervisor.start_child(Assistant.Supervisor, Assistant.Notifications.Router)
       end
     end)
 

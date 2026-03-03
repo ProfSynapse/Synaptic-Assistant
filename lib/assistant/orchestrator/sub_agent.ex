@@ -588,7 +588,12 @@ defmodule Assistant.Orchestrator.SubAgent do
       }
     else
       execute_tool_calls_inner(
-        tool_calls, context, agent_state, dispatch_params, engine_state, genserver_pid
+        tool_calls,
+        context,
+        agent_state,
+        dispatch_params,
+        engine_state,
+        genserver_pid
       )
     end
   end
@@ -1307,18 +1312,33 @@ defmodule Assistant.Orchestrator.SubAgent do
     base = %{"description" => "(#{skill_name}) #{param.description}"}
 
     case param.type do
-      "string" -> Map.put(base, "type", "string")
-      "integer" -> Map.put(base, "type", "integer")
-      "float" -> Map.put(base, "type", "number")
-      "boolean" -> Map.put(base, "type", "boolean")
-      "flag" -> Map.put(base, "type", "boolean")
+      "string" ->
+        Map.put(base, "type", "string")
+
+      "integer" ->
+        Map.put(base, "type", "integer")
+
+      "float" ->
+        Map.put(base, "type", "number")
+
+      "boolean" ->
+        Map.put(base, "type", "boolean")
+
+      "flag" ->
+        Map.put(base, "type", "boolean")
+
       "array" ->
         items_type = Map.get(param, :items, "string")
+
         base
         |> Map.put("type", "array")
         |> Map.put("items", %{"type" => items_type})
-      "object" -> Map.put(base, "type", "object")
-      _other -> Map.put(base, "type", "string")
+
+      "object" ->
+        Map.put(base, "type", "object")
+
+      _other ->
+        Map.put(base, "type", "string")
     end
   end
 

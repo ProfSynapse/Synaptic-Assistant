@@ -850,7 +850,11 @@ defmodule AssistantWeb.SettingsLive.Events do
     end
   end
 
-  def handle_event("save_admin_user_openrouter_key", %{"user_id" => user_id, "api_key" => api_key}, socket) do
+  def handle_event(
+        "save_admin_user_openrouter_key",
+        %{"user_id" => user_id, "api_key" => api_key},
+        socket
+      ) do
     unless socket.assigns.current_scope.settings_user.is_admin do
       {:noreply, put_flash(socket, :error, "Not authorized.")}
     else

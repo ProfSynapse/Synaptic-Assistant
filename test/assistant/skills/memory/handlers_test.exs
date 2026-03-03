@@ -48,6 +48,8 @@ defmodule Assistant.Skills.Memory.HandlersTest do
 
     test "all handlers export execute/2" do
       for handler <- @handlers do
+        Code.ensure_loaded!(handler)
+
         assert function_exported?(handler, :execute, 2),
                "#{inspect(handler)} should export execute/2"
       end
@@ -62,7 +64,7 @@ defmodule Assistant.Skills.Memory.HandlersTest do
 
     test "creates memory entry with valid content" do
       ctx = build_context()
-      # Insert a test user so the FK constraint passes
+      # Insert a test user and conversation so FK constraints pass
       user = insert_test_user(ctx.user_id)
       # Create a real conversation so source_conversation_id FK succeeds
       {:ok, conv} =
@@ -155,6 +157,14 @@ defmodule Assistant.Skills.Memory.HandlersTest do
       external_id: "skill-test-#{System.unique_integer([:positive])}",
       channel: "test"
     })
+    |> Repo.insert!()
+  end
+
+  defp insert_test_conversation(user_id) do
+    alias Assistant.Schemas.Conversation
+
+    %Conversation{}
+    |> Conversation.changeset(%{channel: "test", user_id: user_id})
     |> Repo.insert!()
   end
 end

@@ -187,6 +187,7 @@ defmodule Assistant.Skills.Loader do
   end
 
   defp parse_parameters(nil), do: []
+
   defp parse_parameters(params) when is_list(params) do
     Enum.map(params, fn param when is_map(param) ->
       base = %{
@@ -203,6 +204,7 @@ defmodule Assistant.Skills.Loader do
       end
     end)
   end
+
   defp parse_parameters(_), do: []
 
   @doc false

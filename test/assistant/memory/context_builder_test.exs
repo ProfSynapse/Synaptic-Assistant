@@ -31,10 +31,12 @@ defmodule Assistant.Memory.ContextBuilderTest do
     end
 
     test "exports build_context/3" do
+      Code.ensure_loaded!(ContextBuilder)
       assert function_exported?(ContextBuilder, :build_context, 3)
     end
 
     test "exports build_context/2 (default opts)" do
+      Code.ensure_loaded!(ContextBuilder)
       assert function_exported?(ContextBuilder, :build_context, 2)
     end
   end

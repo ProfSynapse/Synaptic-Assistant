@@ -33,9 +33,9 @@ defmodule Assistant.Skills.Tasks.Update do
          content: "Missing required argument: task ID"
        }}
     else
-      attrs = build_update_attrs(flags, task_id, context)
+      {user_attrs, full_attrs} = build_update_attrs(flags, task_id, context)
 
-      if attrs == %{} do
+      if user_attrs == %{} do
         {:ok,
          %Result{
            status: :error,
@@ -43,9 +43,9 @@ defmodule Assistant.Skills.Tasks.Update do
              "No fields to update. Provide at least one flag (--status, --priority, --title, etc.)"
          }}
       else
-        case Queries.update_task(task_id, attrs, context.user_id) do
+        case Queries.update_task(task_id, full_attrs, context.user_id) do
           {:ok, task} ->
-            changed_fields = Map.keys(attrs) |> Enum.map_join(", ", &Atom.to_string/1)
+            changed_fields = Map.keys(user_attrs) |> Enum.map_join(", ", &Atom.to_string/1)
 
             {:ok,
              %Result{
@@ -90,23 +90,24 @@ defmodule Assistant.Skills.Tasks.Update do
   end
 
   defp build_update_attrs(flags, task_id, context) do
-    attrs = %{}
+    user_attrs = %{}
 
-    attrs = maybe_put(attrs, :status, flags["status"])
-    attrs = maybe_put(attrs, :priority, flags["priority"])
-    attrs = maybe_put(attrs, :title, flags["title"])
-    attrs = maybe_put(attrs, :description, flags["description"])
-    attrs = maybe_put(attrs, :assignee_id, flags["assign"])
-    attrs = maybe_put(attrs, :due_date, parse_date(flags["due"]))
+    user_attrs = maybe_put(user_attrs, :status, flags["status"])
+    user_attrs = maybe_put(user_attrs, :priority, flags["priority"])
+    user_attrs = maybe_put(user_attrs, :title, flags["title"])
+    user_attrs = maybe_put(user_attrs, :description, flags["description"])
+    user_attrs = maybe_put(user_attrs, :assignee_id, flags["assign"])
+    user_attrs = maybe_put(user_attrs, :due_date, parse_date(flags["due"]))
 
     # Tag modifications: --add-tag and --remove-tag for incremental changes
-    attrs = apply_tag_changes(attrs, flags, task_id, context.user_id)
+    user_attrs = apply_tag_changes(user_attrs, flags, task_id, context.user_id)
 
     # Audit metadata (not stored on the task, but passed to history logging)
-    attrs = maybe_put(attrs, :changed_by_user_id, context.user_id)
-    attrs = maybe_put(attrs, :changed_via_conversation_id, context.conversation_id)
+    full_attrs = user_attrs
+    full_attrs = maybe_put(full_attrs, :changed_by_user_id, context.user_id)
+    full_attrs = maybe_put(full_attrs, :changed_via_conversation_id, context.conversation_id)
 
-    attrs
+    {user_attrs, full_attrs}
   end
 
   defp apply_tag_changes(attrs, flags, task_id, user_id) do

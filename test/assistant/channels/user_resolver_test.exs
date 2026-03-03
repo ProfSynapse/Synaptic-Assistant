@@ -238,6 +238,65 @@ defmodule Assistant.Channels.UserResolverTest do
   end
 
   # ---------------------------------------------------------------
+  # P2: space_id-aware identity resolution
+  # ---------------------------------------------------------------
+
+  describe "resolve/3 — space_id scoping" do
+    test "same external_id in different spaces resolves to different users" do
+      # Create user in workspace A
+      {:ok, %{user_id: user_a}} =
+        UserResolver.resolve(:slack, "U0SAMEUSER", %{space_id: "T0WORKSPACE_A"})
+
+      # Create user in workspace B (same Slack user ID, different space)
+      {:ok, %{user_id: user_b}} =
+        UserResolver.resolve(:slack, "U0SAMEUSER", %{space_id: "T0WORKSPACE_B"})
+
+      refute user_a == user_b
+    end
+
+    test "resolving with space_id finds the correct identity" do
+      # Create two identities for the same external_id in different spaces
+      {:ok, %{user_id: user_a}} =
+        UserResolver.resolve(:slack, "U0LOOKUP", %{space_id: "T0SPACEA"})
+
+      {:ok, %{user_id: user_b}} =
+        UserResolver.resolve(:slack, "U0LOOKUP", %{space_id: "T0SPACEB"})
+
+      # Re-resolve each — should find the correct one
+      {:ok, %{user_id: found_a}} =
+        UserResolver.resolve(:slack, "U0LOOKUP", %{space_id: "T0SPACEA"})
+
+      {:ok, %{user_id: found_b}} =
+        UserResolver.resolve(:slack, "U0LOOKUP", %{space_id: "T0SPACEB"})
+
+      assert found_a == user_a
+      assert found_b == user_b
+    end
+
+    test "nil space_id resolves separately from non-nil space_id" do
+      # Create identity with no space_id (e.g., Telegram — no workspace concept)
+      {:ok, %{user_id: user_nil}} =
+        UserResolver.resolve(:telegram, "777888999")
+
+      # Create identity with space_id (hypothetical — same channel but with space)
+      # This would be a different identity row due to COALESCE(space_id, '')
+      {:ok, %{user_id: user_spaced}} =
+        UserResolver.resolve(:telegram, "777888999", %{space_id: "some_space"})
+
+      refute user_nil == user_spaced
+    end
+
+    test "nil space_id backwards compatible — existing no-space lookups still work" do
+      {:ok, %{user_id: user_id}} = UserResolver.resolve(:telegram, "111000222")
+
+      # Second resolve without space_id should find the same user
+      {:ok, %{user_id: found_id}} = UserResolver.resolve(:telegram, "111000222")
+
+      assert user_id == found_id
+    end
+  end
+
+  # ---------------------------------------------------------------
   # P1: race condition handling
   # ---------------------------------------------------------------
 

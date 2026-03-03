@@ -319,7 +319,8 @@ defmodule Assistant.Memory.TurnClassifierTest do
     test "long text is truncated with ellipsis" do
       text = String.duplicate("a", 2500)
       result = truncate(text, 2000)
-      assert String.length(result) == 2003  # 2000 + "..."
+      # 2000 + "..."
+      assert String.length(result) == 2003
       assert String.ends_with?(result, "...")
     end
 

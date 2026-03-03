@@ -159,7 +159,8 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
   @max_file_size Application.compile_env(:assistant, :sync_max_file_size, 50_000_000)
 
   defp handle_update(user_id, access_token, drive_id, synced_file, change) do
-    with {:ok, {content, format}} <- Converter.convert(access_token, change.file_id, change.mime_type),
+    with {:ok, {content, format}} <-
+           Converter.convert(access_token, change.file_id, change.mime_type),
          :ok <- check_file_size(content, change),
          relative_path <- build_relative_path(change, drive_id, format),
          {:ok, _full_path} <- FileManager.write_file(user_id, relative_path, content) do
@@ -224,7 +225,8 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
 
   defp handle_conflict(user_id, access_token, _drive_id, synced_file, change) do
     # Write the remote version as a conflict copy
-    with {:ok, {content, _format}} <- Converter.convert(access_token, change.file_id, change.mime_type) do
+    with {:ok, {content, _format}} <-
+           Converter.convert(access_token, change.file_id, change.mime_type) do
       conflict_path = ChangeDetector.generate_conflict_path(synced_file.local_path)
 
       case FileManager.write_file(user_id, conflict_path, content) do
@@ -238,7 +240,9 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
           StateStore.create_history_entry(%{
             synced_file_id: synced_file.id,
             operation: "conflict_detect",
-            details: %{"message" => "Conflict with #{change.name}. Remote copy saved to #{conflict_path}"}
+            details: %{
+              "message" => "Conflict with #{change.name}. Remote copy saved to #{conflict_path}"
+            }
           })
 
           # Enqueue conflict notification
@@ -357,8 +361,11 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
     size = byte_size(content)
 
     if size > @max_file_size do
-      Logger.warning("SyncPollWorker: skipping #{change.file_id} (#{change.name}), " <>
-        "file size #{size} bytes exceeds max #{@max_file_size}")
+      Logger.warning(
+        "SyncPollWorker: skipping #{change.file_id} (#{change.name}), " <>
+          "file size #{size} bytes exceeds max #{@max_file_size}"
+      )
+
       {:error, :file_too_large}
     else
       :ok

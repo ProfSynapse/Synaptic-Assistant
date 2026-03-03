@@ -24,6 +24,9 @@ defmodule Assistant.Scheduler.QuantumLoaderTest do
     File.mkdir_p!(tmp_dir)
     Application.put_env(:assistant, :workflows_dir, tmp_dir)
 
+    # Detach QuantumLoader from supervisor to prevent restart cascades
+    detach_from_supervisor(QuantumLoader)
+
     # Ensure the Scheduler (Quantum) is running for add_job/delete_job
     case Process.whereis(Assistant.Scheduler) do
       nil -> {:ok, _} = Assistant.Scheduler.start_link()
@@ -35,7 +38,11 @@ defmodule Assistant.Scheduler.QuantumLoaderTest do
       File.rm_rf!(tmp_dir)
 
       safe_stop(QuantumLoader)
-      safe_stop(Assistant.Scheduler)
+
+      # Restore the supervised QuantumLoader for other test modules (if supervisor is still alive)
+      if Process.whereis(Assistant.Supervisor) do
+        Supervisor.start_child(Assistant.Supervisor, Assistant.Scheduler.QuantumLoader)
+      end
     end)
 
     %{workflows_dir: tmp_dir}
@@ -58,6 +65,17 @@ defmodule Assistant.Scheduler.QuantumLoaderTest do
     """)
 
     path
+  end
+
+  defp detach_from_supervisor(child_id) do
+    case Process.whereis(child_id) do
+      nil ->
+        :ok
+
+      _pid ->
+        Supervisor.terminate_child(Assistant.Supervisor, child_id)
+        Supervisor.delete_child(Assistant.Supervisor, child_id)
+    end
   end
 
   defp safe_stop(name) do

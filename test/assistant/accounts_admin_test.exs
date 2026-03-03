@@ -186,7 +186,8 @@ defmodule Assistant.AccountsAdminTest do
       user = settings_user_fixture()
       {encoded_token, _hashed} = generate_settings_user_magic_link_token(user)
 
-      assert {:ok, {%SettingsUser{}, _}} = Accounts.login_settings_user_by_magic_link(encoded_token)
+      assert {:ok, {%SettingsUser{}, _}} =
+               Accounts.login_settings_user_by_magic_link(encoded_token)
     end
   end
 

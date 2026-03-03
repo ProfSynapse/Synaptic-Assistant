@@ -63,8 +63,11 @@ defmodule Assistant.Sync.Workers.SyncPollWorkerTest do
     test "processes multiple users independently", %{user: user} do
       user2 = insert_test_user("poll-worker-2")
 
-      {:ok, _} = StateStore.upsert_cursor(%{user_id: user.id, drive_id: nil, start_page_token: "t1"})
-      {:ok, _} = StateStore.upsert_cursor(%{user_id: user2.id, drive_id: nil, start_page_token: "t2"})
+      {:ok, _} =
+        StateStore.upsert_cursor(%{user_id: user.id, drive_id: nil, start_page_token: "t1"})
+
+      {:ok, _} =
+        StateStore.upsert_cursor(%{user_id: user2.id, drive_id: nil, start_page_token: "t2"})
 
       # Both users have cursors — both will fail auth but worker should not crash
       assert :ok = SyncPollWorker.perform(%Oban.Job{args: %{}})

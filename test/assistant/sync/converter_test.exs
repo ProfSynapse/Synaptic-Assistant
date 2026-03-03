@@ -25,22 +25,30 @@ defmodule Assistant.Sync.ConverterTest do
 
     test "Google Docs mime type routes to markdown export" do
       # Will fail on API call but proves the Docs path is taken
-      result = Converter.convert("invalid-token", "file-id", "application/vnd.google-apps.document")
+      result =
+        Converter.convert("invalid-token", "file-id", "application/vnd.google-apps.document")
+
       assert {:error, _} = result
     end
 
     test "Google Sheets mime type routes to CSV export" do
-      result = Converter.convert("invalid-token", "file-id", "application/vnd.google-apps.spreadsheet")
+      result =
+        Converter.convert("invalid-token", "file-id", "application/vnd.google-apps.spreadsheet")
+
       assert {:error, _} = result
     end
 
     test "Google Slides mime type routes to Slides API" do
-      result = Converter.convert("invalid-token", "file-id", "application/vnd.google-apps.presentation")
+      result =
+        Converter.convert("invalid-token", "file-id", "application/vnd.google-apps.presentation")
+
       assert {:error, _} = result
     end
 
     test "unknown Google Workspace type routes to plain text export" do
-      result = Converter.convert("invalid-token", "file-id", "application/vnd.google-apps.drawing")
+      result =
+        Converter.convert("invalid-token", "file-id", "application/vnd.google-apps.drawing")
+
       assert {:error, _} = result
     end
 

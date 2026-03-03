@@ -37,8 +37,13 @@ defmodule Assistant.Schemas.IntegrationSetting do
 
   defp validate_known_key(changeset) do
     case get_field(changeset, :key) do
-      nil -> changeset
-      key -> if Registry.known_key?(key), do: changeset, else: add_error(changeset, :key, "is not a recognized integration key")
+      nil ->
+        changeset
+
+      key ->
+        if Registry.known_key?(key),
+          do: changeset,
+          else: add_error(changeset, :key, "is not a recognized integration key")
     end
   end
 end

@@ -84,7 +84,8 @@ defmodule Assistant.Integrations.Google.AuthTest do
       json =
         Jason.encode!(%{
           "client_email" => "bot@project.iam.gserviceaccount.com",
-          "private_key" => "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n"
+          "private_key" =>
+            "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n"
         })
 
       Application.put_env(:assistant, :google_service_account_json, json)

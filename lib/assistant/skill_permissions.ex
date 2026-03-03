@@ -33,6 +33,8 @@ defmodule Assistant.SkillPermissions do
     Map.get(read_overrides(), skill_name, true)
   end
 
+  def enabled?(_), do: false
+
   @spec set_enabled(String.t(), boolean()) :: :ok | {:error, term()}
   def set_enabled(skill_name, enabled) when is_binary(skill_name) and is_boolean(enabled) do
     overrides = read_overrides()

@@ -29,10 +29,22 @@ defmodule Assistant.Config.PromptLoaderTest do
   """
 
   setup do
-    # Stop the app-level PromptLoader if running
-    if Process.whereis(PromptLoader) do
-      GenServer.stop(PromptLoader, :normal, 1_000)
-      Process.sleep(50)
+    # Detach PromptLoader from the supervisor to prevent restart cascades.
+    # GenServer.stop triggers supervisor auto-restart; repeated stops across
+    # describe blocks exceed max_restarts and crash the entire supervision
+    # tree (including Repo). terminate_child + delete_child avoids this.
+    if Process.whereis(PromptLoader) && Process.whereis(Assistant.Supervisor) do
+      Supervisor.terminate_child(Assistant.Supervisor, PromptLoader)
+      Supervisor.delete_child(Assistant.Supervisor, PromptLoader)
+    end
+
+    # Clean up stale ETS table if left over from a previous test
+    if :ets.whereis(:assistant_prompts) != :undefined do
+      try do
+        :ets.delete(:assistant_prompts)
+      rescue
+        ArgumentError -> :ok
+      end
     end
 
     # Create temp directory with test YAML files
@@ -43,7 +55,7 @@ defmodule Assistant.Config.PromptLoaderTest do
     File.write!(Path.join(tmp_dir, "memory.yaml"), @test_sections_yaml)
 
     on_exit(fn ->
-      # Stop the named GenServer if still alive
+      # Stop any test-started PromptLoader instance
       case Process.whereis(PromptLoader) do
         nil -> :ok
         pid -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1_000)
@@ -52,12 +64,18 @@ defmodule Assistant.Config.PromptLoaderTest do
       Process.sleep(10)
       File.rm_rf!(tmp_dir)
 
+      # Clean up ETS table before restarting supervised instance
       if :ets.whereis(:assistant_prompts) != :undefined do
         try do
           :ets.delete(:assistant_prompts)
         rescue
           ArgumentError -> :ok
         end
+      end
+
+      # Restore the supervised PromptLoader for other test modules (if supervisor is still alive)
+      if Process.whereis(Assistant.Supervisor) do
+        Supervisor.start_child(Assistant.Supervisor, Assistant.Config.PromptLoader)
       end
     end)
 
@@ -70,8 +88,7 @@ defmodule Assistant.Config.PromptLoaderTest do
 
   describe "render/2" do
     setup %{prompts_dir: dir} do
-      {:ok, pid} = PromptLoader.start_link(dir: dir)
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+      {:ok, _pid} = PromptLoader.start_link(dir: dir)
       :ok
     end
 
@@ -110,8 +127,7 @@ defmodule Assistant.Config.PromptLoaderTest do
 
   describe "render_section/3" do
     setup %{prompts_dir: dir} do
-      {:ok, pid} = PromptLoader.start_link(dir: dir)
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+      {:ok, _pid} = PromptLoader.start_link(dir: dir)
       :ok
     end
 
@@ -152,8 +168,7 @@ defmodule Assistant.Config.PromptLoaderTest do
 
   describe "get_raw/1" do
     setup %{prompts_dir: dir} do
-      {:ok, pid} = PromptLoader.start_link(dir: dir)
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+      {:ok, _pid} = PromptLoader.start_link(dir: dir)
       :ok
     end
 

@@ -5,6 +5,12 @@ defmodule AssistantWeb.SettingsUserLive.SettingsTest do
   import Phoenix.LiveViewTest
   import Assistant.AccountsFixtures
 
+  # An admin must exist in the DB or pages redirect to /setup
+  setup do
+    admin_settings_user_fixture()
+    :ok
+  end
+
   describe "Settings page" do
     test "renders settings page", %{conn: conn} do
       {:ok, _lv, html} =
@@ -135,13 +141,13 @@ defmodule AssistantWeb.SettingsUserLive.SettingsTest do
         |> element("#password_form")
         |> render_change(%{
           "settings_user" => %{
-            "password" => "too short",
+            "password" => "short",
             "password_confirmation" => "does not match"
           }
         })
 
       assert result =~ "Save Password"
-      assert result =~ "should be at least 12 character(s)"
+      assert result =~ "should be at least 8 character(s)"
       assert result =~ "does not match password"
     end
 
@@ -152,14 +158,14 @@ defmodule AssistantWeb.SettingsUserLive.SettingsTest do
         lv
         |> form("#password_form", %{
           "settings_user" => %{
-            "password" => "too short",
+            "password" => "short",
             "password_confirmation" => "does not match"
           }
         })
         |> render_submit()
 
       assert result =~ "Save Password"
-      assert result =~ "should be at least 12 character(s)"
+      assert result =~ "should be at least 8 character(s)"
       assert result =~ "does not match password"
     end
   end

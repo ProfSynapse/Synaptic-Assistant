@@ -75,7 +75,10 @@ defmodule Assistant.Integrations.Discord.ClientTest do
       Bypass.expect_once(bypass, "POST", "/channels/123456/messages", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(403, Jason.encode!(%{"message" => "Missing Permissions", "code" => 50013}))
+        |> Plug.Conn.resp(
+          403,
+          Jason.encode!(%{"message" => "Missing Permissions", "code" => 50013})
+        )
       end)
 
       assert {:error, {:api_error, 403, "Missing Permissions"}} =
@@ -86,7 +89,10 @@ defmodule Assistant.Integrations.Discord.ClientTest do
       Bypass.expect_once(bypass, "POST", "/channels/123456/messages", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(429, Jason.encode!(%{"message" => "You are being rate limited.", "retry_after" => 1.5}))
+        |> Plug.Conn.resp(
+          429,
+          Jason.encode!(%{"message" => "You are being rate limited.", "retry_after" => 1.5})
+        )
       end)
 
       assert {:error, {:api_error, 429, "You are being rate limited."}} =

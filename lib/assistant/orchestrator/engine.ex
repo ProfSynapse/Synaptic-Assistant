@@ -608,7 +608,8 @@ defmodule Assistant.Orchestrator.Engine do
             :ok
 
           {:error, reason} ->
-            Logger.warning("Failed to enqueue memory save for agent #{params.agent_id}: #{inspect(reason)}",
+            Logger.warning(
+              "Failed to enqueue memory save for agent #{params.agent_id}: #{inspect(reason)}",
               conversation_id: state.conversation_id
             )
         end
@@ -765,7 +766,9 @@ defmodule Assistant.Orchestrator.Engine do
     }
 
     case TrajectoryExportWorker.new(job_args) |> Oban.insert() do
-      {:ok, _job} -> :ok
+      {:ok, _job} ->
+        :ok
+
       {:error, reason} ->
         Logger.warning("Failed to enqueue trajectory export: #{inspect(reason)}",
           conversation_id: state.conversation_id
@@ -801,7 +804,11 @@ defmodule Assistant.Orchestrator.Engine do
   defp hydrate_messages(nil), do: []
 
   defp hydrate_messages(conversation_id) do
-    Store.list_messages(conversation_id, limit: @hydrate_message_limit, order: :asc)
+    # Fetch the most recent N messages by querying desc, then reverse to
+    # chronological order. Without this, conversations with >50 messages
+    # would hydrate the oldest 50 instead of the most recent 50.
+    Store.list_messages(conversation_id, limit: @hydrate_message_limit, order: :desc)
+    |> Enum.reverse()
     |> Enum.map(&db_message_to_map/1)
   rescue
     error ->
@@ -813,9 +820,9 @@ defmodule Assistant.Orchestrator.Engine do
   end
 
   # Converts a DB Message schema struct to the in-memory map format
-  # used by the LLM loop.
+  # used by the LLM loop. Maps DB role "tool_result" back to LLM role "tool".
   defp db_message_to_map(msg) do
-    base = %{role: msg.role}
+    base = %{role: db_role_to_llm_role(msg.role)}
 
     base =
       if msg.content do
@@ -854,7 +861,7 @@ defmodule Assistant.Orchestrator.Engine do
           try do
             db_messages =
               Enum.map(new_messages, fn msg ->
-                base = %{role: msg[:role] || "assistant"}
+                base = %{role: llm_role_to_db_role(msg[:role] || "assistant")}
 
                 base =
                   if msg[:content], do: Map.put(base, :content, msg[:content]), else: base
@@ -894,6 +901,20 @@ defmodule Assistant.Orchestrator.Engine do
       )
     end
   end
+
+  # --- Role Mapping ---
+
+  # The LLM loop uses "tool" for tool result messages, but the DB schema
+  # (Message) uses "tool_result" to distinguish from "tool_call". These
+  # helpers translate between the two conventions at the persistence boundary.
+
+  @doc false
+  def llm_role_to_db_role("tool"), do: "tool_result"
+  def llm_role_to_db_role(role), do: role
+
+  @doc false
+  def db_role_to_llm_role("tool_result"), do: "tool"
+  def db_role_to_llm_role(role), do: role
 
   defp via_tuple(user_id) do
     {:via, Registry, {Assistant.Orchestrator.EngineRegistry, user_id}}

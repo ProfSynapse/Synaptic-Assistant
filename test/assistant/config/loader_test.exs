@@ -69,11 +69,22 @@ defmodule Assistant.Config.LoaderTest do
   """
 
   setup do
-    # Stop the app-level Loader if running (it owns the named ETS table)
-    if Process.whereis(Loader) do
-      GenServer.stop(Loader, :normal, 1_000)
-      # Small delay to ensure ETS table is released
-      Process.sleep(50)
+    # Detach Loader from the supervisor to prevent restart cascades.
+    # GenServer.stop triggers supervisor auto-restart; repeated stops across
+    # describe blocks exceed max_restarts and crash the entire supervision
+    # tree (including Repo). terminate_child + delete_child avoids this.
+    if Process.whereis(Loader) && Process.whereis(Assistant.Supervisor) do
+      Supervisor.terminate_child(Assistant.Supervisor, Loader)
+      Supervisor.delete_child(Assistant.Supervisor, Loader)
+    end
+
+    # Clean up stale ETS table if left over from a previous test
+    if :ets.whereis(:assistant_config) != :undefined do
+      try do
+        :ets.delete(:assistant_config)
+      rescue
+        ArgumentError -> :ok
+      end
     end
 
     # Write a temp config file
@@ -84,21 +95,26 @@ defmodule Assistant.Config.LoaderTest do
     on_exit(fn ->
       File.rm(config_path)
 
-      # Stop the named GenServer if still alive
+      # Stop any test-started Loader instance
       case Process.whereis(Loader) do
         nil -> :ok
         pid -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1_000)
       end
 
-      # Small delay then clean up the named ETS table if it persists
       Process.sleep(10)
 
+      # Clean up ETS table before restarting supervised instance
       if :ets.whereis(:assistant_config) != :undefined do
         try do
           :ets.delete(:assistant_config)
         rescue
           ArgumentError -> :ok
         end
+      end
+
+      # Restore the supervised Loader for other test modules (if supervisor is still alive)
+      if Process.whereis(Assistant.Supervisor) do
+        Supervisor.start_child(Assistant.Supervisor, Assistant.Config.Loader)
       end
     end)
 
@@ -156,13 +172,8 @@ defmodule Assistant.Config.LoaderTest do
   describe "model_for/2" do
     setup %{config_path: path} do
       case Loader.start_link(path: path) do
-        {:ok, pid} ->
-          on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
-          :ok
-
-        {:error, {:already_started, pid}} ->
-          on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
-          :ok
+        {:ok, _pid} -> :ok
+        {:error, {:already_started, _pid}} -> :ok
       end
     end
 
@@ -202,8 +213,7 @@ defmodule Assistant.Config.LoaderTest do
 
   describe "http_config/0" do
     setup %{config_path: path} do
-      {:ok, pid} = Loader.start_link(path: path)
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+      {:ok, _pid} = Loader.start_link(path: path)
       :ok
     end
 
@@ -223,8 +233,7 @@ defmodule Assistant.Config.LoaderTest do
 
   describe "limits_config/0" do
     setup %{config_path: path} do
-      {:ok, pid} = Loader.start_link(path: path)
-      on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+      {:ok, _pid} = Loader.start_link(path: path)
       :ok
     end
 

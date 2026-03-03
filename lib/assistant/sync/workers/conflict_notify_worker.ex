@@ -37,7 +37,10 @@ defmodule Assistant.Sync.Workers.ConflictNotifyWorker do
   def perform(%Oban.Job{args: %{"synced_file_id" => synced_file_id, "user_id" => user_id}}) do
     case StateStore.get_synced_file_by_id(synced_file_id) do
       nil ->
-        Logger.info("ConflictNotifyWorker: synced file #{synced_file_id} no longer exists, skipping")
+        Logger.info(
+          "ConflictNotifyWorker: synced file #{synced_file_id} no longer exists, skipping"
+        )
+
         :ok
 
       synced_file ->

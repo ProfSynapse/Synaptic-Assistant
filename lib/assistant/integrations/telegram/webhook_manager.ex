@@ -27,10 +27,10 @@ defmodule Assistant.Integrations.Telegram.WebhookManager do
   require Logger
 
   @telegram_keys MapSet.new([
-    :telegram_bot_token,
-    :telegram_webhook_secret,
-    :telegram_enabled
-  ])
+                   :telegram_bot_token,
+                   :telegram_webhook_secret,
+                   :telegram_enabled
+                 ])
 
   @webhook_path "/webhooks/telegram"
 

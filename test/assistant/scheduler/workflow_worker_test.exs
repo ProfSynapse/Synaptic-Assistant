@@ -78,9 +78,20 @@ defmodule Assistant.Scheduler.WorkflowWorkerTest do
       Run this test prompt.
       """)
 
-      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+      # Point workflows_dir to tmp_dir so resolve_path accepts relative paths
+      prev = Application.get_env(:assistant, :workflows_dir)
+      Application.put_env(:assistant, :workflows_dir, tmp_dir)
 
-      %{workflow_path: workflow_path}
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:assistant, :workflows_dir, prev),
+          else: Application.delete_env(:assistant, :workflows_dir)
+
+        File.rm_rf!(tmp_dir)
+      end)
+
+      # Pass relative filename — WorkflowWorker joins it with workflows_dir
+      %{workflow_path: "test-workflow.md"}
     end
 
     test "returns :ok for valid workflow file", %{workflow_path: path} do
@@ -156,9 +167,20 @@ defmodule Assistant.Scheduler.WorkflowWorkerTest do
       Generate a summary and post to channel.
       """)
 
-      on_exit(fn -> File.rm_rf!(tmp_dir) end)
+      # Point workflows_dir to tmp_dir so resolve_path accepts relative paths
+      prev = Application.get_env(:assistant, :workflows_dir)
+      Application.put_env(:assistant, :workflows_dir, tmp_dir)
 
-      %{workflow_path: workflow_path}
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:assistant, :workflows_dir, prev),
+          else: Application.delete_env(:assistant, :workflows_dir)
+
+        File.rm_rf!(tmp_dir)
+      end)
+
+      # Pass relative filename — WorkflowWorker joins it with workflows_dir
+      %{workflow_path: "channel-workflow.md"}
     end
 
     test "completes even when service account is not configured (channel posting fails gracefully)",

@@ -22,7 +22,11 @@ defmodule Assistant.Orchestrator.ToolChainTest do
   describe "format_tool_results/1 with error results" do
     test "formats error status results as tool messages" do
       tc = %{id: "call_1", type: "function", function: %{name: "use_skill", arguments: "{}"}}
-      result = %SkillResult{status: :error, content: "Skill \"email.send\" not found in registry."}
+
+      result = %SkillResult{
+        status: :error,
+        content: "Skill \"email.send\" not found in registry."
+      }
 
       [msg] = LoopRunner.format_tool_results([{tc, result}])
 
@@ -94,7 +98,12 @@ defmodule Assistant.Orchestrator.ToolChainTest do
     test "handles large number of tool results" do
       pairs =
         for i <- 1..20 do
-          tc = %{id: "call_#{i}", type: "function", function: %{name: "get_skill", arguments: "{}"}}
+          tc = %{
+            id: "call_#{i}",
+            type: "function",
+            function: %{name: "get_skill", arguments: "{}"}
+          }
+
           result = %SkillResult{status: :ok, content: "Result #{i}"}
           {tc, result}
         end
@@ -120,7 +129,11 @@ defmodule Assistant.Orchestrator.ToolChainTest do
           type: "function",
           function: %{
             name: "use_skill",
-            arguments: Jason.encode!(%{"skill" => "email.search", "arguments" => %{"query" => "from:alice"}})
+            arguments:
+              Jason.encode!(%{
+                "skill" => "email.search",
+                "arguments" => %{"query" => "from:alice"}
+              })
           }
         }
       ]
@@ -137,9 +150,21 @@ defmodule Assistant.Orchestrator.ToolChainTest do
 
     test "handles parallel tool calls (multiple get_skill + dispatch)" do
       tool_calls = [
-        %{id: "call_1", type: "function", function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "email"})}},
-        %{id: "call_2", type: "function", function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "calendar"})}},
-        %{id: "call_3", type: "function", function: %{name: "dispatch_agent", arguments: ~s({"agent_id": "search_agent"})}}
+        %{
+          id: "call_1",
+          type: "function",
+          function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "email"})}
+        },
+        %{
+          id: "call_2",
+          type: "function",
+          function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "calendar"})}
+        },
+        %{
+          id: "call_3",
+          type: "function",
+          function: %{name: "dispatch_agent", arguments: ~s({"agent_id": "search_agent"})}
+        }
       ]
 
       msg = LoopRunner.format_assistant_tool_calls(tool_calls)
@@ -169,7 +194,11 @@ defmodule Assistant.Orchestrator.ToolChainTest do
 
     test "single tool call produces valid assistant message" do
       tool_calls = [
-        %{id: "call_1", type: "function", function: %{name: "get_agent_results", arguments: ~s({"agent_ids": ["agent1"]})}}
+        %{
+          id: "call_1",
+          type: "function",
+          function: %{name: "get_agent_results", arguments: ~s({"agent_ids": ["agent1"]})}
+        }
       ]
 
       msg = LoopRunner.format_assistant_tool_calls(tool_calls)
@@ -188,12 +217,20 @@ defmodule Assistant.Orchestrator.ToolChainTest do
     test "builds correct conversation history for get_skill → dispatch_agent chain" do
       # Step 1: LLM calls get_skill
       step1_tool_calls = [
-        %{id: "call_1", type: "function", function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "email"})}}
+        %{
+          id: "call_1",
+          type: "function",
+          function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "email"})}
+        }
       ]
 
       assistant_msg_1 = LoopRunner.format_assistant_tool_calls(step1_tool_calls)
 
-      step1_result = %SkillResult{status: :ok, content: "email domain: search, read, send, draft, list"}
+      step1_result = %SkillResult{
+        status: :ok,
+        content: "email domain: search, read, send, draft, list"
+      }
+
       tool_result_msgs_1 = LoopRunner.format_tool_results([{hd(step1_tool_calls), step1_result}])
 
       # Step 2: LLM calls dispatch_agent based on get_skill result
@@ -203,11 +240,12 @@ defmodule Assistant.Orchestrator.ToolChainTest do
           type: "function",
           function: %{
             name: "dispatch_agent",
-            arguments: Jason.encode!(%{
-              "agent_id" => "email_searcher",
-              "mission" => "Search for emails from Alice",
-              "skills" => ["email.search", "email.read"]
-            })
+            arguments:
+              Jason.encode!(%{
+                "agent_id" => "email_searcher",
+                "mission" => "Search for emails from Alice",
+                "skills" => ["email.search", "email.read"]
+              })
           }
         }
       ]
@@ -237,22 +275,34 @@ defmodule Assistant.Orchestrator.ToolChainTest do
       assert roles == ["system", "user", "assistant", "tool", "assistant", "tool"]
 
       # Verify tool_call_ids match between assistant tool_calls and tool results
-      assert assistant_msg_1.tool_calls |> hd() |> Map.get(:id) == hd(tool_result_msgs_1).tool_call_id
-      assert assistant_msg_2.tool_calls |> hd() |> Map.get(:id) == hd(tool_result_msgs_2).tool_call_id
+      assert assistant_msg_1.tool_calls |> hd() |> Map.get(:id) ==
+               hd(tool_result_msgs_1).tool_call_id
+
+      assert assistant_msg_2.tool_calls |> hd() |> Map.get(:id) ==
+               hd(tool_result_msgs_2).tool_call_id
     end
 
     test "builds correct history for parallel tool calls in one step" do
       # LLM calls multiple tools at once
       tool_calls = [
-        %{id: "call_a", type: "function", function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "email"})}},
-        %{id: "call_b", type: "function", function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "calendar"})}}
+        %{
+          id: "call_a",
+          type: "function",
+          function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "email"})}
+        },
+        %{
+          id: "call_b",
+          type: "function",
+          function: %{name: "get_skill", arguments: ~s({"skill_or_domain": "calendar"})}
+        }
       ]
 
       assistant_msg = LoopRunner.format_assistant_tool_calls(tool_calls)
 
       results = [
         {Enum.at(tool_calls, 0), %SkillResult{status: :ok, content: "email: search, read, send"}},
-        {Enum.at(tool_calls, 1), %SkillResult{status: :ok, content: "calendar: list, create, update"}}
+        {Enum.at(tool_calls, 1),
+         %SkillResult{status: :ok, content: "calendar: list, create, update"}}
       ]
 
       tool_msgs = LoopRunner.format_tool_results(results)
@@ -277,11 +327,12 @@ defmodule Assistant.Orchestrator.ToolChainTest do
         type: "function",
         function: %{
           name: "dispatch_agent",
-          arguments: Jason.encode!(%{
-            "agent_id" => "bad_agent",
-            "mission" => "Do something",
-            "skills" => ["nonexistent.skill"]
-          })
+          arguments:
+            Jason.encode!(%{
+              "agent_id" => "bad_agent",
+              "mission" => "Do something",
+              "skills" => ["nonexistent.skill"]
+            })
         }
       }
 
