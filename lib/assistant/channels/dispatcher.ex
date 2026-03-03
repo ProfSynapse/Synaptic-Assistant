@@ -84,10 +84,8 @@ defmodule Assistant.Channels.Dispatcher do
         handle_engine_response(adapter, message, conversation_id)
 
       {:error, reason} ->
-        Logger.error("Failed to start engine for conversation",
-          conversation_id: conversation_id,
-          channel: message.channel,
-          reason: inspect(reason)
+        Logger.error("Failed to start engine for conversation #{conversation_id}: #{inspect(reason)}",
+          channel: message.channel
         )
 
         reply_opts = build_reply_opts(message)
@@ -95,9 +93,8 @@ defmodule Assistant.Channels.Dispatcher do
     end
   rescue
     error ->
-      Logger.error("Unhandled error in async channel processing",
+      Logger.error("Unhandled error in async channel processing: #{inspect(error)}",
         channel: message.channel,
-        error: inspect(error),
         stacktrace: inspect(__STACKTRACE__)
       )
 
@@ -125,19 +122,17 @@ defmodule Assistant.Channels.Dispatcher do
             )
 
           {:error, reason} ->
-            Logger.error("Failed to send channel reply",
+            Logger.error("Failed to send channel reply: #{inspect(reason)}",
               conversation_id: conversation_id,
               channel: message.channel,
-              space_id: message.space_id,
-              reason: inspect(reason)
+              space_id: message.space_id
             )
         end
 
       {:error, reason} ->
-        Logger.error("Orchestrator processing failed",
+        Logger.error("Orchestrator processing failed: #{inspect(reason)}",
           conversation_id: conversation_id,
-          channel: message.channel,
-          reason: inspect(reason)
+          channel: message.channel
         )
 
         reply_opts = build_reply_opts(message)
@@ -202,9 +197,8 @@ defmodule Assistant.Channels.Dispatcher do
         :ok
 
       {:error, reason} ->
-        Logger.error("Failed to start conversation engine",
-          conversation_id: conversation_id,
-          reason: inspect(reason)
+        Logger.error("Failed to start conversation engine: #{inspect(reason)}",
+          conversation_id: conversation_id
         )
 
         {:error, reason}

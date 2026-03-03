@@ -49,8 +49,7 @@ defmodule AssistantWeb.Plugs.TelegramAuth do
       assign(conn, :telegram_verified, true)
     else
       {:error, reason} ->
-        Logger.warning("Telegram webhook auth failed",
-          reason: reason,
+        Logger.warning("Telegram webhook auth failed: #{reason}",
           remote_ip: to_string(:inet_parse.ntoa(conn.remote_ip))
         )
 
