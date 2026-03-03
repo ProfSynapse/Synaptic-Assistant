@@ -64,7 +64,11 @@ defmodule Assistant.Skills.Memory.HandlersTest do
       ctx = build_context()
       # Insert a test user so the FK constraint passes
       user = insert_test_user(ctx.user_id)
-      ctx = %{ctx | user_id: user.id}
+      # Create a real conversation so source_conversation_id FK succeeds
+      {:ok, conv} =
+        Assistant.Memory.Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      ctx = %{ctx | user_id: user.id, conversation_id: conv.id}
 
       assert {:ok, %Result{status: :ok, side_effects: [:memory_saved]}} =
                Save.execute(%{"content" => "Test memory", "tags" => "test,smoke"}, ctx)

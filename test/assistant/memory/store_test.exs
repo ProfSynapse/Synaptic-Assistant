@@ -22,6 +22,11 @@ defmodule Assistant.Memory.StoreTest do
       assert function_exported?(Store, :get_memory_entry, 1)
       assert function_exported?(Store, :update_memory_entry_accessed_at, 1)
       assert function_exported?(Store, :list_memory_entries, 1)
+      # New unified conversation functions
+      assert function_exported?(Store, :get_or_create_perpetual_conversation, 1)
+      assert function_exported?(Store, :batch_append_messages, 2)
+      assert function_exported?(Store, :list_memory_entries_for_user, 4)
+      assert function_exported?(Store, :list_conversations_for_user, 4)
     end
   end
 
@@ -546,6 +551,246 @@ defmodule Assistant.Memory.StoreTest do
       # Most recent first
       assert Enum.at(entries, 0).content == "newer"
       assert Enum.at(entries, 1).content == "older"
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # get_or_create_perpetual_conversation/1
+  # ---------------------------------------------------------------
+
+  describe "get_or_create_perpetual_conversation/1" do
+    test "creates perpetual conversation for new user" do
+      user = create_test_user()
+
+      assert {:ok, %Conversation{} = conv} =
+               Store.get_or_create_perpetual_conversation(user.id)
+
+      assert conv.user_id == user.id
+      assert conv.channel == "unified"
+      assert conv.agent_type == "orchestrator"
+      assert conv.status == "active"
+    end
+
+    test "returns same conversation on repeated calls" do
+      user = create_test_user()
+
+      {:ok, conv1} = Store.get_or_create_perpetual_conversation(user.id)
+      {:ok, conv2} = Store.get_or_create_perpetual_conversation(user.id)
+
+      assert conv1.id == conv2.id
+    end
+
+    test "different users get different perpetual conversations" do
+      user1 = create_test_user()
+      user2 = create_test_user()
+
+      {:ok, conv1} = Store.get_or_create_perpetual_conversation(user1.id)
+      {:ok, conv2} = Store.get_or_create_perpetual_conversation(user2.id)
+
+      refute conv1.id == conv2.id
+    end
+
+    test "does not return a closed conversation" do
+      user = create_test_user()
+      {:ok, conv} = Store.get_or_create_perpetual_conversation(user.id)
+
+      # Manually close it
+      Repo.update!(Ecto.Changeset.change(conv, status: "closed"))
+
+      {:ok, new_conv} = Store.get_or_create_perpetual_conversation(user.id)
+      refute new_conv.id == conv.id
+      assert new_conv.status == "active"
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # batch_append_messages/2
+  # ---------------------------------------------------------------
+
+  describe "batch_append_messages/2" do
+    test "returns {:ok, []} for empty message list" do
+      assert {:ok, []} = Store.batch_append_messages(Ecto.UUID.generate(), [])
+    end
+
+    test "inserts multiple messages atomically" do
+      user = create_test_user()
+      {:ok, conv} = Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      messages = [
+        %{role: "user", content: "Hello"},
+        %{role: "assistant", content: "Hi there!"},
+        %{role: "user", content: "How are you?"}
+      ]
+
+      assert {:ok, inserted} = Store.batch_append_messages(conv.id, messages)
+      assert length(inserted) == 3
+
+      roles = Enum.map(inserted, & &1.role)
+      assert roles == ["user", "assistant", "user"]
+
+      contents = Enum.map(inserted, & &1.content)
+      assert contents == ["Hello", "Hi there!", "How are you?"]
+    end
+
+    test "all messages have correct conversation_id" do
+      user = create_test_user()
+      {:ok, conv} = Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      messages = [
+        %{role: "user", content: "msg1"},
+        %{role: "assistant", content: "msg2"}
+      ]
+
+      {:ok, inserted} = Store.batch_append_messages(conv.id, messages)
+
+      assert Enum.all?(inserted, fn msg -> msg.conversation_id == conv.id end)
+    end
+
+    test "touches conversation last_active_at" do
+      user = create_test_user()
+      {:ok, conv} = Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      original_active_at = conv.last_active_at
+      Process.sleep(10)
+
+      {:ok, _} =
+        Store.batch_append_messages(conv.id, [
+          %{role: "user", content: "batch msg"}
+        ])
+
+      {:ok, updated_conv} = Store.get_conversation(conv.id)
+
+      if original_active_at do
+        assert DateTime.compare(updated_conv.last_active_at, original_active_at) == :gt
+      else
+        assert updated_conv.last_active_at != nil
+      end
+    end
+
+    test "rolls back entire batch on validation failure" do
+      user = create_test_user()
+      {:ok, conv} = Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      messages = [
+        %{role: "user", content: "valid message"},
+        %{role: "invalid_role", content: "this should fail validation"}
+      ]
+
+      assert {:error, _} = Store.batch_append_messages(conv.id, messages)
+
+      # No messages should have been inserted (atomic rollback)
+      assert Store.list_messages(conv.id) == []
+    end
+
+    test "inserts tool_call and tool_result messages" do
+      user = create_test_user()
+      {:ok, conv} = Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      messages = [
+        %{role: "user", content: "Search for X"},
+        %{role: "tool_call", tool_calls: %{"name" => "search", "args" => %{"q" => "X"}}},
+        %{role: "tool_result", tool_results: %{"result" => "Found X"}},
+        %{role: "assistant", content: "I found X for you"}
+      ]
+
+      assert {:ok, inserted} = Store.batch_append_messages(conv.id, messages)
+      assert length(inserted) == 4
+
+      assert Enum.at(inserted, 1).role == "tool_call"
+      assert Enum.at(inserted, 2).role == "tool_result"
+    end
+
+    test "works for sub-agent conversations" do
+      user = create_test_user()
+
+      {:ok, parent_conv} =
+        Store.create_conversation(%{channel: "unified", user_id: user.id})
+
+      {:ok, sub_conv} =
+        Store.create_conversation(%{
+          channel: "unified",
+          user_id: user.id,
+          agent_type: "sub_agent",
+          parent_conversation_id: parent_conv.id
+        })
+
+      messages = [
+        %{role: "system", content: "You are a research agent"},
+        %{role: "user", content: "Find info about X"},
+        %{role: "assistant", content: "Here's what I found about X"}
+      ]
+
+      assert {:ok, inserted} = Store.batch_append_messages(sub_conv.id, messages)
+      assert length(inserted) == 3
+      assert Enum.all?(inserted, fn m -> m.conversation_id == sub_conv.id end)
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # Admin memory access
+  # ---------------------------------------------------------------
+
+  describe "list_memory_entries_for_user/4" do
+    test "user can access own memories" do
+      user = create_test_user()
+      {:ok, _} = Store.create_memory_entry(%{content: "my memory", user_id: user.id})
+
+      assert {:ok, entries} =
+               Store.list_memory_entries_for_user(user.id, user.id, false)
+
+      assert length(entries) == 1
+    end
+
+    test "non-admin cannot access another user's memories" do
+      user1 = create_test_user()
+      user2 = create_test_user()
+      {:ok, _} = Store.create_memory_entry(%{content: "private", user_id: user1.id})
+
+      assert {:error, :unauthorized} =
+               Store.list_memory_entries_for_user(user1.id, user2.id, false)
+    end
+
+    test "admin can access another user's memories" do
+      user1 = create_test_user()
+      admin = create_test_user()
+      {:ok, _} = Store.create_memory_entry(%{content: "visible to admin", user_id: user1.id})
+
+      assert {:ok, entries} =
+               Store.list_memory_entries_for_user(user1.id, admin.id, true)
+
+      assert length(entries) == 1
+    end
+  end
+
+  describe "list_conversations_for_user/4" do
+    test "user can access own conversations" do
+      user = create_test_user()
+      {:ok, _} = Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      assert {:ok, conversations} =
+               Store.list_conversations_for_user(user.id, user.id, false)
+
+      assert length(conversations) == 1
+    end
+
+    test "non-admin cannot access another user's conversations" do
+      user1 = create_test_user()
+      user2 = create_test_user()
+      {:ok, _} = Store.create_conversation(%{channel: "test", user_id: user1.id})
+
+      assert {:error, :unauthorized} =
+               Store.list_conversations_for_user(user1.id, user2.id, false)
+    end
+
+    test "admin can access another user's conversations" do
+      user1 = create_test_user()
+      admin = create_test_user()
+      {:ok, _} = Store.create_conversation(%{channel: "test", user_id: user1.id})
+
+      assert {:ok, conversations} =
+               Store.list_conversations_for_user(user1.id, admin.id, true)
+
+      assert length(conversations) == 1
     end
   end
 
