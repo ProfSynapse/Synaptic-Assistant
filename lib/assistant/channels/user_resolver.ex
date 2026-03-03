@@ -66,8 +66,10 @@ defmodule Assistant.Channels.UserResolver do
   @spec resolve(atom(), String.t(), map()) ::
           {:ok, %{user_id: binary(), conversation_id: binary()}} | {:error, term()}
   def resolve(channel, external_id, metadata \\ %{}) do
+    space_id = Map.get(metadata, :space_id) || Map.get(metadata, "space_id")
+
     with :ok <- validate_platform_id(channel, external_id) do
-      case find_identity(channel, external_id) do
+      case find_identity(channel, external_id, space_id) do
         {:ok, identity} ->
           ensure_perpetual_conversation(identity.user_id)
 
@@ -134,11 +136,19 @@ defmodule Assistant.Channels.UserResolver do
     end
   end
 
-  defp find_identity(channel, external_id) do
+  defp find_identity(channel, external_id, space_id) do
+    channel_str = to_string(channel)
+
     query =
       from ui in UserIdentity,
-        where: ui.channel == ^to_string(channel) and ui.external_id == ^external_id,
-        limit: 1
+        where: ui.channel == ^channel_str and ui.external_id == ^external_id
+
+    query =
+      if space_id do
+        from ui in query, where: ui.space_id == ^space_id
+      else
+        from ui in query, where: is_nil(ui.space_id)
+      end
 
     case Repo.one(query) do
       nil -> {:error, :not_found}
@@ -208,7 +218,7 @@ defmodule Assistant.Channels.UserResolver do
       {:error, reason} ->
         # Race condition: another process may have created this user.
         # Try to find the identity that was just created.
-        case find_identity(channel, external_id) do
+        case find_identity(channel, external_id, space_id) do
           {:ok, identity} ->
             ensure_perpetual_conversation(identity.user_id)
 
