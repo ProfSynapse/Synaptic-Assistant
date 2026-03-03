@@ -219,15 +219,21 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         })
         |> to_form(as: "allowlist_entry")
 
-      assign(socket,
+      all_users = Accounts.list_settings_users_for_admin()
+      search = socket.assigns[:admin_user_search] || ""
+
+      socket
+      |> assign(
         managed_scopes: Accounts.managed_access_scopes(),
         can_bootstrap_admin: can_bootstrap,
         allowlist_form: blank_form,
         allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
         admin_settings_users: Accounts.list_admin_settings_users(),
-        admin_users_with_keys: Accounts.list_settings_users_for_admin(),
+        admin_users_with_keys: all_users,
+        filtered_admin_users: filter_admin_users(all_users, search),
         integration_settings: IntegrationSettings.list_all()
       )
+      |> maybe_refresh_current_admin_user()
     else
       assign(socket,
         can_bootstrap_admin: can_bootstrap,
@@ -236,8 +242,46 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         allowlist_entries: [],
         admin_settings_users: [],
         admin_users_with_keys: [],
+        filtered_admin_users: [],
         integration_settings: []
       )
+    end
+  end
+
+  def reload_admin_users(socket) do
+    all_users = Accounts.list_settings_users_for_admin()
+    search = socket.assigns[:admin_user_search] || ""
+
+    socket
+    |> assign(:admin_users_with_keys, all_users)
+    |> assign(:admin_settings_users, Accounts.list_admin_settings_users())
+    |> assign(:filtered_admin_users, filter_admin_users(all_users, search))
+    |> maybe_refresh_current_admin_user()
+  end
+
+  def filter_admin_users(users, query) do
+    normalized = query |> to_string() |> String.trim() |> String.downcase()
+
+    if normalized == "" do
+      users
+    else
+      Enum.filter(users, fn user ->
+        String.contains?(String.downcase(to_string(user.email)), normalized) ||
+          String.contains?(String.downcase(to_string(user.display_name || "")), normalized)
+      end)
+    end
+  end
+
+  defp maybe_refresh_current_admin_user(socket) do
+    case socket.assigns[:current_admin_user] do
+      nil ->
+        socket
+
+      %{id: user_id} ->
+        case Accounts.get_user_for_admin(user_id) do
+          {:ok, user} -> assign(socket, :current_admin_user, user)
+          {:error, :not_found} -> assign(socket, :current_admin_user, nil)
+        end
     end
   end
 

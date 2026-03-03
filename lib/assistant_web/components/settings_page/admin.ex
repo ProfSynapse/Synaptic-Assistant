@@ -1,10 +1,12 @@
 defmodule AssistantWeb.Components.SettingsPage.Admin do
   # Settings page admin section component.
-  # Renders the allow list management and user management panels.
-  # Ported from AdminLive — integration settings are handled separately in the Apps tab.
+  # Renders the allow list management, user card grid, and user detail view.
   @moduledoc false
 
   use AssistantWeb, :html
+
+  import AssistantWeb.Components.SettingsPage.UserCards, only: [user_cards_section: 1]
+  import AssistantWeb.Components.SettingsPage.UserDetail, only: [user_detail_section: 1]
 
   def admin_section(assigns) do
     ~H"""
@@ -191,164 +193,18 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
         </div>
       </div>
 
-      <div class="sa-card">
-        <div>
-          <h2>Users</h2>
-          <p>
-            Help users recover access by sending a magic link or forcing a password reset.
-          </p>
-        </div>
+      <.user_detail_section
+        :if={@current_admin_user}
+        user={@current_admin_user}
+        current_user_id={@current_scope.settings_user.id}
+      />
 
-        <div class="overflow-x-auto" style="margin-top: 1rem;">
-          <table class="min-w-full text-sm" id="admin-users-table">
-            <thead>
-              <tr class="text-left border-b">
-                <th class="py-2 pr-4">Email</th>
-                <th class="py-2 pr-4">Admin</th>
-                <th class="py-2 pr-4">Scopes</th>
-                <th class="py-2 pr-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :if={@admin_settings_users == []}>
-                <td class="py-3 text-zinc-500" colspan="4">No user accounts yet.</td>
-              </tr>
-              <tr
-                :for={user <- @admin_settings_users}
-                id={"admin-user-#{user.id}"}
-                class="border-b last:border-0"
-              >
-                <td class="py-2 pr-4">{user.email}</td>
-                <td class="py-2 pr-4">{if user.is_admin, do: "Yes", else: "No"}</td>
-                <td class="py-2 pr-4">{Enum.join(user.access_scopes || [], ", ")}</td>
-                <td class="py-2 pr-4">
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      phx-click="send_recovery_link"
-                      phx-value-id={user.id}
-                      class="rounded border border-zinc-300 px-2 py-1"
-                    >
-                      Send Magic Link
-                    </button>
-                    <button
-                      type="button"
-                      phx-click="force_password_reset"
-                      phx-value-id={user.id}
-                      class="rounded border border-zinc-300 px-2 py-1"
-                    >
-                      Force Password Reset
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="sa-card">
-        <div>
-          <h2>User API Keys</h2>
-          <p>
-            Provision per-user OpenRouter API keys. Users with a key will use it instead of the system key.
-          </p>
-        </div>
-
-        <div class="overflow-x-auto" style="margin-top: 1rem;">
-          <table class="min-w-full text-sm" id="admin-user-keys-table">
-            <thead>
-              <tr class="text-left border-b">
-                <th class="py-2 pr-4">User</th>
-                <th class="py-2 pr-4">Chat Account</th>
-                <th class="py-2 pr-4">OpenRouter Key</th>
-                <th class="py-2 pr-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :if={@admin_users_with_keys == []}>
-                <td class="py-3 text-zinc-500" colspan="4">No user accounts yet.</td>
-              </tr>
-              <tr
-                :for={user <- @admin_users_with_keys}
-                id={"user-key-#{user.id}"}
-                class="border-b last:border-0"
-              >
-                <td class="py-2 pr-4">
-                  <div>
-                    <span class="font-medium">{user.email}</span>
-                    <span :if={user.display_name} class="text-zinc-500 text-xs ml-1">
-                      ({user.display_name})
-                    </span>
-                  </div>
-                </td>
-                <td class="py-2 pr-4">
-                  <span
-                    :if={user.has_linked_user}
-                    class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
-                  >
-                    Linked
-                  </span>
-                  <span
-                    :if={!user.has_linked_user}
-                    class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500"
-                  >
-                    Not Linked
-                  </span>
-                </td>
-                <td class="py-2 pr-4">
-                  <span
-                    :if={user.has_openrouter_key}
-                    class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
-                  >
-                    Configured
-                  </span>
-                  <span
-                    :if={!user.has_openrouter_key}
-                    class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500"
-                  >
-                    Not Set
-                  </span>
-                </td>
-                <td class="py-2 pr-4">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <form
-                      phx-submit="save_user_openrouter_key"
-                      id={"user-key-form-#{user.id}"}
-                      class="flex items-center gap-2"
-                    >
-                      <input type="hidden" name="user_id" value={user.id} />
-                      <input
-                        type="password"
-                        name="api_key"
-                        placeholder={if user.has_openrouter_key, do: "Replace key...", else: "sk-or-v1-..."}
-                        autocomplete="off"
-                        class="rounded-md border border-zinc-300 px-2 py-1 text-sm font-mono w-40"
-                      />
-                      <button
-                        type="submit"
-                        class="rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white hover:bg-zinc-700"
-                      >
-                        Save
-                      </button>
-                    </form>
-                    <button
-                      :if={user.has_openrouter_key}
-                      type="button"
-                      phx-click="delete_user_openrouter_key"
-                      phx-value-id={user.id}
-                      class="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                      data-confirm="Remove this user's OpenRouter API key?"
-                    >
-                      Remove Key
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <.user_cards_section
+        :if={!@current_admin_user}
+        users={@filtered_admin_users}
+        search_value={@admin_user_search}
+        current_user_id={@current_scope.settings_user.id}
+      />
     </section>
     """
   end
