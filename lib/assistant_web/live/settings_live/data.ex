@@ -17,7 +17,9 @@ defmodule AssistantWeb.SettingsLive.Data do
         "Create an OAuth 2.0 Client ID (Web application type)",
         "Add your callback URL to Authorized redirect URIs",
         "Copy the Client ID and Client Secret below, then click Connect to authorize"
-      ]
+      ],
+      portal_url: "https://console.cloud.google.com/apis/credentials",
+      docs_url: "https://developers.google.com/workspace/guides/create-credentials"
     },
     %{
       id: "telegram",
@@ -32,7 +34,9 @@ defmodule AssistantWeb.SettingsLive.Data do
         "Create a new bot with /newbot",
         "Copy the bot token provided by BotFather",
         "Set a webhook secret (any random string) for verification"
-      ]
+      ],
+      portal_url: "https://t.me/BotFather",
+      docs_url: "https://core.telegram.org/bots/tutorial"
     },
     %{
       id: "slack",
@@ -49,7 +53,9 @@ defmodule AssistantWeb.SettingsLive.Data do
         "Copy the Bot Token (xoxb-...) from OAuth & Permissions",
         "Copy the Signing Secret from Basic Information",
         "Copy the Client ID and Client Secret from Basic Information"
-      ]
+      ],
+      portal_url: "https://api.slack.com/apps",
+      docs_url: "https://api.slack.com/authentication/basics"
     },
     %{
       id: "discord",
@@ -65,7 +71,9 @@ defmodule AssistantWeb.SettingsLive.Data do
         "Under Bot, create a bot and copy the token",
         "Copy the Public Key from General Information",
         "Copy the Application ID from General Information"
-      ]
+      ],
+      portal_url: "https://discord.com/developers/applications",
+      docs_url: "https://discord.com/developers/docs/intro"
     },
     %{
       id: "google_chat",
@@ -79,7 +87,9 @@ defmodule AssistantWeb.SettingsLive.Data do
         "Create a Google Chat space or use an existing one",
         "Go to Manage webhooks in the space settings",
         "Copy the webhook URL"
-      ]
+      ],
+      portal_url: "https://console.cloud.google.com/apis/credentials",
+      docs_url: "https://developers.google.com/workspace/chat/quickstart/webhooks"
     },
     %{
       id: "hubspot",
@@ -94,7 +104,9 @@ defmodule AssistantWeb.SettingsLive.Data do
         "Navigate to Settings → Integrations → Private Apps",
         "Create a new private app with required scopes",
         "Copy the access token"
-      ]
+      ],
+      portal_url: "https://app.hubspot.com/settings",
+      docs_url: "https://developers.hubspot.com/docs/guides/apps/private-apps/migrate-an-api-key-integration-to-a-private-app"
     },
     %{
       id: "elevenlabs",
@@ -109,7 +121,9 @@ defmodule AssistantWeb.SettingsLive.Data do
         "Navigate to Profile → API Keys",
         "Generate and copy your API key",
         "Choose a voice from the Voice Library and copy its Voice ID"
-      ]
+      ],
+      portal_url: "https://elevenlabs.io/app/settings/api-keys",
+      docs_url: "https://elevenlabs.io/docs/eleven-api/quickstart"
     }
   ]
 

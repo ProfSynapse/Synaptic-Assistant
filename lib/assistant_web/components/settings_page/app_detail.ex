@@ -36,14 +36,39 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
         </div>
       </header>
 
-      <section class="sa-card" style="margin-top: 1.5rem;">
-        <h2>Setup Instructions</h2>
-        <ol style="padding-left: 1.5rem; margin-top: 0.75rem;" class="sa-setup-steps">
-          <li :for={{step, _idx} <- Enum.with_index(@current_app.setup_instructions)} style="margin-bottom: 0.5rem; line-height: 1.6;">
-            {step}
-          </li>
-        </ol>
-      </section>
+      <details class="sa-accordion" style="margin-top: 1.5rem;" open>
+        <summary>Setup Instructions</summary>
+        <div class="sa-accordion-body">
+          <ol class="sa-setup-steps">
+            <li :for={{step, idx} <- Enum.with_index(@current_app.setup_instructions, 1)}>
+              <span class="sa-step-number">{idx}</span>
+              <span>{step}</span>
+            </li>
+          </ol>
+          <div :if={@current_app[:portal_url] || @current_app[:docs_url]} class="sa-docs-links">
+            <a
+              :if={@current_app[:portal_url]}
+              href={@current_app.portal_url}
+              target="_blank"
+              rel="noopener"
+              class="sa-docs-link"
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" />
+              Open developer console
+            </a>
+            <a
+              :if={@current_app[:docs_url]}
+              href={@current_app.docs_url}
+              target="_blank"
+              rel="noopener"
+              class="sa-docs-link"
+            >
+              <.icon name="hero-book-open" class="h-4 w-4" />
+              View setup guide
+            </a>
+          </div>
+        </div>
+      </details>
 
       <section :if={@current_app.connect_type == :oauth} class="sa-card" style="margin-top: 1.5rem;">
         <h2>Connection</h2>
