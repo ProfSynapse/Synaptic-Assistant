@@ -25,6 +25,11 @@ defmodule Assistant.Skills.Workflow.CancelTest do
     File.mkdir_p!(tmp_dir)
     Application.put_env(:assistant, :workflows_dir, tmp_dir)
 
+    # Detach QuantumLoader then Scheduler from supervisor to prevent restart cascades.
+    # QuantumLoader depends on Scheduler, so detach it first.
+    detach_from_supervisor(Assistant.Scheduler.QuantumLoader)
+    detach_from_supervisor(Assistant.Scheduler)
+
     # Ensure Quantum Scheduler is running (QuantumLoader depends on it)
     case Process.whereis(Assistant.Scheduler) do
       nil -> {:ok, _} = Assistant.Scheduler.start_link()
@@ -53,8 +58,17 @@ defmodule Assistant.Skills.Workflow.CancelTest do
       Application.delete_env(:assistant, :workflows_dir)
       File.rm_rf!(tmp_dir)
 
+      # Stop test-started instances
       safe_stop(Assistant.Scheduler.QuantumLoader)
       safe_stop(Assistant.Scheduler)
+
+      Process.sleep(10)
+
+      # Restore supervised instances (Scheduler first, QuantumLoader depends on it)
+      if Process.whereis(Assistant.Supervisor) do
+        Supervisor.start_child(Assistant.Supervisor, Assistant.Scheduler)
+        Supervisor.start_child(Assistant.Supervisor, Assistant.Scheduler.QuantumLoader)
+      end
     end)
 
     %{workflows_dir: tmp_dir, workflow_path: workflow_path}
@@ -80,6 +94,13 @@ defmodule Assistant.Skills.Workflow.CancelTest do
         catch
           :exit, _ -> :ok
         end
+    end
+  end
+
+  defp detach_from_supervisor(child_id) do
+    if Process.whereis(child_id) && Process.whereis(Assistant.Supervisor) do
+      Supervisor.terminate_child(Assistant.Supervisor, child_id)
+      Supervisor.delete_child(Assistant.Supervisor, child_id)
     end
   end
 

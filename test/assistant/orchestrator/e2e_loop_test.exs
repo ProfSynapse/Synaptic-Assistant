@@ -141,14 +141,15 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
           "finish_reason" => "stop"
         }
       ],
-      "usage" => Map.merge(
-        %{
-          "prompt_tokens" => 100,
-          "completion_tokens" => 50,
-          "total_tokens" => 150
-        },
-        usage
-      )
+      "usage" =>
+        Map.merge(
+          %{
+            "prompt_tokens" => 100,
+            "completion_tokens" => 50,
+            "total_tokens" => 150
+          },
+          usage
+        )
     }
   end
 
@@ -180,14 +181,15 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
           "finish_reason" => "tool_calls"
         }
       ],
-      "usage" => Map.merge(
-        %{
-          "prompt_tokens" => 100,
-          "completion_tokens" => 50,
-          "total_tokens" => 150
-        },
-        usage
-      )
+      "usage" =>
+        Map.merge(
+          %{
+            "prompt_tokens" => 100,
+            "completion_tokens" => 50,
+            "total_tokens" => 150
+          },
+          usage
+        )
     }
   end
 
@@ -224,13 +226,18 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
       Bypass.stub(bypass, "POST", "/chat/completions", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(
-          text_response("Response.", usage: %{
-            "prompt_tokens" => 200,
-            "completion_tokens" => 100,
-            "total_tokens" => 300
-          })
-        ))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(
+            text_response("Response.",
+              usage: %{
+                "prompt_tokens" => 200,
+                "completion_tokens" => 100,
+                "total_tokens" => 300
+              }
+            )
+          )
+        )
       end)
 
       {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
@@ -340,9 +347,12 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
       Bypass.stub(bypass, "POST", "/chat/completions", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(500, Jason.encode!(%{
-          "error" => %{"message" => "Internal server error"}
-        }))
+        |> Plug.Conn.resp(
+          500,
+          Jason.encode!(%{
+            "error" => %{"message" => "Internal server error"}
+          })
+        )
       end)
 
       {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
@@ -360,9 +370,12 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         conn
         |> Plug.Conn.put_resp_header("retry-after", "30")
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(429, Jason.encode!(%{
-          "error" => %{"message" => "Rate limited"}
-        }))
+        |> Plug.Conn.resp(
+          429,
+          Jason.encode!(%{
+            "error" => %{"message" => "Rate limited"}
+          })
+        )
       end)
 
       {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
@@ -397,11 +410,14 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
       Bypass.stub(bypass, "POST", "/chat/completions", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{
-          "id" => "empty",
-          "model" => "test",
-          "choices" => []
-        }))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "id" => "empty",
+            "model" => "test",
+            "choices" => []
+          })
+        )
       end)
 
       {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
@@ -419,20 +435,23 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
       Bypass.stub(bypass, "POST", "/chat/completions", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{
-          "id" => "nil-content",
-          "model" => "test",
-          "choices" => [
-            %{
-              "message" => %{
-                "role" => "assistant",
-                "content" => nil
-              },
-              "finish_reason" => "stop"
-            }
-          ],
-          "usage" => %{"prompt_tokens" => 10, "completion_tokens" => 0, "total_tokens" => 10}
-        }))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "id" => "nil-content",
+            "model" => "test",
+            "choices" => [
+              %{
+                "message" => %{
+                  "role" => "assistant",
+                  "content" => nil
+                },
+                "finish_reason" => "stop"
+              }
+            ],
+            "usage" => %{"prompt_tokens" => 10, "completion_tokens" => 0, "total_tokens" => 10}
+          })
+        )
       end)
 
       {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
@@ -456,9 +475,12 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
           # First call: error
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
-          |> Plug.Conn.resp(500, Jason.encode!(%{
-            "error" => %{"message" => "Temporary failure"}
-          }))
+          |> Plug.Conn.resp(
+            500,
+            Jason.encode!(%{
+              "error" => %{"message" => "Temporary failure"}
+            })
+          )
         else
           # Second call: success
           conn
@@ -493,9 +515,10 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
         :counters.add(call_count, 1, 1)
 
         # Always return a tool call — forces the engine to keep looping
-        response = tool_call_response([
-          {"call_#{:counters.get(call_count, 1)}", "get_skill", %{"domain" => "email"}}
-        ])
+        response =
+          tool_call_response([
+            {"call_#{:counters.get(call_count, 1)}", "get_skill", %{"domain" => "email"}}
+          ])
 
         conn
         |> Plug.Conn.put_resp_content_type("application/json")

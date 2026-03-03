@@ -587,9 +587,7 @@ defmodule Assistant.Integration.AlgedonicLLMTest do
           end
 
         {:error, :agent_exited, _} ->
-          Logger.warning(
-            "Agent exited before calling request_help — cannot test resume."
-          )
+          Logger.warning("Agent exited before calling request_help — cannot test resume.")
       end
     end
   end
@@ -753,9 +751,7 @@ defmodule Assistant.Integration.AlgedonicLLMTest do
           end
 
         {:error, :agent_exited, _} ->
-          Logger.warning(
-            "Agent exited before calling request_help — cannot test resume."
-          )
+          Logger.warning("Agent exited before calling request_help — cannot test resume.")
       end
     end
   end

@@ -179,10 +179,11 @@ defmodule Assistant.Orchestrator.ToolSortingTest do
         type: "function",
         function: %{
           name: "use_skill",
-          arguments: Jason.encode!(%{
-            "skill" => "email.search",
-            "arguments" => %{"query" => "from:alice subject:report"}
-          })
+          arguments:
+            Jason.encode!(%{
+              "skill" => "email.search",
+              "arguments" => %{"query" => "from:alice subject:report"}
+            })
         }
       }
 

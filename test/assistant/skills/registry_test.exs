@@ -11,13 +11,15 @@ defmodule Assistant.Skills.RegistryTest do
   alias Assistant.Skills.{Registry, SkillDefinition, DomainIndex}
 
   setup do
-    # Stop the app-level Registry if running
-    if Process.whereis(Registry) do
-      GenServer.stop(Registry, :normal, 1_000)
-      Process.sleep(50)
+    # Detach Registry from the supervisor to prevent restart cascades.
+    # GenServer.stop triggers supervisor auto-restart; repeated stops across
+    # describe blocks exceed max_restarts and crash the entire supervision tree.
+    if Process.whereis(Registry) && Process.whereis(Assistant.Supervisor) do
+      Supervisor.terminate_child(Assistant.Supervisor, Registry)
+      Supervisor.delete_child(Assistant.Supervisor, Registry)
     end
 
-    # Clean up the named ETS table if it persists
+    # Clean up stale ETS table if left over from a previous test
     if :ets.whereis(:assistant_skills) != :undefined do
       try do
         :ets.delete(:assistant_skills)
@@ -95,10 +97,13 @@ defmodule Assistant.Skills.RegistryTest do
     """)
 
     on_exit(fn ->
-      if Process.whereis(Registry) do
-        GenServer.stop(Registry, :normal, 1_000)
-        Process.sleep(20)
+      # Stop any test-started Registry instance
+      case Process.whereis(Registry) do
+        nil -> :ok
+        pid -> if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1_000)
       end
+
+      Process.sleep(10)
 
       if :ets.whereis(:assistant_skills) != :undefined do
         try do
@@ -109,6 +114,11 @@ defmodule Assistant.Skills.RegistryTest do
       end
 
       File.rm_rf!(tmp_dir)
+
+      # Restore the supervised Registry for other test modules (if supervisor is still alive)
+      if Process.whereis(Assistant.Supervisor) do
+        Supervisor.start_child(Assistant.Supervisor, Assistant.Skills.Registry)
+      end
     end)
 
     %{skills_dir: tmp_dir}

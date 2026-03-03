@@ -299,7 +299,8 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       # Engine state should show 1 iteration (direct text response)
       {:ok, state} = Engine.get_state(user.id)
       assert state.iteration_count >= 1
-      assert state.message_count >= 2  # at least user + assistant
+      # at least user + assistant
+      assert state.message_count >= 2
 
       safe_stop(pid)
     end
@@ -385,6 +386,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       # Response should mention multiple domains
       response_lower = String.downcase(response)
+
       domain_hits =
         ["email", "calendar", "file", "task", "memory", "workflow"]
         |> Enum.count(fn domain -> String.contains?(response_lower, domain) end)
@@ -456,7 +458,9 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       # Response should mention both domains
       response_lower = String.downcase(response)
       assert String.contains?(response_lower, "email") or String.contains?(response_lower, "mail")
-      assert String.contains?(response_lower, "calendar") or String.contains?(response_lower, "event")
+
+      assert String.contains?(response_lower, "calendar") or
+               String.contains?(response_lower, "event")
 
       safe_stop(pid)
     end

@@ -4,14 +4,20 @@ defmodule AssistantWeb.SettingsUserLive.LoginTest do
   import Phoenix.LiveViewTest
   import Assistant.AccountsFixtures
 
+  # An admin must exist in the DB or the login page redirects to /setup
+  setup do
+    admin_settings_user_fixture()
+    :ok
+  end
+
   describe "login page" do
     test "renders login page", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/settings_users/log-in")
 
       assert html =~ "Sign In"
       assert html =~ "Sign in with Google"
-      assert html =~ "Create account"
-      assert html =~ "Use magic link"
+      assert html =~ "Create Account"
+      assert html =~ "Send Magic Link"
     end
   end
 
@@ -85,12 +91,12 @@ defmodule AssistantWeb.SettingsUserLive.LoginTest do
   end
 
   describe "login navigation" do
-    test "redirects to registration page when Create account is clicked", %{conn: conn} do
+    test "redirects to registration page when Create Account is clicked", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/settings_users/log-in")
 
       {:ok, _login_live, login_html} =
         lv
-        |> element("main a", "Create account")
+        |> element(~s|a[href="/settings_users/register"]|, "Create Account")
         |> render_click()
         |> follow_redirect(conn, ~p"/settings_users/register")
 
@@ -107,11 +113,11 @@ defmodule AssistantWeb.SettingsUserLive.LoginTest do
     test "shows login page with email filled in", %{conn: conn, settings_user: settings_user} do
       {:ok, _lv, html} = live(conn, ~p"/settings_users/log-in")
 
-      assert html =~ "Reauthenticate to continue with sensitive account changes."
       assert html =~ "Sign in with Google"
-
       assert html =~ ~s(id="login_form_password_email")
       assert html =~ ~s(value="#{settings_user.email}")
+      # Email field is readonly when re-authenticating
+      assert html =~ "readonly"
     end
   end
 end

@@ -437,9 +437,7 @@ defmodule Assistant.Memory.StoreTest do
       {:ok, msg} = Store.append_message(conv.id, %{role: "user", content: "boundary"})
 
       {:ok, updated} =
-        Store.update_summary(conv.id, "Summary", "model",
-          last_compacted_message_id: msg.id
-        )
+        Store.update_summary(conv.id, "Summary", "model", last_compacted_message_id: msg.id)
 
       assert updated.last_compacted_message_id == msg.id
     end

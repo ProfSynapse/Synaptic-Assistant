@@ -47,7 +47,10 @@ defmodule Assistant.Integrations.Slack.ClientTest do
 
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{"ok" => true, "channel" => "C12345", "ts" => "1234567890.123456"}))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{"ok" => true, "channel" => "C12345", "ts" => "1234567890.123456"})
+        )
       end)
 
       assert {:ok, %{"ok" => true, "channel" => "C12345"}} =
@@ -112,7 +115,8 @@ defmodule Assistant.Integrations.Slack.ClientTest do
         |> Plug.Conn.resp(200, Jason.encode!(%{"ok" => true, "message_ts" => "1234.5678"}))
       end)
 
-      assert {:ok, _} = Client.post_ephemeral(@bot_token, "C12345", "U99999", "Only you can see this")
+      assert {:ok, _} =
+               Client.post_ephemeral(@bot_token, "C12345", "U99999", "Only you can see this")
     end
   end
 
@@ -125,14 +129,17 @@ defmodule Assistant.Integrations.Slack.ClientTest do
       Bypass.expect_once(bypass, "POST", "/auth.test", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{
-          "ok" => true,
-          "url" => "https://myteam.slack.com/",
-          "team" => "My Team",
-          "user" => "bot",
-          "team_id" => "T12345",
-          "user_id" => "U12345"
-        }))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "ok" => true,
+            "url" => "https://myteam.slack.com/",
+            "team" => "My Team",
+            "user" => "bot",
+            "team_id" => "T12345",
+            "user_id" => "U12345"
+          })
+        )
       end)
 
       assert {:ok, %{"ok" => true, "team_id" => "T12345"}} = Client.auth_test(@bot_token)
@@ -153,10 +160,13 @@ defmodule Assistant.Integrations.Slack.ClientTest do
 
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{
-          "ok" => true,
-          "channel" => %{"id" => "C12345", "name" => "general"}
-        }))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "ok" => true,
+            "channel" => %{"id" => "C12345", "name" => "general"}
+          })
+        )
       end)
 
       assert {:ok, %{"ok" => true, "channel" => %{"name" => "general"}}} =

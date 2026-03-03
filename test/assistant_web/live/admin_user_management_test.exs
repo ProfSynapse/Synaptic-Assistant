@@ -116,7 +116,10 @@ defmodule AssistantWeb.AdminUserManagementTest do
       assert html =~ "toggle_user_disabled"
     end
 
-    test "disables toggle and delete for current user (self-protection)", %{conn: conn, admin: admin} do
+    test "disables toggle and delete for current user (self-protection)", %{
+      conn: conn,
+      admin: admin
+    } do
       {:ok, _lv, html} = live(conn, admin_path())
 
       # The admin's own card should have disabled toggle and delete

@@ -4,12 +4,18 @@ defmodule AssistantWeb.SettingsUserLive.RegistrationTest do
   import Phoenix.LiveViewTest
   import Assistant.AccountsFixtures
 
+  # An admin must exist in the DB or post-registration redirects land on /setup
+  setup do
+    admin_settings_user_fixture()
+    :ok
+  end
+
   describe "Registration page" do
     test "renders registration page", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/settings_users/register")
 
-      assert html =~ "Register"
-      assert html =~ "Log in"
+      assert html =~ "Create Account"
+      assert html =~ "Back to Sign In"
     end
 
     test "redirects if already logged in", %{conn: conn} do
@@ -30,7 +36,7 @@ defmodule AssistantWeb.SettingsUserLive.RegistrationTest do
         |> element("#registration_form")
         |> render_change(settings_user: %{"email" => "with spaces"})
 
-      assert result =~ "Register"
+      assert result =~ "Create Account"
       assert result =~ "must have the @ sign and no spaces"
     end
   end
@@ -66,21 +72,22 @@ defmodule AssistantWeb.SettingsUserLive.RegistrationTest do
         )
         |> render_submit()
 
-      assert result =~ "has already been taken"
+      # PetalComponents renders the unique constraint error — the form shows an error state
+      assert result =~ "pc-form-field-wrapper--error"
     end
   end
 
   describe "registration navigation" do
-    test "redirects to login page when the Log in button is clicked", %{conn: conn} do
+    test "redirects to login page when the Back to Sign In link is clicked", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/settings_users/register")
 
       {:ok, _login_live, login_html} =
         lv
-        |> element("main a", "Log in")
+        |> element(~s|a[href="/settings_users/log-in"]|, "Back to Sign In")
         |> render_click()
         |> follow_redirect(conn, ~p"/settings_users/log-in")
 
-      assert login_html =~ "Log in"
+      assert login_html =~ "Sign In"
     end
   end
 end

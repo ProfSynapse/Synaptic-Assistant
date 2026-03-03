@@ -42,8 +42,7 @@ defmodule Assistant.IntegrationSettings.ConnectionValidatorTest do
       hubspot_api_base_url: Application.get_env(:assistant, :hubspot_api_base_url),
       elevenlabs_api_key: Application.get_env(:assistant, :elevenlabs_api_key),
       elevenlabs_api_base_url: Application.get_env(:assistant, :elevenlabs_api_base_url),
-      google_service_account_json:
-        Application.get_env(:assistant, :google_service_account_json),
+      google_service_account_json: Application.get_env(:assistant, :google_service_account_json),
       google_oauth_client_id: Application.get_env(:assistant, :google_oauth_client_id),
       google_oauth_client_secret: Application.get_env(:assistant, :google_oauth_client_secret)
     }

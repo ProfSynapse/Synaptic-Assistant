@@ -20,7 +20,12 @@ defmodule Assistant.Orchestrator.LLMHelpersTest do
     end
 
     test "extracts name from string-keyed tool call" do
-      tc = %{"id" => "call_1", "type" => "function", "function" => %{"name" => "get_skill", "arguments" => "{}"}}
+      tc = %{
+        "id" => "call_1",
+        "type" => "function",
+        "function" => %{"name" => "get_skill", "arguments" => "{}"}
+      }
+
       assert LLMHelpers.extract_function_name(tc) == "get_skill"
     end
 
@@ -48,7 +53,13 @@ defmodule Assistant.Orchestrator.LLMHelpersTest do
 
   describe "extract_function_args/1" do
     test "decodes JSON string arguments with atom keys" do
-      tc = %{function: %{name: "use_skill", arguments: ~s({"skill": "email.send", "to": "test@example.com"})}}
+      tc = %{
+        function: %{
+          name: "use_skill",
+          arguments: ~s({"skill": "email.send", "to": "test@example.com"})
+        }
+      }
+
       args = LLMHelpers.extract_function_args(tc)
 
       assert args["skill"] == "email.send"
@@ -100,14 +111,15 @@ defmodule Assistant.Orchestrator.LLMHelpersTest do
     end
 
     test "handles complex nested JSON arguments" do
-      args_json = Jason.encode!(%{
-        "skill" => "email.send",
-        "arguments" => %{
-          "to" => "user@example.com",
-          "subject" => "Test",
-          "body" => "Hello\nWorld"
-        }
-      })
+      args_json =
+        Jason.encode!(%{
+          "skill" => "email.send",
+          "arguments" => %{
+            "to" => "user@example.com",
+            "subject" => "Test",
+            "body" => "Hello\nWorld"
+          }
+        })
 
       tc = %{function: %{name: "use_skill", arguments: args_json}}
       args = LLMHelpers.extract_function_args(tc)
@@ -136,7 +148,9 @@ defmodule Assistant.Orchestrator.LLMHelpersTest do
     test "returns false when tool_calls present" do
       response = %{
         content: "I'll search for that.",
-        tool_calls: [%{id: "call_1", type: "function", function: %{name: "use_skill", arguments: "{}"}}]
+        tool_calls: [
+          %{id: "call_1", type: "function", function: %{name: "use_skill", arguments: "{}"}}
+        ]
       }
 
       assert LLMHelpers.text_response?(response) == false
@@ -155,7 +169,9 @@ defmodule Assistant.Orchestrator.LLMHelpersTest do
     test "returns false when both content and tool_calls present" do
       response = %{
         content: "Some text",
-        tool_calls: [%{id: "call_1", type: "function", function: %{name: "use_skill", arguments: "{}"}}]
+        tool_calls: [
+          %{id: "call_1", type: "function", function: %{name: "use_skill", arguments: "{}"}}
+        ]
       }
 
       assert LLMHelpers.text_response?(response) == false
@@ -170,7 +186,9 @@ defmodule Assistant.Orchestrator.LLMHelpersTest do
     test "returns true when tool_calls is non-empty list" do
       response = %{
         content: nil,
-        tool_calls: [%{id: "call_1", type: "function", function: %{name: "use_skill", arguments: "{}"}}]
+        tool_calls: [
+          %{id: "call_1", type: "function", function: %{name: "use_skill", arguments: "{}"}}
+        ]
       }
 
       assert LLMHelpers.tool_call_response?(response) == true
@@ -218,7 +236,8 @@ defmodule Assistant.Orchestrator.LLMHelpersTest do
         %{role: "assistant", content: "I found 3 emails matching your query."}
       ]
 
-      assert LLMHelpers.extract_last_assistant_text(messages) == "I found 3 emails matching your query."
+      assert LLMHelpers.extract_last_assistant_text(messages) ==
+               "I found 3 emails matching your query."
     end
 
     test "skips assistant messages with nil content" do

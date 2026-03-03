@@ -66,58 +66,64 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
 
   describe "configured?/0 — raw JSON" do
     test "returns true for valid JSON with client_email and private_key" do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => test_private_key_pem()
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" => test_private_key_pem()
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       assert Auth.configured?()
     end
 
     test "returns false when JSON is missing client_email" do
-      json = Jason.encode!(%{
-        "private_key" => test_private_key_pem()
-      })
+      json =
+        Jason.encode!(%{
+          "private_key" => test_private_key_pem()
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       refute Auth.configured?()
     end
 
     test "returns false when JSON is missing private_key" do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       refute Auth.configured?()
     end
 
     test "returns false when JSON has null client_email" do
-      json = Jason.encode!(%{
-        "client_email" => nil,
-        "private_key" => test_private_key_pem()
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => nil,
+          "private_key" => test_private_key_pem()
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       refute Auth.configured?()
     end
 
     test "returns false when JSON has null private_key" do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => nil
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" => nil
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       refute Auth.configured?()
     end
 
     test "returns false when JSON has integer client_email" do
-      json = Jason.encode!(%{
-        "client_email" => 12345,
-        "private_key" => test_private_key_pem()
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => 12345,
+          "private_key" => test_private_key_pem()
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       refute Auth.configured?()
@@ -134,12 +140,13 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
     end
 
     test "returns true when JSON has extra fields (tolerant parsing)" do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => test_private_key_pem(),
-        "project_id" => "test-project",
-        "type" => "service_account"
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" => test_private_key_pem(),
+          "project_id" => "test-project",
+          "type" => "service_account"
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       assert Auth.configured?()
@@ -148,10 +155,11 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
 
   describe "configured?/0 — file path" do
     test "returns true when value is a file path to valid JSON" do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => test_private_key_pem()
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" => test_private_key_pem()
+        })
 
       path = Path.join(System.tmp_dir!(), "test_sa_#{System.unique_integer([:positive])}.json")
       File.write!(path, json)
@@ -168,7 +176,9 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
     end
 
     test "returns false when file contains invalid JSON" do
-      path = Path.join(System.tmp_dir!(), "test_sa_bad_#{System.unique_integer([:positive])}.json")
+      path =
+        Path.join(System.tmp_dir!(), "test_sa_bad_#{System.unique_integer([:positive])}.json")
+
       File.write!(path, "this is not json")
       on_exit(fn -> File.rm(path) end)
 
@@ -178,7 +188,10 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
 
     test "returns false when file JSON is missing required fields" do
       json = Jason.encode!(%{"type" => "service_account"})
-      path = Path.join(System.tmp_dir!(), "test_sa_missing_#{System.unique_integer([:positive])}.json")
+
+      path =
+        Path.join(System.tmp_dir!(), "test_sa_missing_#{System.unique_integer([:positive])}.json")
+
       File.write!(path, json)
       on_exit(fn -> File.rm(path) end)
 
@@ -235,10 +248,11 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
 
   describe "service_token/0 — invalid private key" do
     test "returns auth error for malformed PEM" do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => "not-a-valid-pem-key"
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" => "not-a-valid-pem-key"
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       result = Auth.service_token()
@@ -251,10 +265,11 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
     end
 
     test "returns auth error for empty private_key" do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => ""
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" => ""
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       result = Auth.service_token()
@@ -268,10 +283,12 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
     end
 
     test "returns auth error for truncated PEM" do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => "-----BEGIN RSA PRIVATE KEY-----\ntruncated\n-----END RSA PRIVATE KEY-----\n"
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" =>
+            "-----BEGIN RSA PRIVATE KEY-----\ntruncated\n-----END RSA PRIVATE KEY-----\n"
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       result = Auth.service_token()
@@ -293,10 +310,11 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
 
   describe "service_token/0 — JWT signing with valid RSA key" do
     setup do
-      json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => test_private_key_pem()
-      })
+      json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" => test_private_key_pem()
+        })
 
       Application.put_env(:assistant, :google_service_account_json, json)
       :ok
@@ -557,10 +575,11 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
       {_type, pem} = JOSE.JWK.to_pem(jwk)
 
       # Build service account JSON with valid credentials
-      sa_json = Jason.encode!(%{
-        "client_email" => @test_client_email,
-        "private_key" => pem
-      })
+      sa_json =
+        Jason.encode!(%{
+          "client_email" => @test_client_email,
+          "private_key" => pem
+        })
 
       Application.put_env(:assistant, :google_service_account_json, sa_json)
 
@@ -576,11 +595,14 @@ defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
       Bypass.expect_once(bypass, "POST", "/token", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, Jason.encode!(%{
-          "access_token" => "bypass-token",
-          "expires_in" => 3600,
-          "token_type" => "Bearer"
-        }))
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "access_token" => "bypass-token",
+            "expires_in" => 3600,
+            "token_type" => "Bearer"
+          })
+        )
       end)
 
       # Clear ETS cache to force a fresh token fetch

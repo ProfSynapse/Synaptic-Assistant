@@ -162,7 +162,11 @@ defmodule Assistant.Integration.ToolUseLLMTest do
       # Step 1: Ask about email capabilities
       messages = [
         %{role: "system", content: orchestrator_system_prompt()},
-        %{role: "user", content: "I need to search my emails. First check what email skills are available, then dispatch an agent to search for messages from alice@example.com."}
+        %{
+          role: "user",
+          content:
+            "I need to search my emails. First check what email skills are available, then dispatch an agent to search for messages from alice@example.com."
+        }
       ]
 
       case call_llm_with_tools(messages, tools, api_key, "chain_step1") do
@@ -366,13 +370,15 @@ defmodule Assistant.Integration.ToolUseLLMTest do
         type: "function",
         function: %{
           name: "get_skill",
-          description: "Discover available skills. Pass a domain name (e.g., 'email', 'calendar') to see skills in that domain, or omit to see all domains.",
+          description:
+            "Discover available skills. Pass a domain name (e.g., 'email', 'calendar') to see skills in that domain, or omit to see all domains.",
           parameters: %{
             "type" => "object",
             "properties" => %{
               "skill_or_domain" => %{
                 "type" => "string",
-                "description" => "Domain or skill name to look up (e.g., 'email', 'calendar', 'email.search')"
+                "description" =>
+                  "Domain or skill name to look up (e.g., 'email', 'calendar', 'email.search')"
               },
               "search" => %{
                 "type" => "string",

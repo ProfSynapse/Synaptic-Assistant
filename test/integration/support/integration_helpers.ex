@@ -401,7 +401,11 @@ defmodule Assistant.Integration.Helpers do
 
         case exec_result do
           {:ok, result} ->
-            log_response("execute_skill[#{skill_name}]", {:ok, %{status: result.status, content: result.content}})
+            log_response(
+              "execute_skill[#{skill_name}]",
+              {:ok, %{status: result.status, content: result.content}}
+            )
+
             log_pass("execute_skill[#{skill_name}]", elapsed)
             {:ok, %{skill: skill_name, flags: flags, result: result}}
 

@@ -266,7 +266,9 @@ defmodule Assistant.Orchestrator.Tools.GetSkillProgressiveTest do
         end
       else
         # Fallback: create minimal test skills
-        tmp_dir = Path.join(System.tmp_dir!(), "test_skills_prog_#{System.unique_integer([:positive])}")
+        tmp_dir =
+          Path.join(System.tmp_dir!(), "test_skills_prog_#{System.unique_integer([:positive])}")
+
         File.mkdir_p!(tmp_dir)
 
         case Registry.start_link(skills_dir: tmp_dir) do
