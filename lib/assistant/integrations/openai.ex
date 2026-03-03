@@ -33,7 +33,7 @@ defmodule Assistant.Integrations.OpenAI do
             {:error, {:rate_limited, retry_after}}
 
           {:ok, %{status: status, body: resp_body}} when status >= 400 ->
-            error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+            error_message = safe_error_message(resp_body)
             {:error, {:api_error, status, error_message}}
 
           {:error, %Req.TransportError{reason: reason}} ->
@@ -84,7 +84,7 @@ defmodule Assistant.Integrations.OpenAI do
 
           {:ok, %{status: status, body: resp_body}} when status >= 400 ->
             Process.delete(:openai_stream_usage)
-            error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+            error_message = safe_error_message(resp_body)
             {:error, {:api_error, status, error_message}}
 
           {:error, reason} ->
@@ -108,7 +108,7 @@ defmodule Assistant.Integrations.OpenAI do
         :ok
 
       {:ok, %{status: status, body: body}} when status >= 400 ->
-        {:error, {:api_error, status, get_in(body, ["error", "message"])}}
+        {:error, {:api_error, status, safe_error_message(body)}}
 
       {:error, reason} ->
         {:error, {:request_failed, reason}}
@@ -135,7 +135,7 @@ defmodule Assistant.Integrations.OpenAI do
         {:ok, model_ids}
 
       {:ok, %{status: status, body: body}} when status >= 400 ->
-        {:error, {:api_error, status, get_in(body, ["error", "message"])}}
+        {:error, {:api_error, status, safe_error_message(body)}}
 
       {:error, reason} ->
         {:error, {:request_failed, reason}}
@@ -651,7 +651,7 @@ defmodule Assistant.Integrations.OpenAI do
 
       {:ok, %{status: status, body: resp_body}} ->
         Process.delete(:openai_codex_state)
-        error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+        error_message = safe_error_message(resp_body)
         {:error, {:api_error, status, error_message}}
 
       {:error, reason} ->
@@ -954,6 +954,14 @@ defmodule Assistant.Integrations.OpenAI do
   defp oauth_user_agent do
     Application.get_env(:assistant, :openai_oauth_user_agent, "synaptic-assistant/1.0")
   end
+
+  # Safely extracts an error message from an API response body.
+  # Handles cases where the body is a map (decoded JSON), an empty string,
+  # nil, or any other non-map value that would crash get_in/2.
+  defp safe_error_message(%{"error" => %{"message" => msg}}) when is_binary(msg), do: msg
+  defp safe_error_message(%{"error" => msg}) when is_binary(msg), do: msg
+  defp safe_error_message(body) when is_binary(body) and body != "", do: body
+  defp safe_error_message(_), do: "Unknown error"
 
   defp blank_to_nil(value) when is_binary(value) do
     trimmed = String.trim(value)
