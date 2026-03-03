@@ -79,6 +79,7 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:allowlist_form, to_form(%{}, as: "allowlist_entry"))
     |> assign(:allowlist_entries, [])
     |> assign(:admin_settings_users, [])
+    |> assign(:admin_users_with_keys, [])
     |> assign(:integration_settings, [])
     |> Loaders.load_profile()
     |> Loaders.load_orchestrator_prompt()

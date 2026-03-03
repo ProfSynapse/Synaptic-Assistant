@@ -28,6 +28,7 @@ defmodule AssistantWeb.AdminLive do
          |> assign(:allowlist_form, blank_allowlist_form())
          |> assign(:allowlist_entries, [])
          |> assign(:settings_users, [])
+         |> assign(:admin_users_with_keys, [])
          |> assign(:integration_settings, [])}
 
       true ->
@@ -286,6 +287,105 @@ defmodule AssistantWeb.AdminLive do
         </section>
 
         <section :if={@current_scope.settings_user.is_admin} class="space-y-4">
+          <section class="rounded-lg border border-zinc-200 bg-white p-4 space-y-4">
+            <div>
+              <h2 class="font-semibold">User API Keys</h2>
+              <p class="text-sm text-zinc-600">
+                Provision per-user OpenRouter API keys. Users with a key will use it instead of the system key.
+              </p>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-sm" id="admin-user-keys-table">
+                <thead>
+                  <tr class="text-left border-b">
+                    <th class="py-2 pr-4">User</th>
+                    <th class="py-2 pr-4">Chat Account</th>
+                    <th class="py-2 pr-4">OpenRouter Key</th>
+                    <th class="py-2 pr-4">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :if={@admin_users_with_keys == []}>
+                    <td class="py-3 text-zinc-500" colspan="4">No user accounts yet.</td>
+                  </tr>
+                  <tr :for={user <- @admin_users_with_keys} id={"user-key-#{user.id}"} class="border-b last:border-0">
+                    <td class="py-2 pr-4">
+                      <div>
+                        <span class="font-medium">{user.email}</span>
+                        <span :if={user.display_name} class="text-zinc-500 text-xs ml-1">
+                          ({user.display_name})
+                        </span>
+                      </div>
+                    </td>
+                    <td class="py-2 pr-4">
+                      <span
+                        :if={user.has_linked_user}
+                        class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
+                      >
+                        Linked
+                      </span>
+                      <span
+                        :if={!user.has_linked_user}
+                        class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500"
+                      >
+                        Not Linked
+                      </span>
+                    </td>
+                    <td class="py-2 pr-4">
+                      <span
+                        :if={user.has_openrouter_key}
+                        class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
+                      >
+                        Configured
+                      </span>
+                      <span
+                        :if={!user.has_openrouter_key}
+                        class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500"
+                      >
+                        Not Set
+                      </span>
+                    </td>
+                    <td class="py-2 pr-4">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <form
+                          phx-submit="save_user_openrouter_key"
+                          id={"user-key-form-#{user.id}"}
+                          class="flex items-center gap-2"
+                        >
+                          <input type="hidden" name="user_id" value={user.id} />
+                          <input
+                            type="password"
+                            name="api_key"
+                            placeholder={if user.has_openrouter_key, do: "Replace key...", else: "sk-or-v1-..."}
+                            autocomplete="off"
+                            class="rounded-md border border-zinc-300 px-2 py-1 text-sm font-mono w-40"
+                          />
+                          <button
+                            type="submit"
+                            class="rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white hover:bg-zinc-700"
+                          >
+                            Save
+                          </button>
+                        </form>
+                        <button
+                          :if={user.has_openrouter_key}
+                          type="button"
+                          phx-click="delete_user_openrouter_key"
+                          phx-value-id={user.id}
+                          class="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                          data-confirm="Remove this user's OpenRouter API key?"
+                        >
+                          Remove Key
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           <div>
             <h2 class="text-xl font-semibold">Integrations</h2>
             <p class="text-sm text-zinc-600">
@@ -487,12 +587,53 @@ defmodule AssistantWeb.AdminLive do
     end
   end
 
+  def handle_event("save_user_openrouter_key", %{"user_id" => user_id, "api_key" => api_key}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      api_key = String.trim(api_key)
+
+      if api_key == "" do
+        {:noreply, put_flash(socket, :error, "API key cannot be blank.")}
+      else
+        case Accounts.admin_set_openrouter_key(user_id, api_key) do
+          {:ok, _user} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "OpenRouter API key saved.")
+             |> assign(:admin_users_with_keys, Accounts.list_settings_users_for_admin())}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Unable to save API key.")}
+        end
+      end
+    end
+  end
+
+  def handle_event("delete_user_openrouter_key", %{"id" => user_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      case Accounts.admin_clear_openrouter_key(user_id) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "OpenRouter API key removed.")
+           |> assign(:admin_users_with_keys, Accounts.list_settings_users_for_admin())}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to remove API key.")}
+      end
+    end
+  end
+
   defp load_admin_data(socket) do
     assign(socket,
       can_bootstrap_admin: Accounts.admin_bootstrap_available?(),
       allowlist_form: blank_allowlist_form(),
       allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
       settings_users: Accounts.list_admin_settings_users(),
+      admin_users_with_keys: Accounts.list_settings_users_for_admin(),
       integration_settings: IntegrationSettings.list_all()
     )
   end
