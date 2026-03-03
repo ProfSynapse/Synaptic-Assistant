@@ -147,25 +147,25 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
 
   defp status_icon(%{status: :connected} = assigns) do
     ~H"""
-    <.icon name="hero-check-circle" class="h-5 w-5 text-green-500" />
+    <span aria-label="Connected"><.icon name="hero-check-circle" class="h-5 w-5 text-green-500" /></span>
     """
   end
 
   defp status_icon(%{status: :disabled} = assigns) do
     ~H"""
-    <.icon name="hero-x-circle" class="h-5 w-5 text-zinc-400" />
+    <span aria-label="Disabled"><.icon name="hero-x-circle" class="h-5 w-5 text-zinc-400" /></span>
     """
   end
 
   defp status_icon(%{status: :not_connected} = assigns) do
     ~H"""
-    <.icon name="hero-x-circle" class="h-5 w-5 text-red-400" />
+    <span aria-label="Connection failed"><.icon name="hero-x-circle" class="h-5 w-5 text-red-400" /></span>
     """
   end
 
   defp status_icon(assigns) do
     ~H"""
-    <.icon name="hero-x-circle" class="h-5 w-5 text-red-400" />
+    <span aria-label="Not configured"><.icon name="hero-x-circle" class="h-5 w-5 text-zinc-400" /></span>
     """
   end
 

@@ -384,6 +384,24 @@ defmodule Assistant.IntegrationSettings.ConnectionValidatorTest do
       results = ConnectionValidator.validate_all(nil)
       assert results["google_chat"] == :connected
     end
+
+    test "returns :not_connected when service account credentials are invalid" do
+      # Provide JSON with required fields but an invalid private key.
+      # Auth.service_token() parses credentials OK, but JOSE.JWK.from_pem
+      # fails → {:error, :invalid_private_key} → validator maps to :not_connected.
+      bad_creds =
+        Jason.encode!(%{
+          "client_email" => "test@test.iam.gserviceaccount.com",
+          "private_key" => "not-a-valid-pem-key"
+        })
+
+      Application.put_env(:assistant, :google_service_account_json, bad_creds)
+      # Clear ETS cache so it actually fetches a new token
+      clear_ets_cache()
+
+      results = ConnectionValidator.validate_all(nil)
+      assert results["google_chat"] == :not_connected
+    end
   end
 
   # ---------------------------------------------------------------
@@ -455,6 +473,17 @@ defmodule Assistant.IntegrationSettings.ConnectionValidatorTest do
 
       results = ConnectionValidator.validate_all(nil)
       assert results["elevenlabs"] == :not_connected
+    end
+
+    test "returns :not_connected when validator raises an exception" do
+      Application.put_env(:assistant, :hubspot_api_key, "pat-crash-key")
+
+      # Set HubSpot base URL to an invalid scheme so Req.get raises ArgumentError.
+      # This exercises the rescue clause in validate_all/1 (lines 76-82).
+      Application.put_env(:assistant, :hubspot_api_base_url, "://invalid")
+
+      results = ConnectionValidator.validate_all(nil)
+      assert results["hubspot"] == :not_connected
     end
 
     test "returns :not_connected when validator exceeds timeout" do

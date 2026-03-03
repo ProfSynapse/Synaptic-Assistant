@@ -5,7 +5,7 @@
 # instead of relying on key existence alone.
 #
 # Each integration has a validator function registered in @validators. Adding a
-# new integration requires one tuple in @validators and one defp clause for
+# new integration requires one entry in @validators and one defp clause for
 # run_validator/2.
 #
 # Related files:
@@ -13,6 +13,8 @@
 #   - lib/assistant/integrations/telegram/client.ex (Telegram health check)
 #   - lib/assistant/integrations/discord/client.ex (Discord health check)
 #   - lib/assistant/integrations/slack/client.ex (Slack auth test)
+#   - lib/assistant/integrations/hubspot/client.ex (HubSpot health check)
+#   - lib/assistant/integrations/elevenlabs/client.ex (ElevenLabs health check)
 #   - lib/assistant/integrations/google/auth.ex (Google token validation)
 #   - lib/assistant_web/live/settings_live/loaders.ex (consumer)
 
@@ -28,6 +30,9 @@ defmodule Assistant.IntegrationSettings.ConnectionValidator do
       results = ConnectionValidator.validate_all(user_id)
       # => %{"telegram" => :connected, "discord" => :not_connected, ...}
 
+      result = ConnectionValidator.validate_one("telegram", user_id)
+      # => :connected
+
   ## Adding a New Integration
 
   1. Add a `{group_string}` entry to `@validators`
@@ -36,7 +41,9 @@ defmodule Assistant.IntegrationSettings.ConnectionValidator do
 
   alias Assistant.IntegrationSettings
   alias Assistant.Integrations.Discord
+  alias Assistant.Integrations.ElevenLabs
   alias Assistant.Integrations.Google.Auth
+  alias Assistant.Integrations.HubSpot
   alias Assistant.Integrations.Slack
   alias Assistant.Integrations.Telegram
 
@@ -44,18 +51,9 @@ defmodule Assistant.IntegrationSettings.ConnectionValidator do
 
   @type result :: :connected | :not_connected | :not_configured
 
-  @default_hubspot_base_url "https://api.hubapi.com"
-  @default_elevenlabs_base_url "https://api.elevenlabs.io"
+  @validators ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
-  @validators [
-    "google_workspace",
-    "telegram",
-    "slack",
-    "discord",
-    "google_chat",
-    "hubspot",
-    "elevenlabs"
-  ]
+  @validators_set MapSet.new(@validators)
 
   @doc """
   Run all integration validators in parallel and return status per group.
@@ -69,32 +67,47 @@ defmodule Assistant.IntegrationSettings.ConnectionValidator do
   def validate_all(user_id) do
     @validators
     |> Task.async_stream(
-      fn group ->
-        result =
-          try do
-            run_validator(group, user_id)
-          rescue
-            error ->
-              Logger.warning("Connection validation failed for #{group}",
-                error: Exception.message(error)
-              )
-
-              :not_connected
-          catch
-            :exit, _ -> :not_connected
-          end
-
-        {group, result}
-      end,
+      fn group -> {group, safe_run(group, user_id)} end,
       max_concurrency: 7,
       timeout: 5_000,
       on_timeout: :kill_task
     )
     |> Enum.zip(@validators)
-    |> Enum.reduce(%{}, fn
-      {{:ok, {group, result}}, _group}, acc -> Map.put(acc, group, result)
-      {{:exit, _reason}, group}, acc -> Map.put(acc, group, :not_connected)
+    |> Map.new(fn
+      {{:ok, {group, result}}, _group} -> {group, result}
+      {{:exit, _reason}, group} -> {group, :not_connected}
     end)
+  end
+
+  @doc """
+  Validate a single integration group.
+
+  Returns the status directly (no map wrapping). Useful for targeted rechecks
+  after saving a key, without re-validating all integrations.
+
+  Returns `:not_configured` if the group is not in the validator registry.
+  """
+  @spec validate_one(String.t(), String.t() | nil) :: result()
+  def validate_one(group, user_id) do
+    if MapSet.member?(@validators_set, group) do
+      safe_run(group, user_id)
+    else
+      :not_configured
+    end
+  end
+
+  # Wraps run_validator with rescue/catch for resilience.
+  defp safe_run(group, user_id) do
+    run_validator(group, user_id)
+  rescue
+    error ->
+      Logger.warning("Connection validation failed for #{group}",
+        error: Exception.message(error)
+      )
+
+      :not_connected
+  catch
+    :exit, _ -> :not_connected
   end
 
   # --- Validators ---
@@ -162,16 +175,8 @@ defmodule Assistant.IntegrationSettings.ConnectionValidator do
         :not_configured
 
       token ->
-        url = "#{hubspot_base_url()}/crm/v3/objects/contacts"
-
-        case Req.get(url,
-               params: [limit: 1],
-               headers: [{"authorization", "Bearer #{token}"}],
-               receive_timeout: 5_000,
-               retry: false
-             ) do
-          {:ok, %Req.Response{status: 200}} -> :connected
-          {:ok, %Req.Response{}} -> :not_connected
+        case HubSpot.Client.health_check(token) do
+          {:ok, _} -> :connected
           {:error, _} -> :not_connected
         end
     end
@@ -183,25 +188,10 @@ defmodule Assistant.IntegrationSettings.ConnectionValidator do
         :not_configured
 
       key ->
-        url = "#{elevenlabs_base_url()}/v1/user"
-
-        case Req.get(url,
-               headers: [{"xi-api-key", key}],
-               receive_timeout: 5_000,
-               retry: false
-             ) do
-          {:ok, %Req.Response{status: 200}} -> :connected
-          {:ok, %Req.Response{}} -> :not_connected
+        case ElevenLabs.Client.health_check(key) do
+          {:ok, _} -> :connected
           {:error, _} -> :not_connected
         end
     end
-  end
-
-  defp hubspot_base_url do
-    Application.get_env(:assistant, :hubspot_api_base_url, @default_hubspot_base_url)
-  end
-
-  defp elevenlabs_base_url do
-    Application.get_env(:assistant, :elevenlabs_api_base_url, @default_elevenlabs_base_url)
   end
 end
