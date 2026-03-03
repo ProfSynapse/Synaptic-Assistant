@@ -4,8 +4,8 @@
 # webhook request. Uses JOSE to verify
 # RS256 signatures against Google's public X.509 certificates.
 #
-# Certificates are cached in an ETS table with a 1-hour TTL to avoid
-# fetching on every request.
+# Certificates are cached in an ETS table with a 1-hour TTL, keyed by issuer
+# to support multiple Google service accounts (Chat API vs G Suite Add-ons).
 #
 # Related files:
 #   - lib/assistant_web/controllers/google_chat_controller.ex (consumer)
@@ -20,12 +20,23 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
   header signed by Google. This plug:
 
     1. Extracts the Bearer token from the Authorization header
-    2. Fetches (and caches) Google's public X.509 certificates
-    3. Decodes the JWT header to find the `kid` (key ID)
-    4. Verifies the RS256 signature against the matching public key
-    5. Validates `iss`, `aud`, and `exp` claims
-    6. On success, assigns `:google_chat_claims` to the conn
-    7. On failure, returns 401 with no error details
+    2. Peeks at the JWT header (`kid`) and payload (`iss`) without verifying
+    3. Validates the `iss` claim is an allowed Google service account
+    4. Fetches (and caches per-issuer) Google's public X.509 certificates
+    5. Verifies the RS256 signature against the matching public key
+    6. Validates `iss`, `aud`, and `exp` claims
+    7. On success, assigns `:google_chat_claims` to the conn
+    8. On failure, returns 401 with no error details
+
+  ## Supported Issuers
+
+  Google Chat may sign JWTs with different service accounts depending on configuration:
+
+    * `chat@system.gserviceaccount.com` — standard Chat API service account
+    * `*@gcp-sa-gsuiteaddons.iam.gserviceaccount.com` — G Suite Add-ons HTTP endpoint mode
+
+  Certificates are fetched dynamically from Google's public endpoint based on the
+  JWT's `iss` claim, with validation that the issuer is a legitimate Google service account.
 
   ## Configuration
 
@@ -44,11 +55,20 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
 
   @behaviour Plug
 
-  @google_certs_url "https://www.googleapis.com/service_accounts/v1/metadata/x509/chat@system.gserviceaccount.com"
-  @expected_issuer "chat@system.gserviceaccount.com"
+  @google_certs_base_url "https://www.googleapis.com/service_accounts/v1/metadata/x509/"
   @cache_table :google_chat_certs_cache
   @cache_ttl_ms :timer.hours(1)
   @clock_skew_seconds 30
+
+  # Allowed issuer patterns for Google Chat webhook JWTs.
+  # The Chat API uses its own service account; G Suite Add-ons uses a project-
+  # scoped service account with a different domain suffix.
+  @allowed_issuers_exact MapSet.new([
+                           "chat@system.gserviceaccount.com"
+                         ])
+  @allowed_issuer_suffixes [
+    "@gcp-sa-gsuiteaddons.iam.gserviceaccount.com"
+  ]
 
   # --- Plug Callbacks ---
 
@@ -97,7 +117,9 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
 
   defp do_verify(token, project_number) do
     with {:ok, kid} <- extract_kid(token),
-         {:ok, jwk} <- get_public_key(kid),
+         {:ok, issuer} <- extract_issuer(token),
+         :ok <- validate_issuer(issuer),
+         {:ok, jwk} <- get_public_key(kid, issuer),
          {:ok, claims} <- verify_signature(jwk, token),
          :ok <- validate_claims(claims, project_number) do
       {:ok, claims}
@@ -117,9 +139,50 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
     _ -> {:error, :invalid_token_header}
   end
 
-  # Look up the cached public key for the given kid, fetching certs if needed.
-  defp get_public_key(kid) do
-    case get_cached_certs() do
+  # Extract the `iss` claim from the JWT payload without verifying signature.
+  # We need the issuer to determine which cert endpoint to fetch from.
+  @doc false
+  def extract_issuer(token) do
+    case JOSE.JWT.peek_payload(token) do
+      %JOSE.JWT{fields: %{"iss" => iss}} when is_binary(iss) and iss != "" ->
+        {:ok, iss}
+
+      _ ->
+        {:error, :missing_issuer}
+    end
+  rescue
+    _ -> {:error, :invalid_token_payload}
+  end
+
+  # Validate the issuer is an allowed Google service account before fetching certs.
+  # Security: prevents cert fetches from arbitrary URLs controlled by an attacker.
+  @doc false
+  def validate_issuer(issuer) do
+    if allowed_issuer?(issuer) do
+      :ok
+    else
+      Logger.warning("Google Chat JWT rejected: disallowed issuer #{inspect(issuer)}")
+      {:error, :disallowed_issuer}
+    end
+  end
+
+  @doc false
+  def allowed_issuer?(issuer) when is_binary(issuer) do
+    MapSet.member?(@allowed_issuers_exact, issuer) or
+      Enum.any?(@allowed_issuer_suffixes, &String.ends_with?(issuer, &1))
+  end
+
+  def allowed_issuer?(_), do: false
+
+  # Build the Google public certs URL for a given issuer.
+  @doc false
+  def certs_url_for_issuer(issuer) do
+    @google_certs_base_url <> URI.encode_www_form(issuer)
+  end
+
+  # Look up the cached public key for the given kid and issuer, fetching certs if needed.
+  defp get_public_key(kid, issuer) do
+    case get_cached_certs(issuer) do
       {:ok, certs} ->
         case Map.get(certs, kid) do
           nil -> {:error, :unknown_kid}
@@ -162,11 +225,13 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
   end
 
   # Validate iss, aud, and exp claims.
+  # The issuer has already been validated against the allowlist before cert fetch,
+  # but we re-check here to ensure the verified payload matches.
   defp validate_claims(claims, project_number) do
     now = System.system_time(:second)
 
     cond do
-      claims["iss"] != @expected_issuer ->
+      not allowed_issuer?(claims["iss"]) ->
         {:error, :invalid_issuer}
 
       claims["aud"] != project_number ->
@@ -180,39 +245,41 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
     end
   end
 
-  # --- Certificate Caching ---
+  # --- Certificate Caching (per-issuer) ---
 
-  defp get_cached_certs do
+  defp get_cached_certs(issuer) do
     ensure_ets_table()
+    cache_key = {:certs, issuer}
 
-    case :ets.lookup(@cache_table, :certs) do
-      [{:certs, certs, cached_at}] ->
+    case :ets.lookup(@cache_table, cache_key) do
+      [{^cache_key, certs, cached_at}] ->
         if System.monotonic_time(:millisecond) - cached_at < @cache_ttl_ms do
           {:ok, certs}
         else
-          fetch_and_cache_certs()
+          fetch_and_cache_certs(issuer)
         end
 
       [] ->
-        fetch_and_cache_certs()
+        fetch_and_cache_certs(issuer)
     end
   end
 
-  defp fetch_and_cache_certs do
-    Logger.info("Fetching Google Chat public certificates from #{@google_certs_url}")
+  defp fetch_and_cache_certs(issuer) do
+    url = certs_url_for_issuer(issuer)
+    Logger.info("Fetching Google Chat public certificates from #{url}")
 
-    case Req.get(@google_certs_url) do
+    case Req.get(url) do
       {:ok, %Req.Response{status: 200, body: body}} when is_map(body) ->
         now = System.monotonic_time(:millisecond)
-        :ets.insert(@cache_table, {:certs, body, now})
+        :ets.insert(@cache_table, {{:certs, issuer}, body, now})
         {:ok, body}
 
       {:ok, %Req.Response{status: status}} ->
-        Logger.error("Failed to fetch Google certs: HTTP #{status}")
+        Logger.error("Failed to fetch Google certs for #{issuer}: HTTP #{status}")
         {:error, :cert_fetch_failed}
 
       {:error, reason} ->
-        Logger.error("Failed to fetch Google certs: #{inspect(reason)}")
+        Logger.error("Failed to fetch Google certs for #{issuer}: #{inspect(reason)}")
         {:error, :cert_fetch_failed}
     end
   end
