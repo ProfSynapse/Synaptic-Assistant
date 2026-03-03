@@ -536,6 +536,159 @@ defmodule Assistant.AccountsTest do
     end
   end
 
+  ## Admin per-user key management
+
+  describe "list_settings_users_for_admin/0" do
+    test "returns empty list when no users exist" do
+      # Clean slate — DataCase sandbox starts empty
+      assert Accounts.list_settings_users_for_admin() == []
+    end
+
+    test "returns users with correct fields" do
+      user = settings_user_fixture()
+
+      [result] = Accounts.list_settings_users_for_admin()
+
+      assert result.id == user.id
+      assert result.email == user.email
+      assert is_boolean(result.has_openrouter_key)
+      assert is_boolean(result.has_linked_user)
+      assert Map.has_key?(result, :display_name)
+    end
+
+    test "shows has_openrouter_key as false when no key set" do
+      settings_user_fixture()
+
+      [result] = Accounts.list_settings_users_for_admin()
+      refute result.has_openrouter_key
+    end
+
+    test "shows has_openrouter_key as true when key is set" do
+      user = settings_user_fixture()
+      {:ok, _} = Accounts.save_openrouter_api_key(user, "sk-or-test-key")
+
+      [result] = Accounts.list_settings_users_for_admin()
+      assert result.has_openrouter_key
+    end
+
+    test "shows has_linked_user as false when no chat user linked" do
+      settings_user_fixture()
+
+      [result] = Accounts.list_settings_users_for_admin()
+      refute result.has_linked_user
+    end
+
+    test "shows has_linked_user as true when chat user is linked" do
+      user = settings_user_fixture()
+
+      # Create a chat user and link it
+      {:ok, chat_user} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "ext-#{System.unique_integer([:positive])}",
+          channel: "google_chat"
+        })
+        |> Repo.insert()
+
+      user
+      |> Ecto.Changeset.change(%{user_id: chat_user.id})
+      |> Repo.update!()
+
+      [result] = Accounts.list_settings_users_for_admin()
+      assert result.has_linked_user
+    end
+
+    test "returns users ordered by email" do
+      # Create users with known emails that sort predictably
+      settings_user_fixture(%{email: "zara@example.com"})
+      settings_user_fixture(%{email: "alice@example.com"})
+      settings_user_fixture(%{email: "mike@example.com"})
+
+      results = Accounts.list_settings_users_for_admin()
+      emails = Enum.map(results, & &1.email)
+
+      assert emails == Enum.sort(emails)
+    end
+
+    test "returns multiple users with mixed key states" do
+      user_with_key = settings_user_fixture(%{email: "has-key@example.com"})
+      _user_without_key = settings_user_fixture(%{email: "no-key@example.com"})
+
+      {:ok, _} = Accounts.save_openrouter_api_key(user_with_key, "sk-or-admin-test")
+
+      results = Accounts.list_settings_users_for_admin()
+      assert length(results) == 2
+
+      keyed = Enum.find(results, &(&1.email == "has-key@example.com"))
+      unkeyed = Enum.find(results, &(&1.email == "no-key@example.com"))
+
+      assert keyed.has_openrouter_key
+      refute unkeyed.has_openrouter_key
+    end
+  end
+
+  describe "admin_set_openrouter_key/2" do
+    setup do
+      %{settings_user: settings_user_fixture()}
+    end
+
+    test "sets key successfully", %{settings_user: settings_user} do
+      assert {:ok, updated} =
+               Accounts.admin_set_openrouter_key(settings_user.id, "sk-or-admin-key")
+
+      assert updated.openrouter_api_key == "sk-or-admin-key"
+    end
+
+    test "key is persisted and encrypted in DB", %{settings_user: settings_user} do
+      {:ok, _} = Accounts.admin_set_openrouter_key(settings_user.id, "sk-or-persist-test")
+
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert reloaded.openrouter_api_key == "sk-or-persist-test"
+    end
+
+    test "overwrites an existing key", %{settings_user: settings_user} do
+      {:ok, _} = Accounts.admin_set_openrouter_key(settings_user.id, "sk-or-first")
+      {:ok, updated} = Accounts.admin_set_openrouter_key(settings_user.id, "sk-or-second")
+
+      assert updated.openrouter_api_key == "sk-or-second"
+
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert reloaded.openrouter_api_key == "sk-or-second"
+    end
+
+    test "returns :not_found for nonexistent user ID" do
+      fake_id = Ecto.UUID.generate()
+      assert {:error, :not_found} = Accounts.admin_set_openrouter_key(fake_id, "sk-or-key")
+    end
+  end
+
+  describe "admin_clear_openrouter_key/1" do
+    setup do
+      %{settings_user: settings_user_fixture()}
+    end
+
+    test "clears an existing key", %{settings_user: settings_user} do
+      {:ok, _} = Accounts.save_openrouter_api_key(settings_user, "sk-or-to-clear")
+
+      assert {:ok, updated} = Accounts.admin_clear_openrouter_key(settings_user.id)
+      assert is_nil(updated.openrouter_api_key)
+
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert is_nil(reloaded.openrouter_api_key)
+    end
+
+    test "succeeds when key is already nil", %{settings_user: settings_user} do
+      assert is_nil(settings_user.openrouter_api_key)
+      assert {:ok, updated} = Accounts.admin_clear_openrouter_key(settings_user.id)
+      assert is_nil(updated.openrouter_api_key)
+    end
+
+    test "returns :not_found for nonexistent user ID" do
+      fake_id = Ecto.UUID.generate()
+      assert {:error, :not_found} = Accounts.admin_clear_openrouter_key(fake_id)
+    end
+  end
+
   describe "inspect/2 for the SettingsUser module" do
     test "does not include password" do
       refute inspect(%SettingsUser{password: "123456"}) =~ "password: \"123456\""
