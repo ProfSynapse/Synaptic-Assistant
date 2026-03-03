@@ -52,13 +52,19 @@ defmodule Assistant.Skills.Result do
   Returns the content unchanged when within bounds. When truncated, appends
   a marker so the LLM knows data was cut.
   """
+  @suffix "\n\n[Truncated — result exceeded 100000 character limit. " <>
+            "Use more specific filters to narrow results.]"
+  @suffix_length String.length(@suffix)
+  @truncate_at @max_content_chars - @suffix_length
+
   @spec truncate_content(String.t() | nil) :: String.t() | nil
   def truncate_content(nil), do: nil
-  def truncate_content(content) when byte_size(content) <= @max_content_chars, do: content
 
   def truncate_content(content) do
-    String.slice(content, 0, @max_content_chars) <>
-      "\n\n[Truncated — result exceeded #{@max_content_chars} character limit. " <>
-      "Use more specific filters to narrow results.]"
+    if String.length(content) <= @max_content_chars do
+      content
+    else
+      String.slice(content, 0, @truncate_at) <> @suffix
+    end
   end
 end

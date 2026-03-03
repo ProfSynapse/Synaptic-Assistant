@@ -111,7 +111,7 @@ defmodule Assistant.Skills.Images.Generate do
   end
 
   defp request_image_generation(
-         _openrouter,
+         openrouter,
          prompt,
          model,
          image_count,
@@ -125,7 +125,16 @@ defmodule Assistant.Skills.Images.Generate do
       |> maybe_put_opt(:size, size)
       |> maybe_put_opt(:aspect_ratio, aspect_ratio)
 
-    case LLMRouter.image_generation(prompt, opts, user_id) do
+    result =
+      if openrouter != OpenRouter do
+        # Injected mock or alternative module — call directly (2-arity)
+        openrouter.image_generation(prompt, opts)
+      else
+        # Default path — route through LLMRouter for per-user key resolution
+        LLMRouter.image_generation(prompt, opts, user_id)
+      end
+
+    case result do
       {:ok, response} ->
         {:ok, response}
 
