@@ -6,6 +6,43 @@ tags:
   - tasks
   - write
   - update
+parameters:
+  - name: "id"
+    type: "string"
+    required: true
+    description: "Task ID (UUID) or short ID to update"
+  - name: "status"
+    type: "string"
+    required: false
+    description: "New status: \"todo\", \"in_progress\", \"blocked\", \"done\", \"cancelled\""
+  - name: "priority"
+    type: "string"
+    required: false
+    description: "New priority: \"low\", \"medium\", \"high\", \"urgent\""
+  - name: "title"
+    type: "string"
+    required: false
+    description: "New task title"
+  - name: "description"
+    type: "string"
+    required: false
+    description: "New task description"
+  - name: "assign"
+    type: "string"
+    required: false
+    description: "Assignee user ID"
+  - name: "due"
+    type: "string"
+    required: false
+    description: "New due date in ISO 8601 format"
+  - name: "add-tag"
+    type: "string"
+    required: false
+    description: "Comma-separated tags to add (merged with existing)"
+  - name: "remove-tag"
+    type: "string"
+    required: false
+    description: "Comma-separated tags to remove from existing"
 ---
 
 # tasks.update

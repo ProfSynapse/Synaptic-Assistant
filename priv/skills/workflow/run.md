@@ -6,6 +6,11 @@ tags:
   - workflow
   - write
   - scheduled
+parameters:
+  - name: "name"
+    type: "string"
+    required: true
+    description: "Name of the workflow to run"
 ---
 
 # workflow.run

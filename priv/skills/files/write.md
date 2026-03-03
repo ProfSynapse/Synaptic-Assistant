@@ -6,6 +6,23 @@ tags:
   - files
   - write
   - drive
+parameters:
+  - name: "name"
+    type: "string"
+    required: true
+    description: "File name (include extension, e.g., \"notes.txt\")"
+  - name: "content"
+    type: "string"
+    required: true
+    description: "The text content of the file"
+  - name: "folder"
+    type: "string"
+    required: false
+    description: "Parent folder ID to create the file in"
+  - name: "type"
+    type: "string"
+    required: false
+    description: "MIME type of the file (default: \"text/plain\")"
 ---
 
 # files.write

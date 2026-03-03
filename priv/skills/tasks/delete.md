@@ -7,6 +7,15 @@ tags:
   - write
   - delete
   - archive
+parameters:
+  - name: "id"
+    type: "string"
+    required: true
+    description: "Task ID (UUID) or short ID to archive"
+  - name: "reason"
+    type: "string"
+    required: false
+    description: "Archive reason (default: \"cancelled\")"
 ---
 
 # tasks.delete

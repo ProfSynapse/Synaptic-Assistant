@@ -7,6 +7,15 @@ tags:
   - workflow
   - write
   - scheduled
+parameters:
+  - name: "name"
+    type: "string"
+    required: true
+    description: "Name of the workflow to cancel"
+  - name: "delete"
+    type: "boolean"
+    required: false
+    description: "Also delete the workflow file (default false)"
 ---
 
 # workflow.cancel

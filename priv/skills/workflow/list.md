@@ -7,6 +7,7 @@ tags:
   - read
   - list
   - scheduled
+parameters: []
 ---
 
 # workflow.list

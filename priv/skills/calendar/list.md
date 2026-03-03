@@ -6,6 +6,27 @@ tags:
   - calendar
   - read
   - events
+parameters:
+  - name: "date"
+    type: "string"
+    required: false
+    description: "List events on a specific date (YYYY-MM-DD)"
+  - name: "from"
+    type: "string"
+    required: false
+    description: "Start of date range (RFC 3339 or \"YYYY-MM-DD HH:MM\")"
+  - name: "to"
+    type: "string"
+    required: false
+    description: "End of date range (RFC 3339 or \"YYYY-MM-DD HH:MM\")"
+  - name: "limit"
+    type: "integer"
+    required: false
+    description: "Max events to return (default 10, max 50)"
+  - name: "calendar"
+    type: "string"
+    required: false
+    description: "Calendar ID (default \"primary\")"
 ---
 
 # calendar.list
