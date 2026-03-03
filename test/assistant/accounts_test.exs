@@ -859,6 +859,142 @@ defmodule Assistant.AccountsTest do
     end
   end
 
+  describe "ensure_linked_user/1 auto-link" do
+    test "auto-links to existing chat user when exactly one exists" do
+      # Create a single real chat user
+      {:ok, chat_user} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "tg-autolink-#{System.unique_integer([:positive])}",
+          channel: "telegram"
+        })
+        |> Repo.insert()
+
+      # Create an unlinked settings_user (user_id = nil)
+      settings_user = settings_user_fixture()
+      assert is_nil(settings_user.user_id)
+
+      # ensure_linked_user should auto-link to the sole chat user
+      assert {:ok, linked_user_id} =
+               AssistantWeb.SettingsLive.Context.ensure_linked_user(settings_user)
+
+      assert linked_user_id == chat_user.id
+
+      # Verify the settings_user was actually updated in DB
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert reloaded.user_id == chat_user.id
+    end
+
+    test "creates pseudo-user when multiple chat users exist" do
+      {:ok, _chat_user1} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "tg-multi1-#{System.unique_integer([:positive])}",
+          channel: "telegram"
+        })
+        |> Repo.insert()
+
+      {:ok, _chat_user2} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "gc-multi2-#{System.unique_integer([:positive])}",
+          channel: "google_chat"
+        })
+        |> Repo.insert()
+
+      settings_user = settings_user_fixture()
+
+      assert {:ok, linked_user_id} =
+               AssistantWeb.SettingsLive.Context.ensure_linked_user(settings_user)
+
+      # Should have created a pseudo-user, not linked to either real user
+      pseudo = Repo.get!(Assistant.Schemas.User, linked_user_id)
+      assert pseudo.channel == "settings"
+    end
+  end
+
+  describe "sole_settings_user_key multi-admin ambiguity" do
+    test "returns nil when 2+ settings_users have OpenRouter keys" do
+      su1 = settings_user_fixture(%{email: "admin1@example.com"})
+      su2 = settings_user_fixture(%{email: "admin2@example.com"})
+
+      {:ok, _} = Accounts.save_openrouter_api_key(su1, "sk-or-admin1")
+      {:ok, _} = Accounts.save_openrouter_api_key(su2, "sk-or-admin2")
+
+      # With multiple keyed settings_users, the bridge must return nil
+      assert is_nil(Assistant.Accounts.CrossChannelBridge.sole_key(:openrouter_api_key))
+    end
+
+    test "returns nil when 2+ settings_users have OpenAI keys" do
+      su1 = settings_user_fixture(%{email: "ai-admin1@example.com"})
+      su2 = settings_user_fixture(%{email: "ai-admin2@example.com"})
+
+      {:ok, _} = Accounts.save_openai_api_key(su1, "sk-openai-admin1")
+      {:ok, _} = Accounts.save_openai_api_key(su2, "sk-openai-admin2")
+
+      assert is_nil(Assistant.Accounts.CrossChannelBridge.sole_key(:openai_api_key))
+    end
+  end
+
+  describe "openai_credentials_for_user/1 fallback path" do
+    setup do
+      {:ok, chat_user} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "tg-cred-fallback-#{System.unique_integer([:positive])}",
+          channel: "telegram"
+        })
+        |> Repo.insert()
+
+      {:ok, pseudo_user} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "settings:cred-pseudo-#{System.unique_integer([:positive])}",
+          channel: "settings"
+        })
+        |> Repo.insert()
+
+      settings_user = settings_user_fixture()
+
+      settings_user =
+        settings_user
+        |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
+        |> Repo.update!()
+
+      %{chat_user: chat_user, settings_user: settings_user}
+    end
+
+    test "falls back to sole credentials with auth_type when direct lookup fails", %{
+      chat_user: chat_user,
+      settings_user: settings_user
+    } do
+      # Store OpenAI OAuth credentials (not just an API key).
+      # save_openai_oauth_credentials uses openai_oauth_changeset which
+      # expects :access_token, :refresh_token, etc. (not openai_*-prefixed).
+      {:ok, _} =
+        Accounts.save_openai_oauth_credentials(settings_user, %{
+          access_token: "sk-openai-oauth-token",
+          refresh_token: "rt-refresh",
+          account_id: "acct-123"
+        })
+
+      result = Accounts.openai_credentials_for_user(chat_user.id)
+      assert result.access_token == "sk-openai-oauth-token"
+      assert result.auth_type == "oauth"
+      assert result.refresh_token == "rt-refresh"
+      assert result.account_id == "acct-123"
+    end
+
+    test "returns nil for invalid user_id" do
+      assert is_nil(Accounts.openai_credentials_for_user("not-a-uuid"))
+    end
+
+    test "returns nil for non-binary input" do
+      assert is_nil(Accounts.openai_credentials_for_user(nil))
+      assert is_nil(Accounts.openai_credentials_for_user(123))
+    end
+  end
+
   describe "inspect/2 for the SettingsUser module" do
     test "does not include password" do
       refute inspect(%SettingsUser{password: "123456"}) =~ "password: \"123456\""

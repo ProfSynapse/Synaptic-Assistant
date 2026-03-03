@@ -11,6 +11,11 @@ defmodule Assistant.Repo.Migrations.RepairSettingsUserPseudoLinks do
 
   Idempotent — safe to run multiple times. Only acts when a single
   non-settings chat user exists.
+
+  Note: `settings_users.user_id` has no unique constraint (multiple
+  settings_users may legitimately share the same chat user_id), so the
+  UPDATE to a shared `real_chat_user_id` is safe and will not violate
+  any DB constraint.
   """
   use Ecto.Migration
 
