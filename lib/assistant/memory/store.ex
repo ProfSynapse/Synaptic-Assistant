@@ -38,6 +38,8 @@ defmodule Assistant.Memory.Store do
   alias Assistant.Repo
   alias Assistant.Schemas.{Conversation, MemoryEntry, Message}
 
+  require Logger
+
   # ---------------------------------------------------------------------------
   # Conversations
   # ---------------------------------------------------------------------------
@@ -108,6 +110,143 @@ defmodule Assistant.Memory.Store do
 
       conversation ->
         {:ok, conversation}
+    end
+  end
+
+  @doc """
+  Returns the user's perpetual conversation, creating one if it doesn't exist.
+
+  Each user has exactly ONE perpetual conversation with channel="unified" and
+  agent_type="orchestrator" that remains active across all sessions. This is
+  the root conversation for the unified cross-channel architecture.
+
+  Uses the partial unique index on (user_id, agent_type) WHERE status='active'
+  to prevent duplicates.
+
+  ## Parameters
+
+    * `user_id` - The user's binary ID.
+
+  ## Returns
+
+    * `{:ok, %Conversation{}}` — existing or newly created perpetual conversation
+    * `{:error, term()}` — on DB errors
+  """
+  @spec get_or_create_perpetual_conversation(binary()) ::
+          {:ok, Conversation.t()} | {:error, term()}
+  def get_or_create_perpetual_conversation(user_id) do
+    query =
+      from c in Conversation,
+        where:
+          c.user_id == ^user_id and
+            c.agent_type == "orchestrator" and
+            c.status == "active",
+        limit: 1
+
+    case Repo.one(query) do
+      nil ->
+        now = DateTime.utc_now()
+
+        attrs = %{
+          channel: "unified",
+          user_id: user_id,
+          agent_type: "orchestrator",
+          status: "active",
+          started_at: now,
+          last_active_at: now
+        }
+
+        case create_conversation(attrs) do
+          {:ok, conversation} ->
+            {:ok, conversation}
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            # Race condition: another process created it. Try to fetch.
+            if has_unique_constraint_error?(changeset) do
+              case Repo.one(query) do
+                nil -> {:error, changeset}
+                conversation -> {:ok, conversation}
+              end
+            else
+              {:error, changeset}
+            end
+        end
+
+      conversation ->
+        {:ok, conversation}
+    end
+  end
+
+  defp has_unique_constraint_error?(changeset) do
+    Enum.any?(changeset.errors, fn
+      {_field, {_msg, opts}} when is_list(opts) ->
+        Keyword.get(opts, :constraint) == :unique
+
+      _ ->
+        false
+    end)
+  end
+
+  @doc """
+  Atomically inserts a batch of messages into a conversation.
+
+  Uses `Ecto.Multi` to insert all messages in a single transaction and
+  touch the conversation's `last_active_at` timestamp. Messages are
+  inserted in the order provided.
+
+  Works for both orchestrator conversations (channel="unified") and
+  sub-agent conversations (with parent_conversation_id set).
+
+  ## Parameters
+
+    * `conversation_id` - The conversation to append to.
+    * `messages` - List of message attribute maps. Each must have `:role`.
+      Optional: `:content`, `:tool_calls`, `:tool_results`, `:token_count`.
+
+  ## Returns
+
+    * `{:ok, [%Message{}]}` — list of inserted messages
+    * `{:error, term()}` — on failure (rolls back entire batch)
+  """
+  @spec batch_append_messages(binary(), [map()]) :: {:ok, [Message.t()]} | {:error, term()}
+  def batch_append_messages(_conversation_id, []), do: {:ok, []}
+
+  def batch_append_messages(conversation_id, messages) when is_list(messages) do
+    now = DateTime.utc_now()
+
+    multi =
+      messages
+      |> Enum.with_index()
+      |> Enum.reduce(Ecto.Multi.new(), fn {msg_attrs, idx}, multi ->
+        attrs = Map.put(msg_attrs, :conversation_id, conversation_id)
+
+        Ecto.Multi.insert(
+          multi,
+          {:message, idx},
+          Message.changeset(%Message{}, attrs)
+        )
+      end)
+
+    multi =
+      Ecto.Multi.update_all(
+        multi,
+        :touch_conversation,
+        from(c in Conversation, where: c.id == ^conversation_id),
+        set: [last_active_at: now]
+      )
+
+    case Repo.transaction(multi) do
+      {:ok, results} ->
+        inserted =
+          results
+          |> Enum.filter(fn {{:message, _idx}, _msg} -> true; _ -> false end)
+          |> Enum.sort_by(fn {{:message, idx}, _msg} -> idx end)
+          |> Enum.map(fn {_key, msg} -> msg end)
+
+        {:ok, inserted}
+
+      {:error, {:message, _idx}, changeset, _changes} ->
+        {:error, changeset}
     end
   end
 
@@ -401,6 +540,87 @@ defmodule Assistant.Memory.Store do
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
+  end
+
+  # ---------------------------------------------------------------------------
+  # Admin Memory Access
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Lists memory entries for a specific user, with admin authorization check.
+
+  Non-admin users can only access their own memories (user_id must match
+  requesting_user_id). Admin users can access any user's memories, with
+  audit logging when accessing another user's data.
+
+  ## Parameters
+
+    * `target_user_id` - The user whose memories to retrieve.
+    * `requesting_user_id` - The user making the request.
+    * `is_admin` - Whether the requesting user is an admin.
+    * `opts` - Same options as `list_memory_entries/1`.
+
+  ## Returns
+
+    * `{:ok, [%MemoryEntry{}]}` on success
+    * `{:error, :unauthorized}` if non-admin tries to access another user's memories
+  """
+  @spec list_memory_entries_for_user(binary(), binary(), boolean(), keyword()) ::
+          {:ok, [MemoryEntry.t()]} | {:error, :unauthorized}
+  def list_memory_entries_for_user(target_user_id, requesting_user_id, is_admin, opts \\ []) do
+    if target_user_id == requesting_user_id do
+      {:ok, list_memory_entries(Keyword.put(opts, :user_id, target_user_id))}
+    else
+      if is_admin do
+        Logger.info("Admin memory access: admin=#{requesting_user_id} viewing user=#{target_user_id}")
+        {:ok, list_memory_entries(Keyword.put(opts, :user_id, target_user_id))}
+      else
+        {:error, :unauthorized}
+      end
+    end
+  end
+
+  @doc """
+  Lists conversations for a specific user, with admin authorization check.
+
+  Same authorization model as `list_memory_entries_for_user/4`.
+
+  ## Parameters
+
+    * `target_user_id` - The user whose conversations to retrieve.
+    * `requesting_user_id` - The user making the request.
+    * `is_admin` - Whether the requesting user is an admin.
+    * `opts` - Keyword list: `:limit` (default: 20), `:offset` (default: 0)
+
+  ## Returns
+
+    * `{:ok, [%Conversation{}]}` on success
+    * `{:error, :unauthorized}` if non-admin tries to access another user's conversations
+  """
+  @spec list_conversations_for_user(binary(), binary(), boolean(), keyword()) ::
+          {:ok, [Conversation.t()]} | {:error, :unauthorized}
+  def list_conversations_for_user(target_user_id, requesting_user_id, is_admin, opts \\ []) do
+    unless target_user_id == requesting_user_id or is_admin do
+      {:error, :unauthorized}
+    else
+      if target_user_id != requesting_user_id do
+        Logger.info("Admin conversation access: admin=#{requesting_user_id} viewing user=#{target_user_id}")
+      end
+
+      limit = Keyword.get(opts, :limit, 20)
+      offset = Keyword.get(opts, :offset, 0)
+
+      conversations =
+        from(c in Conversation,
+          where: c.user_id == ^target_user_id,
+          order_by: [desc: c.last_active_at, desc: c.inserted_at],
+          limit: ^limit,
+          offset: ^offset
+        )
+        |> Repo.all()
+
+      {:ok, conversations}
+    end
   end
 
   # ---------------------------------------------------------------------------

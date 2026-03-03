@@ -159,14 +159,14 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
   end
 
   # Wraps Engine.send_message with verbose request/response logging.
-  defp engine_send(conversation_id, message, label \\ "e2e") do
+  defp engine_send(user_id, message, label \\ "e2e") do
     log_request(label, %{
       messages: [%{role: "user", content: message}],
       model: "(via Engine pipeline)"
     })
 
     {elapsed, result} =
-      timed(fn -> Engine.send_message(conversation_id, message) end)
+      timed(fn -> Engine.send_message(user_id, message) end)
 
     case result do
       {:ok, response} ->
@@ -285,9 +285,9 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine returns a text response to a simple greeting" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
-      result = engine_send(conversation.id, "Hello! What is 2 + 2?", "simple_greeting")
+      result = engine_send(user.id, "Hello! What is 2 + 2?", "simple_greeting")
 
       assert {:ok, response} = result
       assert is_binary(response)
@@ -297,7 +297,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       assert response =~ "4"
 
       # Engine state should show 1 iteration (direct text response)
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.iteration_count >= 1
       assert state.message_count >= 2  # at least user + assistant
 
@@ -309,11 +309,11 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine returns a substantive response to a knowledge question" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       result =
         engine_send(
-          conversation.id,
+          user.id,
           "In one sentence, what is the capital of France?",
           "knowledge_question"
         )
@@ -339,11 +339,11 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine uses get_skill when asked about capabilities" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       result =
         engine_send(
-          conversation.id,
+          user.id,
           "What email skills do you have available? Use your tools to find out.",
           "skill_discovery_email"
         )
@@ -353,7 +353,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       assert String.length(response) > 10
 
       # Engine should have iterated more than once (get_skill call + final response)
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.iteration_count >= 2
 
       # Response should mention email-related capabilities
@@ -367,11 +367,11 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine discovers all skill domains when asked broadly" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       result =
         engine_send(
-          conversation.id,
+          user.id,
           "What can you do? List all your skill domains. Use your tools to check.",
           "skill_discovery_all"
         )
@@ -380,7 +380,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       assert is_binary(response)
 
       # Should have used get_skill tool (iteration_count > 1)
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.iteration_count >= 2
 
       # Response should mention multiple domains
@@ -407,12 +407,12 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine iterates multiple times for a tool-requiring request" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       # Ask something that requires discovering skills first, then acting
       result =
         engine_send(
-          conversation.id,
+          user.id,
           "First check what email skills are available, then tell me about them. Use your get_skill tool.",
           "chain_email_skills"
         )
@@ -420,7 +420,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       assert {:ok, response} = result
       assert is_binary(response)
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
 
       # Should have at least 2 iterations: get_skill + final text
       assert state.iteration_count >= 2
@@ -436,11 +436,11 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine handles get_skill for multiple domains in sequence" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       result =
         engine_send(
-          conversation.id,
+          user.id,
           "Look up what skills are available in both the email domain and the calendar domain. Use get_skill for each.",
           "chain_multi_domain"
         )
@@ -448,7 +448,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       assert {:ok, response} = result
       assert is_binary(response)
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
 
       # Should have multiple iterations (at least one get_skill + response)
       assert state.iteration_count >= 2
@@ -472,12 +472,12 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine preserves context across multiple turns" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       # Turn 1: Establish context
       {:ok, _} =
         engine_send(
-          conversation.id,
+          user.id,
           "Remember this: my favorite color is turquoise.",
           "context_turn1"
         )
@@ -485,7 +485,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       # Turn 2: Reference prior context
       {:ok, response2} =
         engine_send(
-          conversation.id,
+          user.id,
           "What is my favorite color? Answer in one word.",
           "context_turn2"
         )
@@ -494,7 +494,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       assert response2 =~ ~r/[Tt]urquoise/
 
       # State should show growing message history
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       # At minimum: user1 + assistant1 + user2 + assistant2 = 4
       assert state.message_count >= 4
 
@@ -506,20 +506,20 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine maintains conversation thread across three turns" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       # Turn 1
       {:ok, _} =
-        engine_send(conversation.id, "My name is Zephyr.", "thread_turn1")
+        engine_send(user.id, "My name is Zephyr.", "thread_turn1")
 
       # Turn 2
       {:ok, _} =
-        engine_send(conversation.id, "I live in a lighthouse.", "thread_turn2")
+        engine_send(user.id, "I live in a lighthouse.", "thread_turn2")
 
       # Turn 3: Reference both prior turns
       {:ok, response3} =
         engine_send(
-          conversation.id,
+          user.id,
           "What is my name and where do I live? Answer briefly.",
           "thread_turn3"
         )
@@ -528,7 +528,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       assert response3 =~ ~r/[Zz]ephyr/
       assert response3 =~ ~r/[Ll]ighthouse/
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       # 3 turns * 2 messages = 6 minimum
       assert state.message_count >= 6
 
@@ -546,14 +546,14 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine produces a response even when dispatched agent would fail" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       # Ask the LLM to search emails — dispatch_agent will fail because
       # no Google OAuth token exists for this test user. The Engine should
       # handle the error gracefully and still produce a text response.
       result =
         engine_send(
-          conversation.id,
+          user.id,
           "Search my emails for messages from alice@example.com about the weekly report.",
           "error_agent_fail"
         )
@@ -570,7 +570,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       end
 
       # Most importantly: the Engine is still alive and responsive
-      assert {:ok, _state} = Engine.get_state(conversation.id)
+      assert {:ok, _state} = Engine.get_state(user.id)
 
       safe_stop(pid)
     end
@@ -580,12 +580,12 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine survives error and handles next message" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
       # First message: something that might trigger tool errors
       _result1 =
         engine_send(
-          conversation.id,
+          user.id,
           "Send an email to nobody@example.com saying hello",
           "error_survive_msg1"
         )
@@ -595,7 +595,7 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
 
       # Second message: simple question that shouldn't need tools
       result2 =
-        engine_send(conversation.id, "What is 3 + 7?", "error_survive_msg2")
+        engine_send(user.id, "What is 3 + 7?", "error_survive_msg2")
 
       assert {:ok, response2} = result2
       assert is_binary(response2)
@@ -616,16 +616,16 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
       {user, conversation} = create_user_and_conversation()
 
       {:ok, pid} =
-        Engine.start_link(conversation.id,
-          user_id: user.id,
+        Engine.start_link(user.id,
+          conversation_id: conversation.id,
           channel: "test",
           mode: :single_loop
         )
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
       assert state.mode == :single_loop
 
-      result = engine_send(conversation.id, "Say hello in exactly one word.", "single_loop")
+      result = engine_send(user.id, "Say hello in exactly one word.", "single_loop")
 
       assert {:ok, response} = result
       assert is_binary(response)
@@ -645,11 +645,11 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     test "Engine accumulates real token usage" do
       {user, conversation} = create_user_and_conversation()
 
-      {:ok, pid} = Engine.start_link(conversation.id, user_id: user.id, channel: "test")
+      {:ok, pid} = Engine.start_link(user.id, conversation_id: conversation.id, channel: "test")
 
-      {:ok, _} = engine_send(conversation.id, "Hello, how are you?", "token_tracking")
+      {:ok, _} = engine_send(user.id, "Hello, how are you?", "token_tracking")
 
-      {:ok, state} = Engine.get_state(conversation.id)
+      {:ok, state} = Engine.get_state(user.id)
 
       # Real LLM calls should produce non-zero token usage
       assert state.total_usage.prompt_tokens > 0

@@ -1,29 +1,29 @@
 # lib/assistant/channels/dispatcher.ex — Shared channel dispatch logic.
 #
-# Extracts the normalize → engine → reply flow that was previously embedded in
-# GoogleChatController. All channel webhook controllers delegate to this module
-# for async message processing, keeping controllers thin (auth + delegation).
+# Extracts the normalize → resolve → engine → reply flow for all channel
+# webhook controllers. Controllers remain thin (auth + delegation).
 #
 # The dispatch flow:
 #   1. Normalize the raw event via the adapter's normalize/1 callback
 #   2. Spawn an async task under the shared TaskSupervisor
-#   3. In the task: derive a conversation ID, ensure the engine is running,
-#      send the message, and reply via the adapter's send_reply/3
+#   3. In the task: resolve platform identity → ensure engine → send message → reply
 #
 # Related files:
 #   - lib/assistant/channels/adapter.ex (behaviour that adapters implement)
 #   - lib/assistant/channels/registry.ex (channel atom → module mapping)
+#   - lib/assistant/channels/user_resolver.ex (platform identity → DB user)
+#   - lib/assistant/channels/reply_router.ex (outbound message routing)
 #   - lib/assistant/orchestrator/engine.ex (conversation processing)
-#   - lib/assistant_web/controllers/google_chat_controller.ex (primary consumer)
 
 defmodule Assistant.Channels.Dispatcher do
   @moduledoc """
   Shared dispatch logic for all channel adapters.
 
   Accepts a normalized `%Message{}` struct (already produced by the channel's
-  adapter) and handles the async processing pipeline: start or look up the
-  conversation engine, send the message through the orchestrator, and deliver
-  the response back via the adapter's `send_reply/3` callback.
+  adapter) and handles the async processing pipeline: resolve the platform
+  identity to a DB user, start or look up the conversation engine, send the
+  message through the orchestrator, and deliver the response back via the
+  ReplyRouter.
 
   ## Usage
 
@@ -38,18 +38,21 @@ defmodule Assistant.Channels.Dispatcher do
       end
   """
 
+  alias Assistant.Channels.{ReplyRouter, UserResolver}
   alias Assistant.Orchestrator.Engine
 
   require Logger
 
   @error_message "I encountered an error processing your message. Please try again."
   @engine_error_message "I encountered an error starting the conversation engine. Please try again."
+  @resolve_error_message "I couldn't identify your account. Please contact an administrator."
 
   @doc """
   Dispatch a normalized message for async processing.
 
-  Spawns a task that sends the message through the orchestrator engine and
-  replies via the adapter. Returns immediately with `{:ok, :dispatched}`.
+  Spawns a task that resolves the platform identity, sends the message
+  through the orchestrator engine, and replies via the ReplyRouter.
+  Returns immediately with `{:ok, :dispatched}`.
 
   ## Parameters
 
@@ -77,19 +80,46 @@ defmodule Assistant.Channels.Dispatcher do
   # --- Async Processing (runs inside the spawned task) ---
 
   defp process_and_reply(adapter, message, _opts) do
-    conversation_id = derive_conversation_id(message)
+    # Step 1: Resolve platform identity to DB user + perpetual conversation
+    case UserResolver.resolve(message.channel, message.user_id, %{
+           display_name: message.user_display_name,
+           space_id: message.space_id
+         }) do
+      {:ok, %{user_id: user_id, conversation_id: conversation_id}} ->
+        # Build origin for reply routing (hot path — no DB lookup needed)
+        origin = build_origin(adapter, message)
 
-    case ensure_engine_started(conversation_id, message) do
-      :ok ->
-        handle_engine_response(adapter, message, conversation_id)
+        case ensure_engine_started(user_id, conversation_id, message) do
+          :ok ->
+            handle_engine_response(origin, user_id, message)
 
-      {:error, reason} ->
-        Logger.error("Failed to start engine for conversation #{conversation_id}: #{inspect(reason)}",
-          channel: message.channel
+          {:error, reason} ->
+            Logger.error(
+              "Failed to start engine for user #{user_id}: #{inspect(reason)}",
+              channel: message.channel,
+              user_id: user_id
+            )
+
+            ReplyRouter.reply(origin, @engine_error_message)
+        end
+
+      {:error, :invalid_platform_id} ->
+        Logger.warning("Rejected message with invalid platform ID",
+          channel: message.channel,
+          external_id: message.user_id
         )
 
         reply_opts = build_reply_opts(message)
-        adapter.send_reply(message.space_id, @engine_error_message, reply_opts)
+        adapter.send_reply(message.space_id, @resolve_error_message, reply_opts)
+
+      {:error, reason} ->
+        Logger.error("User resolution failed: #{inspect(reason)}",
+          channel: message.channel,
+          external_id: message.user_id
+        )
+
+        reply_opts = build_reply_opts(message)
+        adapter.send_reply(message.space_id, @error_message, reply_opts)
     end
   rescue
     error ->
@@ -98,8 +128,6 @@ defmodule Assistant.Channels.Dispatcher do
         stacktrace: inspect(__STACKTRACE__)
       )
 
-      # Best-effort error reply so the user's message doesn't silently disappear.
-      # Wrapped in try/rescue to avoid masking the original error.
       try do
         reply_opts = build_reply_opts(message)
         adapter.send_reply(message.space_id, @error_message, reply_opts)
@@ -108,74 +136,72 @@ defmodule Assistant.Channels.Dispatcher do
       end
   end
 
-  defp handle_engine_response(adapter, message, conversation_id) do
-    case Engine.send_message(conversation_id, message.content) do
+  defp handle_engine_response(origin, user_id, message) do
+    # Engine is now registered by user_id UUID
+    case Engine.send_message(user_id, message.content) do
       {:ok, response_text} ->
-        reply_opts = build_reply_opts(message)
-
-        case adapter.send_reply(message.space_id, response_text, reply_opts) do
+        case ReplyRouter.reply(origin, response_text) do
           :ok ->
             Logger.debug("Channel reply sent",
-              conversation_id: conversation_id,
-              channel: message.channel,
-              space_id: message.space_id
+              user_id: user_id,
+              channel: origin.channel,
+              space_id: origin.space_id
             )
 
           {:error, reason} ->
             Logger.error("Failed to send channel reply: #{inspect(reason)}",
-              conversation_id: conversation_id,
-              channel: message.channel,
-              space_id: message.space_id
+              user_id: user_id,
+              channel: origin.channel,
+              space_id: origin.space_id
             )
         end
 
       {:error, reason} ->
         Logger.error("Orchestrator processing failed: #{inspect(reason)}",
-          conversation_id: conversation_id,
-          channel: message.channel
+          user_id: user_id,
+          channel: origin.channel
         )
 
-        reply_opts = build_reply_opts(message)
-        adapter.send_reply(message.space_id, @error_message, reply_opts)
+        ReplyRouter.reply(origin, @error_message)
     end
   end
 
   # --- Helpers ---
 
-  @doc false
-  # Derive a stable conversation ID from the channel, space, and thread.
-  # Format: "{channel}:{space_id}" or "{channel}:{space_id}:{thread_id}"
-  def derive_conversation_id(message) do
-    base = "#{message.channel}:#{message.space_id}"
-
-    if message.thread_id do
-      "#{base}:#{message.thread_id}"
-    else
-      base
-    end
+  # Build an origin map carrying everything ReplyRouter.reply/3 needs for the
+  # hot-path reply (no DB lookup required).
+  defp build_origin(adapter, message) do
+    %{
+      adapter: adapter,
+      channel: message.channel,
+      space_id: message.space_id,
+      thread_id: message.thread_id
+    }
   end
 
-  # Start the orchestrator engine for this conversation if not already running.
-  defp ensure_engine_started(conversation_id, message) do
-    case Engine.get_state(conversation_id) do
+  # Start the orchestrator engine for this user if not already running.
+  # Engine is registered by user_id UUID.
+  defp ensure_engine_started(user_id, conversation_id, message) do
+    case Engine.get_state(user_id) do
       {:ok, _state} ->
         :ok
 
       {:error, :not_found} ->
-        start_engine(conversation_id, message)
+        start_engine(user_id, conversation_id, message)
     end
   end
 
-  defp start_engine(conversation_id, message) do
+  defp start_engine(user_id, conversation_id, message) do
     opts = [
-      user_id: message.user_id,
+      user_id: user_id,
+      conversation_id: conversation_id,
       channel: to_string(message.channel),
       mode: :multi_agent
     ]
 
     child_spec = %{
-      id: conversation_id,
-      start: {Engine, :start_link, [conversation_id, opts]},
+      id: user_id,
+      start: {Engine, :start_link, [user_id, opts]},
       restart: :temporary
     }
 
@@ -185,9 +211,9 @@ defmodule Assistant.Channels.Dispatcher do
          ) do
       {:ok, _pid} ->
         Logger.info("Started conversation engine",
+          user_id: user_id,
           conversation_id: conversation_id,
-          channel: message.channel,
-          user_id: message.user_id
+          channel: message.channel
         )
 
         :ok
@@ -198,15 +224,15 @@ defmodule Assistant.Channels.Dispatcher do
 
       {:error, reason} ->
         Logger.error("Failed to start conversation engine: #{inspect(reason)}",
-          conversation_id: conversation_id
+          user_id: user_id
         )
 
         {:error, reason}
     end
   end
 
-  # Build reply options from the message. Adapters may use thread_id for
-  # threaded replies (e.g., Google Chat thread_name).
+  # Build reply options from the message (used in error fallback paths
+  # where we call adapter.send_reply directly instead of ReplyRouter).
   defp build_reply_opts(message) do
     if message.thread_id do
       [thread_name: message.thread_id]

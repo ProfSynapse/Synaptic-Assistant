@@ -271,7 +271,14 @@ defmodule Assistant.Memory.StoreTest do
     test "messages from different conversations are isolated" do
       user = create_test_user()
       {:ok, conv1} = Store.create_conversation(%{channel: "test", user_id: user.id})
-      {:ok, conv2} = Store.create_conversation(%{channel: "test", user_id: user.id})
+
+      {:ok, conv2} =
+        Store.create_conversation(%{
+          channel: "test",
+          user_id: user.id,
+          agent_type: "sub_agent",
+          parent_conversation_id: conv1.id
+        })
 
       {:ok, _} = Store.append_message(conv1.id, %{role: "user", content: "conv1 msg"})
       {:ok, _} = Store.append_message(conv2.id, %{role: "user", content: "conv2 msg"})
