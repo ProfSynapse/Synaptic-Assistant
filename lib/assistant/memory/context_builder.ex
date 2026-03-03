@@ -81,16 +81,23 @@ defmodule Assistant.Memory.ContextBuilder do
   defp fetch_conversation_summary(nil), do: nil
 
   defp fetch_conversation_summary(conversation_id) do
-    case Store.get_conversation(conversation_id) do
-      {:ok, conversation} ->
-        conversation.summary
+    # Only query DB if conversation_id is a valid UUID (conversations table uses :binary_id PK).
+    # Channel-format IDs like "telegram:123" are not UUIDs and have no DB record.
+    case Ecto.UUID.cast(conversation_id) do
+      {:ok, _uuid} ->
+        case Store.get_conversation(conversation_id) do
+          {:ok, conversation} ->
+            conversation.summary
 
-      {:error, reason} ->
-        Logger.debug("ContextBuilder: conversation lookup failed",
-          conversation_id: conversation_id,
-          reason: inspect(reason)
-        )
+          {:error, reason} ->
+            Logger.debug("ContextBuilder: conversation lookup failed: #{inspect(reason)}",
+              conversation_id: conversation_id
+            )
 
+            nil
+        end
+
+      :error ->
         nil
     end
   end
