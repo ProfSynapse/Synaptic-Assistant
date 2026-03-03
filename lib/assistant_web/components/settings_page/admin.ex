@@ -6,8 +6,6 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
 
   use AssistantWeb, :html
 
-  import AssistantWeb.Components.AdminIntegrations, only: [admin_integrations: 1]
-
   def admin_section(assigns) do
     ~H"""
     <section
@@ -246,19 +244,6 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
               </tr>
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <div class="sa-card">
-        <div>
-          <h2>Integrations</h2>
-          <p>
-            Configure API keys and tokens for connected services.
-            Values saved here override environment variables.
-          </p>
-        </div>
-        <div style="margin-top: 1rem;">
-          <.admin_integrations settings={@integration_settings} />
         </div>
       </div>
     </section>

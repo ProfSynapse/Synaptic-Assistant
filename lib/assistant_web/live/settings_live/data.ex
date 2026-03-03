@@ -9,21 +9,107 @@ defmodule AssistantWeb.SettingsLive.Data do
       name: "Google Workspace",
       icon_path: "/images/apps/google.svg",
       scopes: "Gmail, Calendar, Drive",
-      summary: "Connect approved Google tools for email, calendars, and docs."
+      summary: "Connect approved Google tools for email, calendars, and docs.",
+      integration_group: "google_workspace",
+      connect_type: :oauth,
+      setup_instructions: [
+        "Go to console.cloud.google.com/apis/credentials",
+        "Create an OAuth 2.0 Client ID (Web application type)",
+        "Add your callback URL to Authorized redirect URIs",
+        "Copy the Client ID and Client Secret below, then click Connect to authorize"
+      ]
     },
     %{
-      id: "hubspot",
-      name: "HubSpot",
-      icon_path: "/images/apps/hubspot.svg",
-      scopes: "Contacts, Deals",
-      summary: "Sync CRM tasks and account updates from HubSpot."
+      id: "telegram",
+      name: "Telegram",
+      icon_path: "/images/apps/telegram.svg",
+      scopes: "Bot messages",
+      summary: "Receive and respond to messages via a Telegram bot.",
+      integration_group: "telegram",
+      connect_type: :api_key,
+      setup_instructions: [
+        "Open @BotFather on Telegram",
+        "Create a new bot with /newbot",
+        "Copy the bot token provided by BotFather",
+        "Set a webhook secret (any random string) for verification"
+      ]
     },
     %{
       id: "slack",
       name: "Slack",
       icon_path: "/images/apps/slack.svg",
       scopes: "Channels, DMs",
-      summary: "Read channel context and post workflow notifications."
+      summary: "Read channel context and post workflow notifications.",
+      integration_group: "slack",
+      connect_type: :api_key,
+      setup_instructions: [
+        "Go to api.slack.com/apps and create a new app",
+        "Under OAuth & Permissions, add required bot scopes",
+        "Install the app to your workspace",
+        "Copy the Bot Token (xoxb-...) from OAuth & Permissions",
+        "Copy the Signing Secret from Basic Information",
+        "Copy the Client ID and Client Secret from Basic Information"
+      ]
+    },
+    %{
+      id: "discord",
+      name: "Discord",
+      icon_path: "/images/apps/discord.svg",
+      scopes: "Guilds, Messages",
+      summary: "Interact via Discord bot with slash commands and messages.",
+      integration_group: "discord",
+      connect_type: :api_key,
+      setup_instructions: [
+        "Go to discord.com/developers/applications",
+        "Create a new application",
+        "Under Bot, create a bot and copy the token",
+        "Copy the Public Key from General Information",
+        "Copy the Application ID from General Information"
+      ]
+    },
+    %{
+      id: "google_chat",
+      name: "Google Chat",
+      icon_path: "/images/apps/google-chat.svg",
+      scopes: "Spaces, Messages",
+      summary: "Send and receive messages in Google Chat spaces.",
+      integration_group: "google_chat",
+      connect_type: :api_key,
+      setup_instructions: [
+        "Create a Google Chat space or use an existing one",
+        "Go to Manage webhooks in the space settings",
+        "Copy the webhook URL"
+      ]
+    },
+    %{
+      id: "hubspot",
+      name: "HubSpot",
+      icon_path: "/images/apps/hubspot.svg",
+      scopes: "Contacts, Deals",
+      summary: "Sync CRM tasks and account updates from HubSpot.",
+      integration_group: "hubspot",
+      connect_type: :api_key,
+      setup_instructions: [
+        "Go to app.hubspot.com",
+        "Navigate to Settings → Integrations → Private Apps",
+        "Create a new private app with required scopes",
+        "Copy the access token"
+      ]
+    },
+    %{
+      id: "elevenlabs",
+      name: "ElevenLabs",
+      icon_path: "/images/apps/elevenlabs.svg",
+      scopes: "Text-to-Speech",
+      summary: "Generate voice responses using ElevenLabs text-to-speech.",
+      integration_group: "elevenlabs",
+      connect_type: :api_key,
+      setup_instructions: [
+        "Go to elevenlabs.io",
+        "Navigate to Profile → API Keys",
+        "Generate and copy your API key",
+        "Choose a voice from the Voice Library and copy its Voice ID"
+      ]
     }
   ]
 
@@ -137,6 +223,7 @@ defmodule AssistantWeb.SettingsLive.Data do
 
   def sections, do: @sections
   def app_catalog, do: @app_catalog
+  def find_app(app_id), do: Enum.find(@app_catalog, &(&1.id == app_id))
   def help_articles, do: @help_articles
   def empty_analytics, do: @empty_analytics
   def blank_profile, do: @blank_profile

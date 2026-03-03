@@ -107,6 +107,7 @@ defmodule AssistantWeb.Router do
       live "/", SettingsLive, :profile
       live "/settings", SettingsLive, :profile
       live "/settings/workflows/:name/edit", WorkflowEditorLive, :edit
+      live "/settings/apps/:app_id", SettingsLive, :app_detail
       live "/settings/:section", SettingsLive, :section
 
       live "/settings_users/settings", SettingsUserLive.Settings, :edit
