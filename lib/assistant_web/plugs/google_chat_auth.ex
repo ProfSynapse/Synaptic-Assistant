@@ -62,8 +62,7 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
       assign(conn, :google_chat_claims, claims)
     else
       {:error, reason} ->
-        Logger.warning("Google Chat JWT verification failed",
-          reason: inspect(reason),
+        Logger.warning("Google Chat JWT verification failed: #{inspect(reason)}",
           request_id: conn.assigns[:request_id]
         )
 

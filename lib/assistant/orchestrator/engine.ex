@@ -157,6 +157,11 @@ defmodule Assistant.Orchestrator.Engine do
 
   @impl true
   def handle_call({:send_message, message}, _from, state) do
+    Logger.debug("Engine received message",
+      conversation_id: state.conversation_id,
+      message_length: String.length(message)
+    )
+
     # Interrupt any still-running sub-agents from the previous turn
     interrupt_active_agents(state)
 
@@ -192,6 +197,10 @@ defmodule Assistant.Orchestrator.Engine do
         {:reply, {:ok, response_text}, final_state}
 
       {:error, reason, final_state} ->
+        Logger.error("Engine loop failed: #{inspect(reason)}",
+          conversation_id: state.conversation_id
+        )
+
         {:reply, {:error, reason}, final_state}
     end
   end
@@ -214,9 +223,8 @@ defmodule Assistant.Orchestrator.Engine do
 
   @impl true
   def terminate(reason, state) do
-    Logger.info("Engine terminating",
-      conversation_id: state.conversation_id,
-      reason: inspect(reason)
+    Logger.info("Engine terminating: #{inspect(reason)}",
+      conversation_id: state.conversation_id
     )
 
     # Shut down the agent supervisor (kills running sub-agent tasks)
@@ -233,9 +241,8 @@ defmodule Assistant.Orchestrator.Engine do
     max = LoopRunner.max_iterations()
 
     if state.iteration_count >= max do
-      Logger.warning("Max orchestrator iterations reached",
-        conversation_id: state.conversation_id,
-        iterations: state.iteration_count
+      Logger.warning("Max orchestrator iterations reached (#{state.iteration_count})",
+        conversation_id: state.conversation_id
       )
 
       {:ok, "I reached my processing limit for this turn. Here's what I have so far.", state}
@@ -249,9 +256,8 @@ defmodule Assistant.Orchestrator.Engine do
           run_loop_iteration(state)
 
         {:error, :limit_exceeded, details} ->
-          Logger.warning("Conversation rate limit reached",
-            conversation_id: state.conversation_id,
-            details: inspect(details)
+          Logger.warning("Conversation rate limit reached: #{inspect(details)}",
+            conversation_id: state.conversation_id
           )
 
           {:ok,
@@ -366,9 +372,8 @@ defmodule Assistant.Orchestrator.Engine do
             |> Map.update!(:messages, &(&1 ++ dispatch_result_messages))
 
           {:error, reason} ->
-            Logger.error("Agent scheduler failed",
-              conversation_id: state.conversation_id,
-              reason: inspect(reason)
+            Logger.error("Agent scheduler failed: #{inspect(reason)}",
+              conversation_id: state.conversation_id
             )
 
             # Add error messages for each dispatch, with nudge hint if available
@@ -387,9 +392,8 @@ defmodule Assistant.Orchestrator.Engine do
         end
 
       {:error, :limit_exceeded, details} ->
-        Logger.warning("Agent dispatch limit exceeded",
-          conversation_id: state.conversation_id,
-          details: inspect(details)
+        Logger.warning("Agent dispatch limit exceeded: #{inspect(details)}",
+          conversation_id: state.conversation_id
         )
 
         # Add limit-exceeded messages for each dispatch tool call, with nudge hint
@@ -568,10 +572,8 @@ defmodule Assistant.Orchestrator.Engine do
             :ok
 
           {:error, reason} ->
-            Logger.warning("Failed to enqueue memory save for agent",
-              agent_id: params.agent_id,
-              conversation_id: state.conversation_id,
-              reason: inspect(reason)
+            Logger.warning("Failed to enqueue memory save for agent #{params.agent_id}: #{inspect(reason)}",
+              conversation_id: state.conversation_id
             )
         end
       end
@@ -729,9 +731,8 @@ defmodule Assistant.Orchestrator.Engine do
     case TrajectoryExportWorker.new(job_args) |> Oban.insert() do
       {:ok, _job} -> :ok
       {:error, reason} ->
-        Logger.warning("Failed to enqueue trajectory export",
-          conversation_id: state.conversation_id,
-          reason: inspect(reason)
+        Logger.warning("Failed to enqueue trajectory export: #{inspect(reason)}",
+          conversation_id: state.conversation_id
         )
     end
   end
