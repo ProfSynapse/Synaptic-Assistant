@@ -92,7 +92,8 @@ defmodule Assistant.Channels.ReplyRouter do
   @doc """
   Broadcasts a message to all channels where a user has identities.
 
-  Sends to every channel in parallel and returns results per channel.
+  Sends to each registered channel sequentially and returns results per channel.
+  Identities on unknown/unregistered channels are skipped with a warning.
 
   ## Parameters
 
@@ -106,23 +107,35 @@ defmodule Assistant.Channels.ReplyRouter do
   """
   @spec broadcast(binary(), String.t(), keyword()) :: [{atom(), :ok | {:error, term()}}]
   def broadcast(user_id, text, opts \\ []) do
+    # Build a reverse map from channel string → {atom, module} using the
+    # Registry as the source of truth. This avoids String.to_existing_atom
+    # which can raise ArgumentError if the channel string in the DB doesn't
+    # correspond to a loaded atom.
+    adapter_by_string =
+      Registry.all_channels()
+      |> Map.new(fn channel_atom ->
+        {:ok, adapter} = Registry.adapter_for(channel_atom)
+        {to_string(channel_atom), {channel_atom, adapter}}
+      end)
+
     identities = list_user_identities(user_id)
 
     identities
-    |> Enum.map(fn identity ->
-      channel = String.to_existing_atom(identity.channel)
+    |> Enum.flat_map(fn identity ->
+      case Map.get(adapter_by_string, identity.channel) do
+        {channel_atom, adapter} ->
+          space_id = identity.space_id || identity.external_id
+          result = adapter.send_reply(space_id, text, opts)
+          [{channel_atom, result}]
 
-      result =
-        case Registry.adapter_for(channel) do
-          {:ok, adapter} ->
-            space_id = identity.space_id || identity.external_id
-            adapter.send_reply(space_id, text, opts)
+        nil ->
+          Logger.warning("Broadcast skipping unknown channel",
+            channel: identity.channel,
+            user_id: user_id
+          )
 
-          {:error, reason} ->
-            {:error, reason}
-        end
-
-      {channel, result}
+          []
+      end
     end)
   end
 
