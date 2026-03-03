@@ -106,7 +106,8 @@ defmodule AssistantWeb.SettingsLive.Data do
         "Copy the access token"
       ],
       portal_url: "https://app.hubspot.com/settings",
-      docs_url: "https://developers.hubspot.com/docs/guides/apps/private-apps/migrate-an-api-key-integration-to-a-private-app"
+      docs_url:
+        "https://developers.hubspot.com/docs/guides/apps/private-apps/migrate-an-api-key-integration-to-a-private-app"
     },
     %{
       id: "elevenlabs",

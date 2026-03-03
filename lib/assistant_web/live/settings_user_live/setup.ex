@@ -78,7 +78,8 @@ defmodule AssistantWeb.SettingsUserLive.Setup do
   @impl true
   def mount(_params, _session, socket) do
     if Accounts.admin_bootstrap_available?() do
-      changeset = Accounts.change_settings_user_email(%SettingsUser{}, %{}, validate_unique: false)
+      changeset =
+        Accounts.change_settings_user_email(%SettingsUser{}, %{}, validate_unique: false)
 
       {:ok,
        socket
@@ -94,9 +95,10 @@ defmodule AssistantWeb.SettingsUserLive.Setup do
   def handle_event("save", %{"settings_user" => params}, socket) do
     case Accounts.register_and_bootstrap_admin(params) do
       {:ok, _settings_user} ->
-        login_form = to_form(%{"email" => params["email"], "password" => params["password"]},
-          as: "settings_user"
-        )
+        login_form =
+          to_form(%{"email" => params["email"], "password" => params["password"]},
+            as: "settings_user"
+          )
 
         {:noreply,
          socket

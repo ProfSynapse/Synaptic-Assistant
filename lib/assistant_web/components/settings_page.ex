@@ -22,6 +22,7 @@ defmodule AssistantWeb.Components.SettingsPage do
         %{settings_user: %{is_admin: true}} -> true
         _ -> false
       end
+
     assigns = assign(assigns, :is_admin, is_admin)
 
     ~H"""

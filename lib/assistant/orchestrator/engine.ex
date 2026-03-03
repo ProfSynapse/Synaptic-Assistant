@@ -608,7 +608,8 @@ defmodule Assistant.Orchestrator.Engine do
             :ok
 
           {:error, reason} ->
-            Logger.warning("Failed to enqueue memory save for agent #{params.agent_id}: #{inspect(reason)}",
+            Logger.warning(
+              "Failed to enqueue memory save for agent #{params.agent_id}: #{inspect(reason)}",
               conversation_id: state.conversation_id
             )
         end
@@ -765,7 +766,9 @@ defmodule Assistant.Orchestrator.Engine do
     }
 
     case TrajectoryExportWorker.new(job_args) |> Oban.insert() do
-      {:ok, _job} -> :ok
+      {:ok, _job} ->
+        :ok
+
       {:error, reason} ->
         Logger.warning("Failed to enqueue trajectory export: #{inspect(reason)}",
           conversation_id: state.conversation_id

@@ -230,9 +230,9 @@ defmodule Assistant.IntegrationSettings.Registry do
 
   # Build compile-time lookup maps for fast access
   @all_key_defs @groups
-               |> Enum.flat_map(fn {group, %{keys: keys}} ->
-                 Enum.map(keys, &Map.put(&1, :group, group))
-               end)
+                |> Enum.flat_map(fn {group, %{keys: keys}} ->
+                  Enum.map(keys, &Map.put(&1, :group, group))
+                end)
 
   @key_to_def Map.new(@all_key_defs, fn def -> {def.key, def} end)
   @key_string_to_def Map.new(@all_key_defs, fn def -> {Atom.to_string(def.key), def} end)
@@ -241,7 +241,9 @@ defmodule Assistant.IntegrationSettings.Registry do
   @known_key_strings MapSet.new(@all_key_defs, &Atom.to_string(&1.key))
 
   @enabled_keys @all_key_defs
-                |> Enum.filter(fn def -> String.ends_with?(Atom.to_string(def.key), "_enabled") end)
+                |> Enum.filter(fn def ->
+                  String.ends_with?(Atom.to_string(def.key), "_enabled")
+                end)
                 |> MapSet.new(& &1.key)
 
   @enabled_key_strings MapSet.new(@enabled_keys, &Atom.to_string/1)
@@ -322,5 +324,4 @@ defmodule Assistant.IntegrationSettings.Registry do
   def enabled_key_for_group(group) when is_binary(group) do
     Map.get(@group_to_enabled_key, group)
   end
-
 end

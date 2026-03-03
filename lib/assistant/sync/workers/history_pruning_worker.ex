@@ -48,7 +48,9 @@ defmodule Assistant.Sync.Workers.HistoryPruningWorker do
       |> Repo.delete_all()
 
     if count > 0 do
-      Logger.info("HistoryPruningWorker: pruned #{count} entries older than #{retention_days} days")
+      Logger.info(
+        "HistoryPruningWorker: pruned #{count} entries older than #{retention_days} days"
+      )
     end
 
     :ok
