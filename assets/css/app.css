@@ -700,8 +700,9 @@ a {
 
 .sa-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 20px;
+  max-width: 100%;
 }
 
 .sa-section-stack {
@@ -720,6 +721,8 @@ a {
   display: grid;
   gap: 16px;
   min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .sa-card h2,

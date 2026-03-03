@@ -6,6 +6,11 @@ tags:
   - tasks
   - read
   - detail
+parameters:
+  - name: "id"
+    type: "string"
+    required: true
+    description: "Task ID (UUID) or short ID (e.g., \"T-001\")"
 ---
 
 # tasks.get

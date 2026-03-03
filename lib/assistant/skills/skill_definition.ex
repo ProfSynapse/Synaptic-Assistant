@@ -22,6 +22,7 @@ defmodule Assistant.Skills.SkillDefinition do
     * `:tags` - Searchable tags for skill discovery
     * `:author` - Who created the skill (optional, for custom skills)
     * `:timezone` - Default timezone override for scheduled execution (optional)
+    * `:parameters` - Typed parameter definitions from YAML frontmatter (list of maps)
     * `:body` - Raw markdown body (everything after YAML frontmatter)
     * `:path` - Absolute filesystem path to the source .md file
   """
@@ -35,6 +36,7 @@ defmodule Assistant.Skills.SkillDefinition do
           tags: [String.t()],
           author: String.t() | nil,
           timezone: String.t() | nil,
+          parameters: [map()],
           body: String.t(),
           path: String.t()
         }
@@ -50,6 +52,7 @@ defmodule Assistant.Skills.SkillDefinition do
     :timezone,
     :body,
     :path,
-    tags: []
+    tags: [],
+    parameters: []
   ]
 end

@@ -6,6 +6,32 @@ tags:
   - memory
   - write
   - storage
+parameters:
+  - name: "content"
+    type: "string"
+    required: true
+    description: "The memory content to store (factual, concise)"
+  - name: "topics"
+    type: "array"
+    items: "string"
+    required: true
+    description: "Topic labels for categorization and retrieval"
+  - name: "source_type"
+    type: "string"
+    required: false
+    description: "Origin: \"conversation\", \"compaction\", \"manual\" (default: \"conversation\")"
+  - name: "confidence"
+    type: "float"
+    required: false
+    description: "Confidence level 0.0-1.0 (default: 0.8)"
+  - name: "source_conversation_id"
+    type: "string"
+    required: false
+    description: "UUID of the originating conversation"
+  - name: "source_message_range"
+    type: "object"
+    required: false
+    description: "{start_idx: int, end_idx: int} for compaction provenance"
 ---
 
 # memory.save_memory

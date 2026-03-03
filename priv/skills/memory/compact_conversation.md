@@ -6,6 +6,24 @@ tags:
   - memory
   - compaction
   - write
+parameters:
+  - name: "conversation_id"
+    type: "string"
+    required: true
+    description: "UUID of the conversation to compact"
+  - name: "start_index"
+    type: "integer"
+    required: true
+    description: "First message index in the range (inclusive)"
+  - name: "end_index"
+    type: "integer"
+    required: true
+    description: "Last message index in the range (inclusive)"
+  - name: "focus_topics"
+    type: "array"
+    items: "string"
+    required: false
+    description: "Prioritize extraction of these topics"
 ---
 
 # memory.compact_conversation

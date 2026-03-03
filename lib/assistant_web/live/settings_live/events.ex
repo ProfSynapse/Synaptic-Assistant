@@ -1041,7 +1041,9 @@ defmodule AssistantWeb.SettingsLive.Events do
         assign(socket, :integration_settings, IntegrationSettings.list_all())
 
       section == "apps" ->
-        Loaders.load_apps_integration_settings(socket)
+        socket
+        |> Loaders.load_apps_integration_settings()
+        |> Loaders.load_connection_status()
 
       true ->
         socket

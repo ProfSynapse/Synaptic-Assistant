@@ -7,6 +7,23 @@ tags:
   - read
   - list
   - gmail
+parameters:
+  - name: "limit"
+    type: "integer"
+    required: false
+    description: "Max messages to return (default 10, max 50)"
+  - name: "unread"
+    type: "boolean"
+    required: false
+    description: "Only show unread messages"
+  - name: "label"
+    type: "string"
+    required: false
+    description: "Gmail label to list from (default \"INBOX\"). Examples: \"INBOX\", \"SENT\", \"DRAFTS\", \"STARRED\""
+  - name: "full"
+    type: "boolean"
+    required: false
+    description: "Show full message content (headers + body) instead of summary"
 ---
 
 # email.list

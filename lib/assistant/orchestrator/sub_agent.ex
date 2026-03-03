@@ -739,7 +739,13 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp execute_use_skill(tc, args, dispatch_params, engine_state) do
     skill_name = args["skill"]
-    skill_args = args["arguments"] || %{}
+
+    # Strip empty strings the LLM sends for optional typed parameters.
+    # Handlers guard on nil, not "", so "" would pass through and cause
+    # Ecto cast errors (e.g., "" can't dump to :binary_id).
+    skill_args =
+      (args["arguments"] || %{})
+      |> Map.reject(fn {_k, v} -> v == "" end)
 
     cond do
       is_nil(skill_name) ->
@@ -757,7 +763,8 @@ defmodule Assistant.Orchestrator.SubAgent do
 
         {tc,
          "Error: Skill \"#{skill_name}\" is not available to this agent. " <>
-           "Available skills: #{Enum.join(dispatch_params.skills, ", ")}"}
+           "Available skills: #{Enum.join(dispatch_params.skills, ", ")}. " <>
+           "Call request_help to ask the orchestrator for access to this skill."}
 
       true ->
         # Sentinel security gate
@@ -1171,10 +1178,14 @@ defmodule Assistant.Orchestrator.SubAgent do
       |> Enum.map(fn name ->
         case Registry.lookup(name) do
           {:ok, skill_def} ->
-            %{name: skill_def.name, description: skill_def.description}
+            %{
+              name: skill_def.name,
+              description: skill_def.description,
+              parameters: Map.get(skill_def, :parameters, [])
+            }
 
           {:error, :not_found} ->
-            %{name: name, description: "(skill not found in registry)"}
+            %{name: name, description: "(skill not found in registry)", parameters: []}
         end
       end)
 
@@ -1183,13 +1194,33 @@ defmodule Assistant.Orchestrator.SubAgent do
         "  - #{sd.name}: #{sd.description}"
       end)
 
+    # Build typed argument properties as a union of all skill parameters
+    arg_properties = build_argument_properties(skill_defs)
+
+    arguments_schema =
+      if map_size(arg_properties) > 0 do
+        %{
+          "type" => "object",
+          "properties" => arg_properties,
+          "required" => []
+        }
+      else
+        %{
+          "type" => "object",
+          "description" =>
+            "Arguments for the skill as key-value pairs. " <>
+              "See the Skill Definitions section in your system prompt for each skill's parameters."
+        }
+      end
+
     use_skill_tool = %{
       type: "function",
       function: %{
         name: "use_skill",
         description: """
-        Execute a skill. Available skills for this agent:\n#{skills_desc}\n\n\
-        Call with the skill name and arguments as a JSON object.\
+        Execute a skill to make progress on your mission. Available skills:\n#{skills_desc}\n\n\
+        Each skill's full definition (parameters, usage) is in the Skill Definitions \
+        section of your system prompt. Pass skill-specific arguments as a JSON object.\
         """,
         parameters: %{
           "type" => "object",
@@ -1197,12 +1228,9 @@ defmodule Assistant.Orchestrator.SubAgent do
             "skill" => %{
               "type" => "string",
               "enum" => Enum.map(skill_defs, & &1.name),
-              "description" => "The skill to execute"
+              "description" => "The skill to execute (must be one of the available skills)"
             },
-            "arguments" => %{
-              "type" => "object",
-              "description" => "Arguments for the skill as key-value pairs"
-            }
+            "arguments" => arguments_schema
           },
           "required" => ["skill", "arguments"]
         }
@@ -1214,12 +1242,16 @@ defmodule Assistant.Orchestrator.SubAgent do
       function: %{
         name: "request_help",
         description: """
-        Pause this task and request additional context, skills, or instructions \
-        from the orchestrator. Use this when you are blocked and cannot complete \
-        your mission with the current information or tools.
-
-        The orchestrator may respond with new skills, updated instructions, \
-        or additional context. Your conversation will resume after the response.\
+        REQUIRED when you cannot complete your mission. Call this tool instead of \
+        responding with text when you are blocked. Specific triggers:\
+        \n- A skill returned an error (auth failure, "not configured", permission denied)\
+        \n- Your available skills don't match what the mission requires\
+        \n- A prior agent failed (shown in dependency results) and you cannot proceed\
+        \n- You completed part of the mission but lack skills to finish the rest\
+        \n- You need information or context you don't have\
+        \n\nThe orchestrator will respond with new skills, instructions, or context. \
+        Your conversation resumes after the response. \
+        Do NOT explain blockers in a text response — always use this tool instead.\
         """,
         parameters: %{
           "type" => "object",
@@ -1227,13 +1259,15 @@ defmodule Assistant.Orchestrator.SubAgent do
             "reason" => %{
               "type" => "string",
               "description" =>
-                "Describe what you need from the orchestrator — what information, " <>
-                  "skills, or context would help you complete your mission."
+                "What blocked you and what you need. Include: the specific error or " <>
+                  "missing capability, what you tried, and what skills or context " <>
+                  "would let you proceed."
             },
             "partial_results" => %{
               "type" => "string",
               "description" =>
-                "Optional: describe what you've accomplished so far before getting stuck."
+                "What you accomplished before getting blocked. Include any useful " <>
+                  "data from skill calls that succeeded."
             }
           },
           "required" => ["reason"]
@@ -1242,6 +1276,50 @@ defmodule Assistant.Orchestrator.SubAgent do
     }
 
     [use_skill_tool, request_help_tool]
+  end
+
+  # Build a union of all argument properties across all skills for the JSON Schema.
+  # Since required params vary per skill, `required` is set to [] — handlers validate.
+  defp build_argument_properties(skill_defs) do
+    skill_defs
+    |> Enum.flat_map(fn sd ->
+      Enum.map(sd.parameters, fn param -> {sd.name, param} end)
+    end)
+    |> Enum.reduce(%{}, fn {skill_name, param}, acc ->
+      prop_name = param.name
+      schema = param_to_json_schema(param, skill_name)
+
+      # On name collision, merge descriptions noting both skills
+      case Map.get(acc, prop_name) do
+        nil ->
+          Map.put(acc, prop_name, schema)
+
+        existing ->
+          merged_desc =
+            (existing["description"] || "") <> " | Also used by #{skill_name}."
+
+          Map.put(acc, prop_name, Map.put(existing, "description", merged_desc))
+      end
+    end)
+  end
+
+  defp param_to_json_schema(param, skill_name) do
+    base = %{"description" => "(#{skill_name}) #{param.description}"}
+
+    case param.type do
+      "string" -> Map.put(base, "type", "string")
+      "integer" -> Map.put(base, "type", "integer")
+      "float" -> Map.put(base, "type", "number")
+      "boolean" -> Map.put(base, "type", "boolean")
+      "flag" -> Map.put(base, "type", "boolean")
+      "array" ->
+        items_type = Map.get(param, :items, "string")
+        base
+        |> Map.put("type", "array")
+        |> Map.put("items", %{"type" => items_type})
+      "object" -> Map.put(base, "type", "object")
+      _other -> Map.put(base, "type", "string")
+    end
   end
 
   defp record_llm_analytics(engine_state, response, model, status, reason \\ nil) do

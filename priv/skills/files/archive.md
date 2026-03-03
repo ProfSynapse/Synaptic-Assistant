@@ -6,6 +6,15 @@ tags:
   - files
   - archive
   - drive
+parameters:
+  - name: "id"
+    type: "string"
+    required: true
+    description: "The Drive file ID to archive"
+  - name: "folder"
+    type: "string"
+    required: false
+    description: "Archive folder ID (default: auto-detect or create \"Archive\")"
 ---
 
 # files.archive

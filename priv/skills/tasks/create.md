@@ -6,6 +6,31 @@ tags:
   - tasks
   - write
   - create
+parameters:
+  - name: "title"
+    type: "string"
+    required: true
+    description: "Task title (concise, descriptive)"
+  - name: "description"
+    type: "string"
+    required: false
+    description: "Detailed task description"
+  - name: "priority"
+    type: "string"
+    required: false
+    description: "Priority level: \"low\", \"medium\", \"high\", \"urgent\" (default: \"medium\")"
+  - name: "tags"
+    type: "string"
+    required: false
+    description: "Comma-separated tag labels (e.g., \"bug, backend\")"
+  - name: "due"
+    type: "string"
+    required: false
+    description: "Due date in ISO 8601 format (e.g., \"2026-03-01\")"
+  - name: "parent"
+    type: "string"
+    required: false
+    description: "Parent task ID (UUID) to create as subtask"
 ---
 
 # tasks.create

@@ -7,6 +7,35 @@ tags:
   - calendar
   - write
   - events
+parameters:
+  - name: "title"
+    type: "string"
+    required: true
+    description: "Event title"
+  - name: "start"
+    type: "string"
+    required: true
+    description: "Start time (RFC 3339 or \"YYYY-MM-DD HH:MM\")"
+  - name: "end"
+    type: "string"
+    required: true
+    description: "End time (RFC 3339 or \"YYYY-MM-DD HH:MM\")"
+  - name: "description"
+    type: "string"
+    required: false
+    description: "Event description"
+  - name: "location"
+    type: "string"
+    required: false
+    description: "Event location"
+  - name: "attendees"
+    type: "string"
+    required: false
+    description: "Comma-separated email addresses"
+  - name: "calendar"
+    type: "string"
+    required: false
+    description: "Calendar ID (default \"primary\")"
 ---
 
 # calendar.create

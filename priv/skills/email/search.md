@@ -7,6 +7,39 @@ tags:
   - read
   - search
   - gmail
+parameters:
+  - name: "query"
+    type: "string"
+    required: false
+    description: "Free-text search (matched against subject, body, etc.)"
+  - name: "from"
+    type: "string"
+    required: false
+    description: "Filter by sender email address"
+  - name: "to"
+    type: "string"
+    required: false
+    description: "Filter by recipient email address"
+  - name: "after"
+    type: "string"
+    required: false
+    description: "Messages after this date (YYYY/MM/DD)"
+  - name: "before"
+    type: "string"
+    required: false
+    description: "Messages before this date (YYYY/MM/DD)"
+  - name: "limit"
+    type: "integer"
+    required: false
+    description: "Max results to return (default 10, max 50)"
+  - name: "unread"
+    type: "boolean"
+    required: false
+    description: "Only show unread messages"
+  - name: "full"
+    type: "boolean"
+    required: false
+    description: "Show full message content (headers + body) instead of summary"
 ---
 
 # email.search

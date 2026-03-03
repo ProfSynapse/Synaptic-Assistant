@@ -1,10 +1,10 @@
 # lib/assistant_web/components/settings_page/apps.ex
 #
 # Apps & Connections section component for the settings page. Renders a grid of
-# integration cards, each showing connection status. OAuth services (Google)
-# show "Connected" when @google_connected is true. API-key services show
-# "Configured" when at least one key is set. All detail actions live on
-# /settings/apps/:app_id. Used by settings_page.ex.
+# integration cards with four status states derived from ConnectionValidator:
+# :connected (API responded + enabled), :disabled (API responded but toggled off),
+# :not_connected (keys exist but API handshake failed), :not_configured (no keys).
+# All detail actions live on /settings/apps/:app_id. Used by settings_page.ex.
 
 defmodule AssistantWeb.Components.SettingsPage.Apps do
   @moduledoc false
@@ -24,14 +24,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
       end
 
     all_settings = assigns[:integration_settings] || []
-
-    # Build a set of groups that have at least one configured API key
-    # (excludes _enabled toggle keys — only counts real credentials)
-    configured_groups =
-      all_settings
-      |> Enum.filter(fn s -> not Registry.enabled_key?(s.key) and s.source != :none end)
-      |> Enum.map(& &1.group)
-      |> MapSet.new()
+    connection_status = assigns[:connection_status] || %{}
 
     # Groups where the _enabled key has been explicitly set to "false".
     # When no _enabled key exists in DB (source :none), the group defaults to enabled.
@@ -46,7 +39,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
     assigns =
       assigns
       |> assign(:is_admin, is_admin)
-      |> assign(:configured_groups, configured_groups)
+      |> assign(:connection_status, connection_status)
       |> assign(:disabled_groups, disabled_groups)
 
     ~H"""
@@ -58,8 +51,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         <.app_card
           :for={app <- @app_catalog}
           app={app}
-          google_connected={@google_connected}
-          configured_groups={@configured_groups}
+          connection_status={@connection_status}
           disabled_groups={@disabled_groups}
           is_admin={@is_admin}
         />
@@ -84,39 +76,36 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
   end
 
   attr :app, :map, required: true
-  attr :google_connected, :boolean, required: true
-  attr :configured_groups, :any, required: true
+  attr :connection_status, :map, required: true
   attr :disabled_groups, :any, required: true
   attr :is_admin, :boolean, required: true
 
   defp app_card(assigns) do
     app = assigns.app
     group = app.integration_group
-    configured = MapSet.member?(assigns.configured_groups, group)
+    conn_status = Map.get(assigns.connection_status, group, :not_configured)
+    explicitly_disabled = MapSet.member?(assigns.disabled_groups, group)
 
-    enabled =
-      if app.connect_type == :oauth do
-        assigns.google_connected
-      else
-        # Default to enabled when configured; only disabled if explicitly toggled off
-        explicitly_disabled = MapSet.member?(assigns.disabled_groups, group)
-        configured and not explicitly_disabled
-      end
-
-    # Three-state status:
-    # :connected — keys configured AND integration is enabled
-    # :configured — keys exist but integration has been explicitly disabled
-    # :not_set — no keys configured at all
+    # Four-state status derived from ConnectionValidator + toggle state:
+    # :connected — API handshake succeeded and integration enabled
+    # :disabled — API handshake succeeded but explicitly toggled off
+    # :not_connected — keys exist but API handshake failed
+    # :not_configured — no keys configured at all
     status =
       cond do
-        configured and enabled -> :connected
-        configured -> :configured
-        true -> :not_set
+        conn_status == :connected and not explicitly_disabled -> :connected
+        conn_status == :connected and explicitly_disabled -> :disabled
+        conn_status == :not_connected -> :not_connected
+        true -> :not_configured
       end
+
+    # Show toggle when keys exist (connected or not_connected) regardless of handshake result
+    has_keys = conn_status in [:connected, :not_connected]
+    enabled = status == :connected
 
     assigns =
       assigns
-      |> assign(:configured, configured)
+      |> assign(:has_keys, has_keys)
       |> assign(:enabled, enabled)
       |> assign(:status, status)
 
@@ -129,7 +118,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         </div>
 
         <div style="display: flex; align-items: center; gap: 0.75rem;">
-          <label :if={@is_admin and @configured and @app.connect_type != :oauth} class="sa-switch">
+          <label :if={@is_admin and @has_keys and @app.connect_type != :oauth} class="sa-switch">
             <input
               type="checkbox"
               checked={@enabled}
@@ -143,7 +132,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
             />
             <span class="sa-switch-slider"></span>
           </label>
-          <.status_badge status={@status} />
+          <.status_icon status={@status} />
         </div>
       </div>
 
@@ -156,39 +145,40 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
     """
   end
 
-  defp status_badge(%{status: :connected} = assigns) do
+  defp status_icon(%{status: :connected} = assigns) do
     ~H"""
-    <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-      Connected
-    </span>
+    <span aria-label="Connected"><.icon name="hero-check-circle" class="h-5 w-5 text-green-500" /></span>
     """
   end
 
-  defp status_badge(%{status: :configured} = assigns) do
+  defp status_icon(%{status: :disabled} = assigns) do
     ~H"""
-    <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-      Configured
-    </span>
+    <span aria-label="Disabled"><.icon name="hero-x-circle" class="h-5 w-5 text-zinc-400" /></span>
     """
   end
 
-  defp status_badge(assigns) do
+  defp status_icon(%{status: :not_connected} = assigns) do
     ~H"""
-    <span class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
-      Not Set
-    </span>
+    <span aria-label="Connection failed"><.icon name="hero-x-circle" class="h-5 w-5 text-red-400" /></span>
+    """
+  end
+
+  defp status_icon(assigns) do
+    ~H"""
+    <span aria-label="Not configured"><.icon name="hero-x-circle" class="h-5 w-5 text-zinc-400" /></span>
     """
   end
 
   # --- Card action buttons ---
 
-  # Configured or Connected — full-width "Settings" button
-  defp card_actions(%{status: status} = assigns) when status in [:connected, :configured] do
+  # Connected, disabled, or not_connected — full-width "Settings" button
+  defp card_actions(%{status: status} = assigns)
+       when status in [:connected, :disabled, :not_connected] do
     ~H"""
     <.link
       navigate={~p"/settings/apps/#{@app.id}"}
       class="sa-btn secondary"
-      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none;"
+      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none; box-sizing: border-box;"
     >
       <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Settings
     </.link>
@@ -196,12 +186,12 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
   end
 
   # Not configured — admin gets "Set Up" button
-  defp card_actions(%{status: :not_set, is_admin: true} = assigns) do
+  defp card_actions(%{status: :not_configured, is_admin: true} = assigns) do
     ~H"""
     <.link
       navigate={~p"/settings/apps/#{@app.id}"}
       class="sa-btn"
-      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none;"
+      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none; box-sizing: border-box;"
     >
       <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Set Up
     </.link>

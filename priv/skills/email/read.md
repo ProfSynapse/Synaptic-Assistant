@@ -6,6 +6,11 @@ tags:
   - email
   - read
   - gmail
+parameters:
+  - name: "id"
+    type: "string"
+    required: true
+    description: "Gmail message ID(s) — single ID or comma-separated (e.g. \"id1,id2,id3\")"
 ---
 
 # email.read

@@ -181,8 +181,43 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     result
   end
 
+  # GPT-5.2 model config for e2e integration tests.
+  # If ConfigLoader is already running (ETS exists), we force GPT-5.2
+  # by overwriting the :models and :defaults entries directly.
+  # Otherwise, we start ConfigLoader with a valid config YAML.
+  @test_models [
+    %{
+      id: "openai/gpt-5.2",
+      tier: :primary,
+      description: "GPT-5.2 — integration test model",
+      use_cases: [:orchestrator, :sub_agent],
+      supports_tools: true,
+      max_context_tokens: 400_000,
+      cost_tier: :high
+    },
+    %{
+      id: "openai/gpt-5-mini",
+      tier: :fast,
+      description: "GPT-5 Mini — fast fallback for compaction/sentinel",
+      use_cases: [:sub_agent, :compaction, :sentinel],
+      supports_tools: true,
+      max_context_tokens: 400_000,
+      cost_tier: :low
+    }
+  ]
+
+  @test_defaults %{
+    orchestrator: :primary,
+    sub_agent: :primary,
+    compaction: :fast,
+    sentinel: :fast
+  }
+
   defp ensure_config_loader_started do
     if :ets.whereis(:assistant_config) != :undefined do
+      # ConfigLoader already running — force GPT-5.2 by overwriting ETS entries
+      :ets.insert(:assistant_config, {:models, @test_models})
+      :ets.insert(:assistant_config, {:defaults, @test_defaults})
       :ok
     else
       tmp_dir = System.tmp_dir!()
@@ -191,20 +226,49 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
         Path.join(tmp_dir, "test_config_e2e_llm_#{System.unique_integer([:positive])}.yaml")
 
       File.write!(config_path, """
+      defaults:
+        orchestrator: primary
+        sub_agent: primary
+        compaction: fast
+        sentinel: fast
+
       models:
-        default: "openai/gpt-5.2"
-        roster:
-          - "openai/gpt-5.2"
-      limits:
-        max_context_tokens: 128000
-        max_output_tokens: 4096
-        orchestrator_budget: 0.8
-        context_budget: 0.15
-        user_message_budget: 0.05
+        - id: "openai/gpt-5.2"
+          tier: primary
+          description: "GPT-5.2 — integration test model"
+          use_cases:
+            - orchestrator
+            - sub_agent
+          supports_tools: true
+          max_context_tokens: 400000
+          cost_tier: high
+        - id: "openai/gpt-5-mini"
+          tier: fast
+          description: "GPT-5 Mini — fast fallback"
+          use_cases:
+            - sub_agent
+            - compaction
+            - sentinel
+          supports_tools: true
+          max_context_tokens: 400000
+          cost_tier: low
+
       http:
         max_retries: 1
-        base_timeout: 60000
-        max_timeout: 120000
+        base_backoff_ms: 1000
+        max_backoff_ms: 5000
+        request_timeout_ms: 120000
+        streaming_timeout_ms: 300000
+
+      limits:
+        context_utilization_target: 0.85
+        compaction_trigger_threshold: 0.75
+        response_reserve_tokens: 4096
+        orchestrator_turn_limit: 100
+        sub_agent_turn_limit: 30
+        cache_ttl_seconds: 3600
+        orchestrator_cache_breakpoints: 4
+        sub_agent_cache_breakpoints: 1
       """)
 
       start_unlinked(Assistant.Config.Loader, path: config_path)
