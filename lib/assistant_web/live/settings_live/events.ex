@@ -79,6 +79,28 @@ defmodule AssistantWeb.SettingsLive.Events do
      |> assign(:model_modal_open, false)}
   end
 
+  def handle_event("toggle_integration", %{"group" => group, "enabled" => enabled}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      case Registry.enabled_key_for_group(group) do
+        nil ->
+          {:noreply, put_flash(socket, :error, "Unknown integration group.")}
+
+        enabled_key ->
+          admin_id = socket.assigns.current_scope.settings_user.id
+
+          case IntegrationSettings.put(enabled_key, enabled, admin_id) do
+            {:ok, _setting} ->
+              {:noreply, reload_integration_settings(socket)}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Unable to toggle integration.")}
+          end
+      end
+    end
+  end
+
   def handle_event("connect_google", _params, socket) do
     case Context.current_settings_user(socket) do
       nil ->

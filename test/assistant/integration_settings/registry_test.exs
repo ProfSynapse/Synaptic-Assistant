@@ -110,11 +110,12 @@ defmodule Assistant.IntegrationSettings.RegistryTest do
     test "returns keys for a valid group" do
       keys = Registry.keys_for_group("telegram")
       assert is_list(keys)
-      assert length(keys) == 2
+      assert length(keys) == 3
 
       key_atoms = Enum.map(keys, & &1.key)
       assert :telegram_bot_token in key_atoms
       assert :telegram_webhook_secret in key_atoms
+      assert :telegram_enabled in key_atoms
     end
 
     test "returns nil for unknown group" do
@@ -131,6 +132,54 @@ defmodule Assistant.IntegrationSettings.RegistryTest do
 
     test "returns nil for unknown key" do
       assert Registry.env_var_for_key(:bogus) == nil
+    end
+  end
+
+  describe "enabled_key?/1" do
+    test "returns true for _enabled atom keys" do
+      assert Registry.enabled_key?(:telegram_enabled)
+      assert Registry.enabled_key?(:slack_enabled)
+      assert Registry.enabled_key?(:discord_enabled)
+      assert Registry.enabled_key?(:google_workspace_enabled)
+      assert Registry.enabled_key?(:google_chat_enabled)
+      assert Registry.enabled_key?(:hubspot_enabled)
+      assert Registry.enabled_key?(:elevenlabs_enabled)
+    end
+
+    test "returns true for _enabled string keys" do
+      assert Registry.enabled_key?("telegram_enabled")
+      assert Registry.enabled_key?("slack_enabled")
+    end
+
+    test "returns false for regular keys" do
+      refute Registry.enabled_key?(:openrouter_api_key)
+      refute Registry.enabled_key?(:telegram_bot_token)
+      refute Registry.enabled_key?("openrouter_api_key")
+    end
+
+    test "returns false for unknown keys" do
+      refute Registry.enabled_key?(:bogus_enabled)
+      refute Registry.enabled_key?("bogus_enabled")
+    end
+  end
+
+  describe "enabled_key_for_group/1" do
+    test "returns the _enabled key atom for known groups" do
+      assert Registry.enabled_key_for_group("telegram") == :telegram_enabled
+      assert Registry.enabled_key_for_group("slack") == :slack_enabled
+      assert Registry.enabled_key_for_group("discord") == :discord_enabled
+      assert Registry.enabled_key_for_group("google_workspace") == :google_workspace_enabled
+      assert Registry.enabled_key_for_group("google_chat") == :google_chat_enabled
+      assert Registry.enabled_key_for_group("hubspot") == :hubspot_enabled
+      assert Registry.enabled_key_for_group("elevenlabs") == :elevenlabs_enabled
+    end
+
+    test "returns nil for groups without _enabled keys" do
+      assert Registry.enabled_key_for_group("ai_providers") == nil
+    end
+
+    test "returns nil for unknown groups" do
+      assert Registry.enabled_key_for_group("nonexistent") == nil
     end
   end
 end

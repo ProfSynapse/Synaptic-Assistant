@@ -5,13 +5,18 @@ defmodule AssistantWeb.Components.AdminIntegrations do
 
   import AssistantWeb.CoreComponents, only: [icon: 1]
 
+  alias Assistant.IntegrationSettings.Registry
+
   @group_order ~w(ai_providers google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
   attr :settings, :list, required: true, doc: "Output of IntegrationSettings.list_all/0"
 
   def admin_integrations(assigns) do
+    # Filter out _enabled toggle keys — they are managed via app card toggles, not admin forms
+    settings = Enum.reject(assigns.settings, fn s -> Registry.enabled_key?(s.key) end)
+
     grouped =
-      assigns.settings
+      settings
       |> Enum.group_by(& &1.group)
 
     ordered_groups =

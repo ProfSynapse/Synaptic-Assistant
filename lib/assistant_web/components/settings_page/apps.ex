@@ -1,8 +1,9 @@
 # lib/assistant_web/components/settings_page/apps.ex
 #
 # Apps & Connections section component for the settings page. Renders a grid of
-# integration cards, each showing connection status. OAuth services (Google) have
-# inline connect/disconnect. API-key services link to a dedicated setup page at
+# integration cards, each showing connection status. OAuth services (Google)
+# show "Connected" when @google_connected is true. API-key services show
+# "Configured" when at least one key is set. All detail actions live on
 # /settings/apps/:app_id. Used by settings_page.ex.
 
 defmodule AssistantWeb.Components.SettingsPage.Apps do
@@ -11,6 +12,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
   use AssistantWeb, :html
 
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
+  alias Assistant.IntegrationSettings.Registry
 
   import AssistantWeb.Components.DriveSettings, only: [drive_settings: 1]
 
@@ -21,10 +23,23 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         _ -> false
       end
 
-    # Build a set of groups that have at least one configured key
+    all_settings = assigns[:integration_settings] || []
+
+    # Build a set of groups that have at least one configured API key
+    # (excludes _enabled toggle keys — only counts real credentials)
     configured_groups =
-      (assigns[:integration_settings] || [])
-      |> Enum.filter(fn s -> s.source != :none end)
+      all_settings
+      |> Enum.filter(fn s -> not Registry.enabled_key?(s.key) and s.source != :none end)
+      |> Enum.map(& &1.group)
+      |> MapSet.new()
+
+    # Groups where the _enabled key has been explicitly set to "false".
+    # When no _enabled key exists in DB (source :none), the group defaults to enabled.
+    disabled_groups =
+      all_settings
+      |> Enum.filter(fn s ->
+        Registry.enabled_key?(s.key) and s.source != :none and s.masked_value == "false"
+      end)
       |> Enum.map(& &1.group)
       |> MapSet.new()
 
@@ -32,6 +47,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
       assigns
       |> assign(:is_admin, is_admin)
       |> assign(:configured_groups, configured_groups)
+      |> assign(:disabled_groups, disabled_groups)
 
     ~H"""
     <section class="sa-card">
@@ -44,6 +60,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
           app={app}
           google_connected={@google_connected}
           configured_groups={@configured_groups}
+          disabled_groups={@disabled_groups}
           is_admin={@is_admin}
         />
       </div>
@@ -69,19 +86,39 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
   attr :app, :map, required: true
   attr :google_connected, :boolean, required: true
   attr :configured_groups, :any, required: true
+  attr :disabled_groups, :any, required: true
   attr :is_admin, :boolean, required: true
 
   defp app_card(assigns) do
     app = assigns.app
+    group = app.integration_group
+    configured = MapSet.member?(assigns.configured_groups, group)
 
-    connected =
+    enabled =
       if app.connect_type == :oauth do
         assigns.google_connected
       else
-        MapSet.member?(assigns.configured_groups, app.integration_group)
+        # Default to enabled when configured; only disabled if explicitly toggled off
+        explicitly_disabled = MapSet.member?(assigns.disabled_groups, group)
+        configured and not explicitly_disabled
       end
 
-    assigns = assign(assigns, :connected, connected)
+    # Three-state status:
+    # :connected — keys configured AND integration is enabled
+    # :configured — keys exist but integration has been explicitly disabled
+    # :not_set — no keys configured at all
+    status =
+      cond do
+        configured and enabled -> :connected
+        configured -> :configured
+        true -> :not_set
+      end
+
+    assigns =
+      assigns
+      |> assign(:configured, configured)
+      |> assign(:enabled, enabled)
+      |> assign(:status, status)
 
     ~H"""
     <article class="sa-card">
@@ -92,12 +129,21 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         </div>
 
         <div style="display: flex; align-items: center; gap: 0.75rem;">
-          <span :if={@connected} class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-            Connected
-          </span>
-          <span :if={!@connected} class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
-            Not Set
-          </span>
+          <label :if={@is_admin and @configured and @app.connect_type != :oauth} class="sa-switch">
+            <input
+              type="checkbox"
+              checked={@enabled}
+              class="sa-switch-input"
+              role="switch"
+              aria-checked={to_string(@enabled)}
+              aria-label={"Toggle #{@app.name}"}
+              phx-click="toggle_integration"
+              phx-value-group={@app.integration_group}
+              phx-value-enabled={to_string(!@enabled)}
+            />
+            <span class="sa-switch-slider"></span>
+          </label>
+          <.status_badge status={@status} />
         </div>
       </div>
 
@@ -105,28 +151,69 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         {@app.summary}
       </p>
 
-      <%= if @app.connect_type == :oauth do %>
-        <div :if={!@connected}>
-          <button type="button" class="sa-btn" style="width: 100%; justify-content: center;" phx-click="connect_google">
-            <.icon name="hero-link" class="h-4 w-4" /> Connect
-          </button>
-        </div>
-        <div :if={@connected} style="display: flex; gap: 0.5rem;">
-          <.link navigate={~p"/settings/apps/#{@app.id}"} class="sa-btn secondary" style="flex: 1; justify-content: center;">
-            <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Settings
-          </.link>
-          <button type="button" class="sa-btn secondary" style="flex: 1; justify-content: center;" phx-click="disconnect_google" data-confirm="Disconnect Google Workspace?">
-            Disconnect
-          </button>
-        </div>
-      <% else %>
-        <.link navigate={~p"/settings/apps/#{@app.id}"} class="sa-btn" style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none;">
-          <.icon :if={!@connected} name="hero-plus-circle" class="h-4 w-4" />
-          <.icon :if={@connected} name="hero-cog-6-tooth" class="h-4 w-4" />
-          {if @connected, do: "Settings", else: "Set Up"}
-        </.link>
-      <% end %>
+      <.card_actions app={@app} status={@status} is_admin={@is_admin} />
     </article>
+    """
+  end
+
+  defp status_badge(%{status: :connected} = assigns) do
+    ~H"""
+    <span class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+      Connected
+    </span>
+    """
+  end
+
+  defp status_badge(%{status: :configured} = assigns) do
+    ~H"""
+    <span class="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+      Configured
+    </span>
+    """
+  end
+
+  defp status_badge(assigns) do
+    ~H"""
+    <span class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500">
+      Not Set
+    </span>
+    """
+  end
+
+  # --- Card action buttons ---
+
+  # Configured or Connected — full-width "Settings" button
+  defp card_actions(%{status: status} = assigns) when status in [:connected, :configured] do
+    ~H"""
+    <.link
+      navigate={~p"/settings/apps/#{@app.id}"}
+      class="sa-btn secondary"
+      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none;"
+    >
+      <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Settings
+    </.link>
+    """
+  end
+
+  # Not configured — admin gets "Set Up" button
+  defp card_actions(%{status: :not_set, is_admin: true} = assigns) do
+    ~H"""
+    <.link
+      navigate={~p"/settings/apps/#{@app.id}"}
+      class="sa-btn"
+      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none;"
+    >
+      <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Set Up
+    </.link>
+    """
+  end
+
+  # Not configured — non-admin gets informational text
+  defp card_actions(assigns) do
+    ~H"""
+    <p style="font-size: 0.8125rem; color: var(--sa-text-secondary); text-align: center;">
+      Contact your admin to configure this integration.
+    </p>
     """
   end
 end

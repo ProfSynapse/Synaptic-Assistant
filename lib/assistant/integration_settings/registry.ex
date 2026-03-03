@@ -51,6 +51,13 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "GOOGLE_OAUTH_CLIENT_SECRET",
           label: "OAuth Client Secret",
           help: "Same page as Client ID"
+        },
+        %{
+          key: :google_workspace_enabled,
+          secret: false,
+          env: "",
+          label: "Enabled",
+          help: "Enable or disable this integration"
         }
       ]
     },
@@ -70,6 +77,13 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "TELEGRAM_WEBHOOK_SECRET",
           label: "Webhook Secret",
           help: "Random string for webhook verification"
+        },
+        %{
+          key: :telegram_enabled,
+          secret: false,
+          env: "",
+          label: "Enabled",
+          help: "Enable or disable this integration"
         }
       ]
     },
@@ -103,6 +117,13 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "SLACK_SIGNING_SECRET",
           label: "Signing Secret",
           help: "From Basic Information → App Credentials"
+        },
+        %{
+          key: :slack_enabled,
+          secret: false,
+          env: "",
+          label: "Enabled",
+          help: "Enable or disable this integration"
         }
       ]
     },
@@ -131,6 +152,13 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "DISCORD_APPLICATION_ID",
           label: "Application ID",
           help: "From discord.com/developers/applications → General Information"
+        },
+        %{
+          key: :discord_enabled,
+          secret: false,
+          env: "",
+          label: "Enabled",
+          help: "Enable or disable this integration"
         }
       ]
     },
@@ -143,6 +171,13 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "GOOGLE_CHAT_WEBHOOK_URL",
           label: "Webhook URL",
           help: "From Google Chat space → Manage webhooks"
+        },
+        %{
+          key: :google_chat_enabled,
+          secret: false,
+          env: "",
+          label: "Enabled",
+          help: "Enable or disable this integration"
         }
       ]
     },
@@ -155,6 +190,13 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "HUBSPOT_API_KEY",
           label: "Private App Token",
           help: "From app.hubspot.com → Settings → Integrations → Private Apps"
+        },
+        %{
+          key: :hubspot_enabled,
+          secret: false,
+          env: "",
+          label: "Enabled",
+          help: "Enable or disable this integration"
         }
       ]
     },
@@ -174,6 +216,13 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "ELEVENLABS_VOICE_ID",
           label: "Voice ID",
           help: "From Voice Library → voice settings"
+        },
+        %{
+          key: :elevenlabs_enabled,
+          secret: false,
+          env: "",
+          label: "Enabled",
+          help: "Enable or disable this integration"
         }
       ]
     }
@@ -190,6 +239,17 @@ defmodule Assistant.IntegrationSettings.Registry do
   @key_to_env Map.new(@all_key_defs, fn def -> {def.key, def.env} end)
   @known_keys MapSet.new(@all_key_defs, & &1.key)
   @known_key_strings MapSet.new(@all_key_defs, &Atom.to_string(&1.key))
+
+  @enabled_keys @all_key_defs
+                |> Enum.filter(fn def -> String.ends_with?(Atom.to_string(def.key), "_enabled") end)
+                |> MapSet.new(& &1.key)
+
+  @enabled_key_strings MapSet.new(@enabled_keys, &Atom.to_string/1)
+
+  # Map from group string to the corresponding _enabled key atom
+  @group_to_enabled_key @all_key_defs
+                        |> Enum.filter(fn def -> MapSet.member?(@enabled_keys, def.key) end)
+                        |> Map.new(fn def -> {def.group, def.key} end)
 
   @doc """
   Returns all groups with their metadata and keys.
@@ -243,4 +303,24 @@ defmodule Assistant.IntegrationSettings.Registry do
   @spec known_key?(atom() | String.t()) :: boolean()
   def known_key?(key) when is_atom(key), do: MapSet.member?(@known_keys, key)
   def known_key?(key) when is_binary(key), do: MapSet.member?(@known_key_strings, key)
+
+  @doc """
+  Returns true if the key is an `_enabled` toggle key.
+
+  Accepts both atoms and strings.
+  """
+  @spec enabled_key?(atom() | String.t()) :: boolean()
+  def enabled_key?(key) when is_atom(key), do: MapSet.member?(@enabled_keys, key)
+  def enabled_key?(key) when is_binary(key), do: MapSet.member?(@enabled_key_strings, key)
+
+  @doc """
+  Returns the `_enabled` key atom for the given group string.
+
+  Returns `nil` if the group has no `_enabled` key.
+  """
+  @spec enabled_key_for_group(String.t()) :: atom() | nil
+  def enabled_key_for_group(group) when is_binary(group) do
+    Map.get(@group_to_enabled_key, group)
+  end
+
 end
