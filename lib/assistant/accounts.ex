@@ -619,12 +619,16 @@ defmodule Assistant.Accounts do
   defp maybe_sync_new_settings_user_access(other), do: other
 
   defp maybe_sync_and_authorize_settings_user(%SettingsUser{} = settings_user) do
-    with true <- email_allowed_by_allowlist?(settings_user.email),
-         {:ok, synced_settings_user} <- sync_settings_user_access_from_allowlist(settings_user) do
-      {:ok, synced_settings_user}
+    if SettingsUser.disabled?(settings_user) do
+      {:error, :disabled}
     else
-      false -> {:error, :not_allowed}
-      {:error, _} = error -> error
+      with true <- email_allowed_by_allowlist?(settings_user.email),
+           {:ok, synced_settings_user} <- sync_settings_user_access_from_allowlist(settings_user) do
+        {:ok, synced_settings_user}
+      else
+        false -> {:error, :not_allowed}
+        {:error, _} = error -> error
+      end
     end
   end
 
@@ -807,7 +811,10 @@ defmodule Assistant.Accounts do
         id: su.id,
         email: su.email,
         display_name: su.display_name,
+        is_admin: su.is_admin,
+        disabled_at: su.disabled_at,
         has_openrouter_key: not is_nil(su.openrouter_api_key),
+        has_openai_key: not is_nil(su.openai_api_key),
         has_linked_user: not is_nil(su.user_id)
       }
     )
@@ -847,6 +854,142 @@ defmodule Assistant.Accounts do
         |> SettingsUser.openrouter_api_key_changeset(nil)
         |> Repo.update()
     end
+  end
+
+  @doc """
+  Returns `true` if the given settings_user is disabled.
+  """
+  def settings_user_disabled?(%SettingsUser{} = settings_user) do
+    SettingsUser.disabled?(settings_user)
+  end
+
+  @doc """
+  Returns detailed information about a settings_user for the admin detail view.
+
+  Returns `{:ok, map}` or `{:error, :not_found}`.
+  """
+  def get_user_for_admin(settings_user_id) when is_binary(settings_user_id) do
+    case Repo.get(SettingsUser, settings_user_id) do
+      nil ->
+        {:error, :not_found}
+
+      %SettingsUser{} = su ->
+        {:ok,
+         %{
+           id: su.id,
+           email: su.email,
+           display_name: su.display_name,
+           is_admin: su.is_admin,
+           disabled_at: su.disabled_at,
+           has_openrouter_key: is_binary(su.openrouter_api_key),
+           has_openai_key: is_binary(su.openai_api_key),
+           has_linked_user: not is_nil(su.user_id),
+           user_id: su.user_id,
+           access_scopes: su.access_scopes,
+           confirmed_at: su.confirmed_at,
+           inserted_at: su.inserted_at,
+           updated_at: su.updated_at
+         }}
+    end
+  end
+
+  @doc """
+  Toggles the disabled state for a settings_user.
+
+  When currently enabled, sets `disabled_at` to now.
+  When currently disabled, clears `disabled_at` to nil.
+
+  Guards:
+  - Cannot disable yourself (`:cannot_disable_self`)
+  - Cannot disable the last active admin (`:last_admin`)
+  """
+  def toggle_user_disabled(settings_user_id, actor_settings_user_id)
+      when is_binary(settings_user_id) and is_binary(actor_settings_user_id) do
+    if settings_user_id == actor_settings_user_id do
+      {:error, :cannot_disable_self}
+    else
+      case Repo.get(SettingsUser, settings_user_id) do
+        nil ->
+          {:error, :not_found}
+
+        %SettingsUser{} = settings_user ->
+          currently_disabled = SettingsUser.disabled?(settings_user)
+
+          if not currently_disabled and settings_user.is_admin and last_active_admin?() do
+            {:error, :last_admin}
+          else
+            new_disabled_at = if currently_disabled, do: nil, else: DateTime.utc_now(:second)
+
+            settings_user
+            |> SettingsUser.disabled_changeset(new_disabled_at)
+            |> Repo.update()
+          end
+      end
+    end
+  end
+
+  @doc """
+  Deletes a settings_user by ID.
+
+  Tokens are cascade-deleted by the database FK constraint.
+
+  Guards:
+  - Cannot delete yourself (`:cannot_delete_self`)
+  - Cannot delete the last active admin (`:last_admin`)
+  """
+  def delete_settings_user(settings_user_id, actor_settings_user_id)
+      when is_binary(settings_user_id) and is_binary(actor_settings_user_id) do
+    if settings_user_id == actor_settings_user_id do
+      {:error, :cannot_delete_self}
+    else
+      case Repo.get(SettingsUser, settings_user_id) do
+        nil ->
+          {:error, :not_found}
+
+        %SettingsUser{} = settings_user ->
+          if settings_user.is_admin and last_active_admin?() do
+            {:error, :last_admin}
+          else
+            Repo.delete(settings_user)
+          end
+      end
+    end
+  end
+
+  @doc """
+  Toggles admin status for a settings_user.
+
+  Guards:
+  - Cannot demote the last active admin (`:last_admin`)
+  """
+  def toggle_admin_status(settings_user_id, is_admin)
+      when is_binary(settings_user_id) and is_boolean(is_admin) do
+    case Repo.get(SettingsUser, settings_user_id) do
+      nil ->
+        {:error, :not_found}
+
+      %SettingsUser{} = settings_user ->
+        if not is_admin and settings_user.is_admin and last_active_admin?() do
+          {:error, :last_admin}
+        else
+          settings_user
+          |> Ecto.Changeset.change(is_admin: is_admin)
+          |> Repo.update()
+        end
+    end
+  end
+
+  # Returns true when there is exactly one active (non-disabled) admin.
+  defp last_active_admin? do
+    count =
+      Repo.one(
+        from(su in SettingsUser,
+          where: su.is_admin == true and is_nil(su.disabled_at),
+          select: count(su.id)
+        )
+      )
+
+    count <= 1
   end
 
   @doc """

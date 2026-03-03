@@ -724,7 +724,7 @@ defmodule AssistantWeb.SettingsLive.Events do
             {:noreply,
              socket
              |> put_flash(:info, "OpenRouter API key saved.")
-             |> assign(:admin_users_with_keys, Accounts.list_settings_users_for_admin())}
+             |> Loaders.reload_admin_users()}
 
           {:error, _} ->
             {:noreply, put_flash(socket, :error, "Unable to save API key.")}
@@ -742,7 +742,159 @@ defmodule AssistantWeb.SettingsLive.Events do
           {:noreply,
            socket
            |> put_flash(:info, "OpenRouter API key removed.")
-           |> assign(:admin_users_with_keys, Accounts.list_settings_users_for_admin())}
+           |> Loaders.reload_admin_users()}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to remove API key.")}
+      end
+    end
+  end
+
+  # --- Admin user card management handlers ---
+
+  def handle_event("search_admin_users", %{"query" => query}, socket) do
+    normalized = query |> to_string() |> String.trim()
+    all_users = socket.assigns[:admin_users_with_keys] || []
+
+    {:noreply,
+     socket
+     |> assign(:admin_user_search, normalized)
+     |> assign(:filtered_admin_users, Loaders.filter_admin_users(all_users, normalized))}
+  end
+
+  def handle_event("edit_admin_user", %{"id" => user_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      case Accounts.get_user_for_admin(user_id) do
+        {:ok, user} ->
+          {:noreply, assign(socket, :current_admin_user, user)}
+
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "User not found.")}
+      end
+    end
+  end
+
+  def handle_event("back_to_admin_users", _params, socket) do
+    {:noreply, assign(socket, :current_admin_user, nil)}
+  end
+
+  def handle_event("toggle_user_disabled", %{"id" => user_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      actor_id = socket.assigns.current_scope.settings_user.id
+
+      case Accounts.toggle_user_disabled(user_id, actor_id) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "User status updated.")
+           |> Loaders.reload_admin_users()}
+
+        {:error, :cannot_disable_self} ->
+          {:noreply, put_flash(socket, :error, "You cannot disable your own account.")}
+
+        {:error, :last_admin} ->
+          {:noreply, put_flash(socket, :error, "Cannot disable the last active admin.")}
+
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "User not found.")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to update user status.")}
+      end
+    end
+  end
+
+  def handle_event("delete_admin_user", %{"id" => user_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      actor_id = socket.assigns.current_scope.settings_user.id
+
+      case Accounts.delete_settings_user(user_id, actor_id) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> assign(:current_admin_user, nil)
+           |> put_flash(:info, "User deleted.")
+           |> Loaders.reload_admin_users()}
+
+        {:error, :cannot_delete_self} ->
+          {:noreply, put_flash(socket, :error, "You cannot delete your own account.")}
+
+        {:error, :last_admin} ->
+          {:noreply, put_flash(socket, :error, "Cannot delete the last active admin.")}
+
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "User not found.")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to delete user.")}
+      end
+    end
+  end
+
+  def handle_event("toggle_admin_status", %{"id" => user_id, "is-admin" => is_admin}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      is_admin? = is_admin == "true"
+
+      case Accounts.toggle_admin_status(user_id, is_admin?) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Admin status updated.")
+           |> Loaders.reload_admin_users()}
+
+        {:error, :last_admin} ->
+          {:noreply, put_flash(socket, :error, "Cannot demote the last active admin.")}
+
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "User not found.")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to update admin status.")}
+      end
+    end
+  end
+
+  def handle_event("save_admin_user_openrouter_key", %{"user_id" => user_id, "api_key" => api_key}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      api_key = String.trim(api_key)
+
+      if api_key == "" do
+        {:noreply, put_flash(socket, :error, "API key cannot be blank.")}
+      else
+        case Accounts.admin_set_openrouter_key(user_id, api_key) do
+          {:ok, _user} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "OpenRouter API key saved.")
+             |> Loaders.reload_admin_users()}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Unable to save API key.")}
+        end
+      end
+    end
+  end
+
+  def handle_event("delete_admin_user_openrouter_key", %{"id" => user_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      case Accounts.admin_clear_openrouter_key(user_id) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "OpenRouter API key removed.")
+           |> Loaders.reload_admin_users()}
 
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Unable to remove API key.")}

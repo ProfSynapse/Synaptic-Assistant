@@ -8,6 +8,8 @@ defmodule AssistantWeb.AdminLive do
   alias AssistantWeb.SettingsUserAuth
 
   import AssistantWeb.Components.AdminIntegrations
+  import AssistantWeb.Components.SettingsPage.UserCards, only: [user_cards_section: 1]
+  import AssistantWeb.Components.SettingsPage.UserDetail, only: [user_detail_section: 1]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -15,6 +17,8 @@ defmodule AssistantWeb.AdminLive do
       socket
       |> assign(:managed_scopes, Accounts.managed_access_scopes())
       |> assign(:can_bootstrap_admin, Accounts.admin_bootstrap_available?())
+      |> assign(:admin_user_search, "")
+      |> assign(:current_admin_user, nil)
 
     current_user = socket.assigns.current_scope.settings_user
 
@@ -29,6 +33,7 @@ defmodule AssistantWeb.AdminLive do
          |> assign(:allowlist_entries, [])
          |> assign(:settings_users, [])
          |> assign(:admin_users_with_keys, [])
+         |> assign(:filtered_admin_users, [])
          |> assign(:integration_settings, [])}
 
       true ->
@@ -74,317 +79,181 @@ defmodule AssistantWeb.AdminLive do
           </.button>
         </section>
 
-        <section :if={@current_scope.settings_user.is_admin} class="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
-          <div class="space-y-8">
-            <section class="rounded-lg border border-zinc-200 bg-white p-4 space-y-4">
-              <div>
-                <h2 class="font-semibold">Allow List</h2>
-                <p class="text-sm text-zinc-600">
-                  When at least one active entry exists, only active allow-listed emails can authenticate.
-                </p>
-              </div>
-
-              <.form
-                for={@allowlist_form}
-                id="allowlist-entry-form"
-                phx-change="validate_allowlist_entry"
-                phx-submit="save_allowlist_entry"
-                class="space-y-4"
-              >
+        <section :if={@current_scope.settings_user.is_admin} class="space-y-8">
+          <div class="grid gap-8 lg:grid-cols-[1.1fr_1fr]">
+            <div class="space-y-8">
+              <section class="rounded-lg border border-zinc-200 bg-white p-4 space-y-4">
                 <div>
-                  <label for="allowlist-email" class="block text-sm font-medium mb-1">Email</label>
-                  <input
-                    id="allowlist-email"
-                    name={@allowlist_form[:email].name}
-                    type="email"
-                    value={@allowlist_form[:email].value}
-                    class="w-full rounded-md border border-zinc-300 px-3 py-2"
-                    required
-                  />
-                  <p :for={msg <- @allowlist_form[:email].errors} class="mt-1 text-xs text-red-600">
-                    {translate_error(msg)}
+                  <h2 class="font-semibold">Allow List</h2>
+                  <p class="text-sm text-zinc-600">
+                    When at least one active entry exists, only active allow-listed emails can authenticate.
                   </p>
                 </div>
 
-                <div class="grid gap-3 sm:grid-cols-2">
-                  <label class="inline-flex items-center gap-2 text-sm">
+                <.form
+                  for={@allowlist_form}
+                  id="allowlist-entry-form"
+                  phx-change="validate_allowlist_entry"
+                  phx-submit="save_allowlist_entry"
+                  class="space-y-4"
+                >
+                  <div>
+                    <label for="allowlist-email" class="block text-sm font-medium mb-1">Email</label>
                     <input
-                      id="allowlist-active"
-                      type="checkbox"
-                      name={@allowlist_form[:active].name}
-                      value="true"
-                      checked={checkbox_checked?(@allowlist_form[:active].value)}
+                      id="allowlist-email"
+                      name={@allowlist_form[:email].name}
+                      type="email"
+                      value={@allowlist_form[:email].value}
+                      class="w-full rounded-md border border-zinc-300 px-3 py-2"
+                      required
                     />
-                    Active
-                  </label>
+                    <p :for={msg <- @allowlist_form[:email].errors} class="mt-1 text-xs text-red-600">
+                      {translate_error(msg)}
+                    </p>
+                  </div>
 
-                  <label class="inline-flex items-center gap-2 text-sm">
-                    <input
-                      id="allowlist-admin"
-                      type="checkbox"
-                      name={@allowlist_form[:is_admin].name}
-                      value="true"
-                      checked={checkbox_checked?(@allowlist_form[:is_admin].value)}
-                    />
-                    Admin access
-                  </label>
-                </div>
-
-                <div>
-                  <p class="block text-sm font-medium mb-2">Scoped Privileges</p>
-                  <input type="hidden" name="allowlist_entry[scopes][]" value="" />
-                  <div class="grid gap-2 sm:grid-cols-2">
-                    <label
-                      :for={scope <- @managed_scopes}
-                      class="inline-flex items-center gap-2 text-sm rounded border border-zinc-200 px-3 py-2"
-                    >
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <label class="inline-flex items-center gap-2 text-sm">
                       <input
+                        id="allowlist-active"
                         type="checkbox"
-                        name="allowlist_entry[scopes][]"
-                        value={scope}
-                        checked={scope in form_scopes(@allowlist_form)}
+                        name={@allowlist_form[:active].name}
+                        value="true"
+                        checked={checkbox_checked?(@allowlist_form[:active].value)}
                       />
-                      <span>{scope}</span>
+                      Active
+                    </label>
+
+                    <label class="inline-flex items-center gap-2 text-sm">
+                      <input
+                        id="allowlist-admin"
+                        type="checkbox"
+                        name={@allowlist_form[:is_admin].name}
+                        value="true"
+                        checked={checkbox_checked?(@allowlist_form[:is_admin].value)}
+                      />
+                      Admin access
                     </label>
                   </div>
-                </div>
 
+                  <div>
+                    <p class="block text-sm font-medium mb-2">Scoped Privileges</p>
+                    <input type="hidden" name="allowlist_entry[scopes][]" value="" />
+                    <div class="grid gap-2 sm:grid-cols-2">
+                      <label
+                        :for={scope <- @managed_scopes}
+                        class="inline-flex items-center gap-2 text-sm rounded border border-zinc-200 px-3 py-2"
+                      >
+                        <input
+                          type="checkbox"
+                          name="allowlist_entry[scopes][]"
+                          value={scope}
+                          checked={scope in form_scopes(@allowlist_form)}
+                        />
+                        <span>{scope}</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label for="allowlist-notes" class="block text-sm font-medium mb-1">Notes</label>
+                    <textarea
+                      id="allowlist-notes"
+                      name={@allowlist_form[:notes].name}
+                      rows="3"
+                      class="w-full rounded-md border border-zinc-300 px-3 py-2"
+                    ><%= @allowlist_form[:notes].value %></textarea>
+                    <p :for={msg <- @allowlist_form[:notes].errors} class="mt-1 text-xs text-red-600">
+                      {translate_error(msg)}
+                    </p>
+                  </div>
+
+                  <div class="flex flex-wrap gap-3">
+                    <.button id="save-allowlist-entry-btn" phx-disable-with="Saving...">
+                      Save Allow List Entry
+                    </.button>
+                    <button
+                      id="reset-allowlist-entry-form-btn"
+                      type="button"
+                      phx-click="reset_allowlist_form"
+                      class="rounded-md border border-zinc-300 px-3 py-2 text-sm"
+                    >
+                      Clear Form
+                    </button>
+                  </div>
+                </.form>
+              </section>
+
+              <section class="rounded-lg border border-zinc-200 bg-white p-4 space-y-4">
                 <div>
-                  <label for="allowlist-notes" class="block text-sm font-medium mb-1">Notes</label>
-                  <textarea
-                    id="allowlist-notes"
-                    name={@allowlist_form[:notes].name}
-                    rows="3"
-                    class="w-full rounded-md border border-zinc-300 px-3 py-2"
-                  ><%= @allowlist_form[:notes].value %></textarea>
-                  <p :for={msg <- @allowlist_form[:notes].errors} class="mt-1 text-xs text-red-600">
-                    {translate_error(msg)}
+                  <h2 class="font-semibold">Allow List Entries</h2>
+                  <p class="text-sm text-zinc-600">
+                    Edit entries to grant/revoke access and keep current user privileges in sync.
                   </p>
                 </div>
 
-                <div class="flex flex-wrap gap-3">
-                  <.button id="save-allowlist-entry-btn" phx-disable-with="Saving...">
-                    Save Allow List Entry
-                  </.button>
-                  <button
-                    id="reset-allowlist-entry-form-btn"
-                    type="button"
-                    phx-click="reset_allowlist_form"
-                    class="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                  >
-                    Clear Form
-                  </button>
+                <div class="overflow-x-auto">
+                  <table class="min-w-full text-sm" id="allowlist-entries-table">
+                    <thead>
+                      <tr class="text-left border-b">
+                        <th class="py-2 pr-4">Email</th>
+                        <th class="py-2 pr-4">Status</th>
+                        <th class="py-2 pr-4">Admin</th>
+                        <th class="py-2 pr-4">Scopes</th>
+                        <th class="py-2 pr-4">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr :if={@allowlist_entries == []}>
+                        <td class="py-3 text-zinc-500" colspan="5">No allow list entries yet.</td>
+                      </tr>
+                      <tr :for={entry <- @allowlist_entries} id={"allowlist-entry-#{entry.id}"} class="border-b last:border-0">
+                        <td class="py-2 pr-4">{entry.email}</td>
+                        <td class="py-2 pr-4">{if entry.active, do: "Active", else: "Disabled"}</td>
+                        <td class="py-2 pr-4">{if entry.is_admin, do: "Yes", else: "No"}</td>
+                        <td class="py-2 pr-4">{Enum.join(entry.scopes || [], ", ")}</td>
+                        <td class="py-2 pr-4">
+                          <div class="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              phx-click="edit_allowlist_entry"
+                              phx-value-id={entry.id}
+                              class="rounded border border-zinc-300 px-2 py-1"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              phx-click="toggle_allowlist_entry"
+                              phx-value-id={entry.id}
+                              class="rounded border border-zinc-300 px-2 py-1"
+                            >
+                              {if entry.active, do: "Disable", else: "Enable"}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
-              </.form>
-            </section>
+              </section>
+            </div>
 
-            <section class="rounded-lg border border-zinc-200 bg-white p-4 space-y-4">
-              <div>
-                <h2 class="font-semibold">Allow List Entries</h2>
-                <p class="text-sm text-zinc-600">
-                  Edit entries to grant/revoke access and keep current user privileges in sync.
-                </p>
-              </div>
+            <div class="space-y-8">
+              <.user_detail_section
+                :if={@current_admin_user}
+                user={@current_admin_user}
+                current_user_id={@current_scope.settings_user.id}
+              />
 
-              <div class="overflow-x-auto">
-                <table class="min-w-full text-sm" id="allowlist-entries-table">
-                  <thead>
-                    <tr class="text-left border-b">
-                      <th class="py-2 pr-4">Email</th>
-                      <th class="py-2 pr-4">Status</th>
-                      <th class="py-2 pr-4">Admin</th>
-                      <th class="py-2 pr-4">Scopes</th>
-                      <th class="py-2 pr-4">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr :if={@allowlist_entries == []}>
-                      <td class="py-3 text-zinc-500" colspan="5">No allow list entries yet.</td>
-                    </tr>
-                    <tr :for={entry <- @allowlist_entries} id={"allowlist-entry-#{entry.id}"} class="border-b last:border-0">
-                      <td class="py-2 pr-4">{entry.email}</td>
-                      <td class="py-2 pr-4">{if entry.active, do: "Active", else: "Disabled"}</td>
-                      <td class="py-2 pr-4">{if entry.is_admin, do: "Yes", else: "No"}</td>
-                      <td class="py-2 pr-4">{Enum.join(entry.scopes || [], ", ")}</td>
-                      <td class="py-2 pr-4">
-                        <div class="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            phx-click="edit_allowlist_entry"
-                            phx-value-id={entry.id}
-                            class="rounded border border-zinc-300 px-2 py-1"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            phx-click="toggle_allowlist_entry"
-                            phx-value-id={entry.id}
-                            class="rounded border border-zinc-300 px-2 py-1"
-                          >
-                            {if entry.active, do: "Disable", else: "Enable"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
+              <.user_cards_section
+                :if={!@current_admin_user}
+                users={@filtered_admin_users}
+                search_value={@admin_user_search}
+                current_user_id={@current_scope.settings_user.id}
+              />
+            </div>
           </div>
-
-          <section class="rounded-lg border border-zinc-200 bg-white p-4 space-y-4">
-            <div>
-              <h2 class="font-semibold">Users</h2>
-              <p class="text-sm text-zinc-600">
-                Help users recover access by sending a magic link or forcing a password reset.
-              </p>
-            </div>
-
-            <div class="overflow-x-auto">
-              <table class="min-w-full text-sm" id="admin-users-table">
-                <thead>
-                  <tr class="text-left border-b">
-                    <th class="py-2 pr-4">Email</th>
-                    <th class="py-2 pr-4">Admin</th>
-                    <th class="py-2 pr-4">Scopes</th>
-                    <th class="py-2 pr-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :if={@settings_users == []}>
-                    <td class="py-3 text-zinc-500" colspan="4">No user accounts yet.</td>
-                  </tr>
-                  <tr :for={user <- @settings_users} id={"admin-user-#{user.id}"} class="border-b last:border-0">
-                    <td class="py-2 pr-4">{user.email}</td>
-                    <td class="py-2 pr-4">{if user.is_admin, do: "Yes", else: "No"}</td>
-                    <td class="py-2 pr-4">{Enum.join(user.access_scopes || [], ", ")}</td>
-                    <td class="py-2 pr-4">
-                      <div class="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          phx-click="send_recovery_link"
-                          phx-value-id={user.id}
-                          class="rounded border border-zinc-300 px-2 py-1"
-                        >
-                          Send Magic Link
-                        </button>
-                        <button
-                          type="button"
-                          phx-click="force_password_reset"
-                          phx-value-id={user.id}
-                          class="rounded border border-zinc-300 px-2 py-1"
-                        >
-                          Force Password Reset
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </section>
-
-        <section :if={@current_scope.settings_user.is_admin} class="space-y-4">
-          <section class="rounded-lg border border-zinc-200 bg-white p-4 space-y-4">
-            <div>
-              <h2 class="font-semibold">User API Keys</h2>
-              <p class="text-sm text-zinc-600">
-                Provision per-user OpenRouter API keys. Users with a key will use it instead of the system key.
-              </p>
-            </div>
-
-            <div class="overflow-x-auto">
-              <table class="min-w-full text-sm" id="admin-user-keys-table">
-                <thead>
-                  <tr class="text-left border-b">
-                    <th class="py-2 pr-4">User</th>
-                    <th class="py-2 pr-4">Chat Account</th>
-                    <th class="py-2 pr-4">OpenRouter Key</th>
-                    <th class="py-2 pr-4">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :if={@admin_users_with_keys == []}>
-                    <td class="py-3 text-zinc-500" colspan="4">No user accounts yet.</td>
-                  </tr>
-                  <tr :for={user <- @admin_users_with_keys} id={"user-key-#{user.id}"} class="border-b last:border-0">
-                    <td class="py-2 pr-4">
-                      <div>
-                        <span class="font-medium">{user.email}</span>
-                        <span :if={user.display_name} class="text-zinc-500 text-xs ml-1">
-                          ({user.display_name})
-                        </span>
-                      </div>
-                    </td>
-                    <td class="py-2 pr-4">
-                      <span
-                        :if={user.has_linked_user}
-                        class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
-                      >
-                        Linked
-                      </span>
-                      <span
-                        :if={!user.has_linked_user}
-                        class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500"
-                      >
-                        Not Linked
-                      </span>
-                    </td>
-                    <td class="py-2 pr-4">
-                      <span
-                        :if={user.has_openrouter_key}
-                        class="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700"
-                      >
-                        Configured
-                      </span>
-                      <span
-                        :if={!user.has_openrouter_key}
-                        class="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500"
-                      >
-                        Not Set
-                      </span>
-                    </td>
-                    <td class="py-2 pr-4">
-                      <div class="flex flex-wrap items-center gap-2">
-                        <form
-                          phx-submit="save_user_openrouter_key"
-                          id={"user-key-form-#{user.id}"}
-                          class="flex items-center gap-2"
-                        >
-                          <input type="hidden" name="user_id" value={user.id} />
-                          <input
-                            type="password"
-                            name="api_key"
-                            placeholder={if user.has_openrouter_key, do: "Replace key...", else: "sk-or-v1-..."}
-                            autocomplete="off"
-                            class="rounded-md border border-zinc-300 px-2 py-1 text-sm font-mono w-40"
-                          />
-                          <button
-                            type="submit"
-                            class="rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white hover:bg-zinc-700"
-                          >
-                            Save
-                          </button>
-                        </form>
-                        <button
-                          :if={user.has_openrouter_key}
-                          type="button"
-                          phx-click="delete_user_openrouter_key"
-                          phx-value-id={user.id}
-                          class="rounded border border-red-300 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                          data-confirm="Remove this user's OpenRouter API key?"
-                        >
-                          Remove Key
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
 
           <div>
             <h2 class="text-xl font-semibold">Integrations</h2>
@@ -587,55 +456,218 @@ defmodule AssistantWeb.AdminLive do
     end
   end
 
-  def handle_event("save_user_openrouter_key", %{"user_id" => user_id, "api_key" => api_key}, socket) do
-    unless socket.assigns.current_scope.settings_user.is_admin do
-      {:noreply, put_flash(socket, :error, "Not authorized.")}
+  # --- Admin user card management handlers ---
+
+  def handle_event("search_admin_users", %{"query" => query}, socket) do
+    normalized = query |> to_string() |> String.trim()
+    all_users = socket.assigns[:admin_users_with_keys] || []
+
+    {:noreply,
+     socket
+     |> assign(:admin_user_search, normalized)
+     |> assign(:filtered_admin_users, filter_admin_users(all_users, normalized))}
+  end
+
+  def handle_event("edit_admin_user", %{"id" => user_id}, socket) do
+    case Accounts.get_user_for_admin(user_id) do
+      {:ok, user} ->
+        {:noreply, assign(socket, :current_admin_user, user)}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "User not found.")}
+    end
+  end
+
+  def handle_event("back_to_admin_users", _params, socket) do
+    {:noreply, assign(socket, :current_admin_user, nil)}
+  end
+
+  def handle_event("toggle_user_disabled", %{"id" => user_id}, socket) do
+    actor_id = socket.assigns.current_scope.settings_user.id
+
+    case Accounts.toggle_user_disabled(user_id, actor_id) do
+      {:ok, _user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "User status updated.")
+         |> reload_admin_users()}
+
+      {:error, :cannot_disable_self} ->
+        {:noreply, put_flash(socket, :error, "You cannot disable your own account.")}
+
+      {:error, :last_admin} ->
+        {:noreply, put_flash(socket, :error, "Cannot disable the last active admin.")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "User not found.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to update user status.")}
+    end
+  end
+
+  def handle_event("delete_admin_user", %{"id" => user_id}, socket) do
+    actor_id = socket.assigns.current_scope.settings_user.id
+
+    case Accounts.delete_settings_user(user_id, actor_id) do
+      {:ok, _user} ->
+        {:noreply,
+         socket
+         |> assign(:current_admin_user, nil)
+         |> put_flash(:info, "User deleted.")
+         |> reload_admin_users()}
+
+      {:error, :cannot_delete_self} ->
+        {:noreply, put_flash(socket, :error, "You cannot delete your own account.")}
+
+      {:error, :last_admin} ->
+        {:noreply, put_flash(socket, :error, "Cannot delete the last active admin.")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "User not found.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to delete user.")}
+    end
+  end
+
+  def handle_event("toggle_admin_status", %{"id" => user_id, "is-admin" => is_admin}, socket) do
+    is_admin? = is_admin == "true"
+
+    case Accounts.toggle_admin_status(user_id, is_admin?) do
+      {:ok, _user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Admin status updated.")
+         |> reload_admin_users()}
+
+      {:error, :last_admin} ->
+        {:noreply, put_flash(socket, :error, "Cannot demote the last active admin.")}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "User not found.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to update admin status.")}
+    end
+  end
+
+  def handle_event("save_admin_user_openrouter_key", %{"user_id" => user_id, "api_key" => api_key}, socket) do
+    api_key = String.trim(api_key)
+
+    if api_key == "" do
+      {:noreply, put_flash(socket, :error, "API key cannot be blank.")}
     else
-      api_key = String.trim(api_key)
+      case Accounts.admin_set_openrouter_key(user_id, api_key) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "OpenRouter API key saved.")
+           |> reload_admin_users()}
 
-      if api_key == "" do
-        {:noreply, put_flash(socket, :error, "API key cannot be blank.")}
-      else
-        case Accounts.admin_set_openrouter_key(user_id, api_key) do
-          {:ok, _user} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "OpenRouter API key saved.")
-             |> assign(:admin_users_with_keys, Accounts.list_settings_users_for_admin())}
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to save API key.")}
+      end
+    end
+  end
 
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Unable to save API key.")}
-        end
+  def handle_event("delete_admin_user_openrouter_key", %{"id" => user_id}, socket) do
+    case Accounts.admin_clear_openrouter_key(user_id) do
+      {:ok, _user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "OpenRouter API key removed.")
+         |> reload_admin_users()}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to remove API key.")}
+    end
+  end
+
+  def handle_event("save_user_openrouter_key", %{"user_id" => user_id, "api_key" => api_key}, socket) do
+    api_key = String.trim(api_key)
+
+    if api_key == "" do
+      {:noreply, put_flash(socket, :error, "API key cannot be blank.")}
+    else
+      case Accounts.admin_set_openrouter_key(user_id, api_key) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "OpenRouter API key saved.")
+           |> reload_admin_users()}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to save API key.")}
       end
     end
   end
 
   def handle_event("delete_user_openrouter_key", %{"id" => user_id}, socket) do
-    unless socket.assigns.current_scope.settings_user.is_admin do
-      {:noreply, put_flash(socket, :error, "Not authorized.")}
-    else
-      case Accounts.admin_clear_openrouter_key(user_id) do
-        {:ok, _user} ->
-          {:noreply,
-           socket
-           |> put_flash(:info, "OpenRouter API key removed.")
-           |> assign(:admin_users_with_keys, Accounts.list_settings_users_for_admin())}
+    case Accounts.admin_clear_openrouter_key(user_id) do
+      {:ok, _user} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "OpenRouter API key removed.")
+         |> reload_admin_users()}
 
-        {:error, _} ->
-          {:noreply, put_flash(socket, :error, "Unable to remove API key.")}
-      end
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Unable to remove API key.")}
     end
   end
 
   defp load_admin_data(socket) do
-    assign(socket,
+    all_users = Accounts.list_settings_users_for_admin()
+    search = socket.assigns[:admin_user_search] || ""
+
+    socket
+    |> assign(
       can_bootstrap_admin: Accounts.admin_bootstrap_available?(),
       allowlist_form: blank_allowlist_form(),
       allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
       settings_users: Accounts.list_admin_settings_users(),
-      admin_users_with_keys: Accounts.list_settings_users_for_admin(),
+      admin_users_with_keys: all_users,
+      filtered_admin_users: filter_admin_users(all_users, search),
       integration_settings: IntegrationSettings.list_all()
     )
+    |> maybe_refresh_current_admin_user()
+  end
+
+  defp reload_admin_users(socket) do
+    all_users = Accounts.list_settings_users_for_admin()
+    search = socket.assigns[:admin_user_search] || ""
+
+    socket
+    |> assign(:admin_users_with_keys, all_users)
+    |> assign(:settings_users, Accounts.list_admin_settings_users())
+    |> assign(:filtered_admin_users, filter_admin_users(all_users, search))
+    |> maybe_refresh_current_admin_user()
+  end
+
+  defp filter_admin_users(users, query) do
+    normalized = query |> to_string() |> String.trim() |> String.downcase()
+
+    if normalized == "" do
+      users
+    else
+      Enum.filter(users, fn user ->
+        String.contains?(String.downcase(to_string(user.email)), normalized) ||
+          String.contains?(String.downcase(to_string(user.display_name || "")), normalized)
+      end)
+    end
+  end
+
+  defp maybe_refresh_current_admin_user(socket) do
+    case socket.assigns[:current_admin_user] do
+      nil ->
+        socket
+
+      %{id: user_id} ->
+        case Accounts.get_user_for_admin(user_id) do
+          {:ok, user} -> assign(socket, :current_admin_user, user)
+          {:error, :not_found} -> assign(socket, :current_admin_user, nil)
+        end
+    end
   end
 
   defp blank_allowlist_form do

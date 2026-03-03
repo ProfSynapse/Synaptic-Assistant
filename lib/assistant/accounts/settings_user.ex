@@ -20,6 +20,7 @@ defmodule Assistant.Accounts.SettingsUser do
     field :openai_account_id, :string
     field :openai_expires_at, :utc_datetime
     field :openai_auth_type, :string
+    field :disabled_at, :utc_datetime
 
     belongs_to :user, Assistant.Schemas.User
 
@@ -191,6 +192,21 @@ defmodule Assistant.Accounts.SettingsUser do
       openai_expires_at: Map.get(attrs, :expires_at),
       openai_auth_type: "oauth"
     })
+  end
+
+  @doc """
+  Returns `true` if the settings_user account is disabled.
+  """
+  def disabled?(%__MODULE__{disabled_at: disabled_at}), do: not is_nil(disabled_at)
+  def disabled?(_), do: false
+
+  @doc """
+  A changeset for toggling the disabled state.
+
+  Pass `DateTime.utc_now(:second)` to disable, or `nil` to re-enable.
+  """
+  def disabled_changeset(settings_user, disabled_at) do
+    change(settings_user, disabled_at: disabled_at)
   end
 
   @doc """

@@ -221,15 +221,25 @@ defmodule AssistantWeb.SettingsUserAuth do
   def on_mount(:require_authenticated, _params, session, socket) do
     socket = mount_current_scope(socket, session)
 
-    if socket.assigns.current_scope && socket.assigns.current_scope.settings_user do
-      {:cont, socket}
-    else
-      socket =
-        socket
-        |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
-        |> Phoenix.LiveView.redirect(to: ~p"/settings_users/log-in")
+    cond do
+      is_nil(socket.assigns.current_scope) or is_nil(socket.assigns.current_scope.settings_user) ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
+          |> Phoenix.LiveView.redirect(to: ~p"/settings_users/log-in")
 
-      {:halt, socket}
+        {:halt, socket}
+
+      Accounts.settings_user_disabled?(socket.assigns.current_scope.settings_user) ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "Your account has been disabled.")
+          |> Phoenix.LiveView.redirect(to: ~p"/settings_users/log-in")
+
+        {:halt, socket}
+
+      true ->
+        {:cont, socket}
     end
   end
 
