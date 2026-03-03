@@ -1,8 +1,8 @@
 # test/assistant_web/plugs/google_chat_auth_test.exs
 #
-# Tests for the GoogleChatAuth plug's dynamic issuer-based cert resolution
-# and issuer validation. Focuses on the issuer allowlist logic and cert URL
-# construction that was added to support G Suite Add-ons HTTP endpoint mode.
+# Tests for the GoogleChatAuth plug's dynamic issuer-based cert/key resolution
+# and issuer validation. Covers the issuer allowlist, cert URL construction,
+# and JWKS key parsing for service accounts and Google ID token issuers.
 #
 # Does NOT test full JWT verification (would require real/mocked Google certs).
 
@@ -18,6 +18,10 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
   describe "allowed_issuer?/1" do
     test "accepts standard Chat API service account" do
       assert GoogleChatAuth.allowed_issuer?("chat@system.gserviceaccount.com")
+    end
+
+    test "accepts Google ID token issuer (accounts.google.com)" do
+      assert GoogleChatAuth.allowed_issuer?("https://accounts.google.com")
     end
 
     test "accepts G Suite Add-ons service account" do
@@ -54,6 +58,14 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
                "fake@gcp-sa-gsuiteaddons.iam.gserviceaccount.com.evil.com"
              )
     end
+
+    test "rejects accounts.google.com without https scheme" do
+      refute GoogleChatAuth.allowed_issuer?("accounts.google.com")
+    end
+
+    test "rejects http variant of accounts.google.com" do
+      refute GoogleChatAuth.allowed_issuer?("http://accounts.google.com")
+    end
   end
 
   # ---------------------------------------------------------------
@@ -61,8 +73,12 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
   # ---------------------------------------------------------------
 
   describe "validate_issuer/1" do
-    test "returns :ok for allowed issuers" do
+    test "returns :ok for allowed service account issuers" do
       assert :ok = GoogleChatAuth.validate_issuer("chat@system.gserviceaccount.com")
+    end
+
+    test "returns :ok for Google ID token issuer" do
+      assert :ok = GoogleChatAuth.validate_issuer("https://accounts.google.com")
     end
 
     test "returns error for disallowed issuers" do
@@ -91,6 +107,11 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
                "https://www.googleapis.com/service_accounts/v1/metadata/x509/service-530288889088%40gcp-sa-gsuiteaddons.iam.gserviceaccount.com"
     end
 
+    test "returns JWKS URL for Google ID token issuer" do
+      url = GoogleChatAuth.certs_url_for_issuer("https://accounts.google.com")
+      assert url == "https://www.googleapis.com/oauth2/v3/certs"
+    end
+
     test "URL-encodes the @ symbol to prevent path injection" do
       url = GoogleChatAuth.certs_url_for_issuer("test@example.com")
       assert String.contains?(url, "%40")
@@ -117,6 +138,15 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
       issuer = "service-530288889088@gcp-sa-gsuiteaddons.iam.gserviceaccount.com"
       header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "kid" => "key1"}), padding: false)
       payload = Base.url_encode64(Jason.encode!(%{"iss" => issuer, "aud" => "123"}), padding: false)
+      token = "#{header}.#{payload}.fake_signature"
+
+      assert {:ok, ^issuer} = GoogleChatAuth.extract_issuer(token)
+    end
+
+    test "extracts Google ID token issuer (accounts.google.com)" do
+      issuer = "https://accounts.google.com"
+      header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "kid" => "key1"}), padding: false)
+      payload = Base.url_encode64(Jason.encode!(%{"iss" => issuer, "aud" => "123456"}), padding: false)
       token = "#{header}.#{payload}.fake_signature"
 
       assert {:ok, ^issuer} = GoogleChatAuth.extract_issuer(token)
