@@ -87,9 +87,30 @@ defmodule Assistant.Channels.GoogleChat do
     normalize_v2_added_to_space(chat)
   end
 
-  def normalize(%{"chat" => %{"removedFromSpacePayload" => _payload}}) do
-    Logger.debug("Google Chat v2 REMOVED_FROM_SPACE — ignoring")
-    {:error, :ignored}
+  def normalize(%{"chat" => %{"removedFromSpacePayload" => payload} = chat}) do
+    user = chat["user"] || %{}
+    space = payload["space"] || %{}
+
+    {:ok,
+     %Message{
+       id: generate_id(),
+       channel: :google_chat,
+       channel_message_id: "",
+       space_id: space["name"] || "",
+       thread_id: nil,
+       user_id: user["name"] || "",
+       user_display_name: user["displayName"],
+       user_email: user["email"],
+       content: "",
+       argument_text: nil,
+       slash_command: nil,
+       metadata: %{
+         "event_type" => "REMOVED_FROM_SPACE",
+         "space_type" => space["type"],
+         "format" => "v2"
+       },
+       timestamp: parse_timestamp(chat["eventTime"])
+     }}
   end
 
   def normalize(%{"chat" => chat} = event) do
@@ -114,8 +135,29 @@ defmodule Assistant.Channels.GoogleChat do
     normalize_v1_added_to_space(event)
   end
 
-  def normalize(%{"type" => "REMOVED_FROM_SPACE"}) do
-    {:error, :ignored}
+  def normalize(%{"type" => "REMOVED_FROM_SPACE"} = event) do
+    user = event["user"] || %{}
+    space = event["space"] || %{}
+
+    {:ok,
+     %Message{
+       id: generate_id(),
+       channel: :google_chat,
+       channel_message_id: "",
+       space_id: space["name"] || "",
+       thread_id: nil,
+       user_id: user["name"] || "",
+       user_display_name: user["displayName"],
+       user_email: user["email"],
+       content: "",
+       argument_text: nil,
+       slash_command: nil,
+       metadata: %{
+         "event_type" => "REMOVED_FROM_SPACE",
+         "space_type" => space["type"]
+       },
+       timestamp: parse_timestamp(event["eventTime"])
+     }}
   end
 
   def normalize(event) do

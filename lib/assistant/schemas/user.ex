@@ -19,6 +19,7 @@ defmodule Assistant.Schemas.User do
   schema "users" do
     field :external_id, :string
     field :channel, :string
+    field :email, :string
     field :display_name, :string
     field :timezone, :string, default: "UTC"
     field :preferences, :map, default: %{}
@@ -40,7 +41,7 @@ defmodule Assistant.Schemas.User do
   # in user_identities. Existing callers still provide these fields — this
   # change only relaxes the validation constraint.
   @required_fields []
-  @optional_fields [:external_id, :channel, :display_name, :timezone, :preferences]
+  @optional_fields [:external_id, :channel, :email, :display_name, :timezone, :preferences]
 
   def changeset(user, attrs) do
     user

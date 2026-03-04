@@ -48,7 +48,7 @@ defmodule Assistant.Channels.Dispatcher do
       end
   """
 
-  alias Assistant.Channels.{MessageFormatter, ReplyRouter, UserResolver}
+  alias Assistant.Channels.{MessageFormatter, ReplyRouter, SpaceContextFanoutWorker, UserResolver}
   alias Assistant.Orchestrator.Engine
 
   require Logger
@@ -209,6 +209,9 @@ defmodule Assistant.Channels.Dispatcher do
           Map.put(metadata, :user_id, user_id)
         )
 
+        # Post-reply hook: enqueue space context fan-out for shared GChat spaces
+        maybe_enqueue_space_context(message, user_id, message.content, response_text)
+
         {:ok, MessageFormatter.format(response_text, message.channel)}
 
       {:error, reason} ->
@@ -348,6 +351,9 @@ defmodule Assistant.Channels.Dispatcher do
               channel: origin.channel,
               space_id: origin.space_id
             )
+
+            # Post-reply hook: enqueue space context fan-out for shared GChat spaces
+            maybe_enqueue_space_context(message, user_id, message.content, response_text)
 
           {:error, reason} ->
             Logger.error("Failed to send channel reply: #{inspect(reason)}",
@@ -505,4 +511,50 @@ defmodule Assistant.Channels.Dispatcher do
   end
 
   defp present_or_nil(value), do: value
+
+  # Enqueue space context fan-out for Google Chat space messages.
+  # Skips DMs and non-GChat channels.
+  defp maybe_enqueue_space_context(message, user_id, question, response) do
+    space_type = get_in(message.metadata, ["space_type"])
+
+    cond do
+      message.channel != :google_chat ->
+        :ok
+
+      dm_space?(space_type) ->
+        :ok
+
+      is_nil(message.space_id) or message.space_id == "" ->
+        :ok
+
+      true ->
+        args = %{
+          "space_id" => message.space_id,
+          "sender_user_id" => user_id,
+          "sender_email" => message.user_email,
+          "sender_display_name" => message.user_display_name,
+          "question" => question,
+          "response" => response,
+          "space_type" => space_type
+        }
+
+        case SpaceContextFanoutWorker.new(args) |> Oban.insert() do
+          {:ok, _job} ->
+            Logger.debug("Enqueued space context fan-out",
+              space_id: message.space_id,
+              sender: user_id
+            )
+
+          {:error, reason} ->
+            Logger.warning("Failed to enqueue space context fan-out: #{inspect(reason)}",
+              space_id: message.space_id
+            )
+        end
+    end
+  end
+
+  defp dm_space?(nil), do: false
+  defp dm_space?("DM"), do: true
+  defp dm_space?("DIRECT_MESSAGE"), do: true
+  defp dm_space?(_), do: false
 end

@@ -255,9 +255,18 @@ defmodule Assistant.Channels.GoogleChatTest do
   # ---------------------------------------------------------------
 
   describe "normalize/1 REMOVED_FROM_SPACE event" do
-    test "returns {:error, :ignored}" do
-      event = %{"type" => "REMOVED_FROM_SPACE"}
-      assert {:error, :ignored} = GoogleChat.normalize(event)
+    test "returns {:ok, message} with event_type REMOVED_FROM_SPACE" do
+      event = %{
+        "type" => "REMOVED_FROM_SPACE",
+        "user" => %{"name" => "users/123", "displayName" => "Test", "email" => "test@example.com"},
+        "space" => %{"name" => "spaces/ABC", "type" => "SPACE"}
+      }
+
+      assert {:ok, message} = GoogleChat.normalize(event)
+      assert message.metadata["event_type"] == "REMOVED_FROM_SPACE"
+      assert message.space_id == "spaces/ABC"
+      assert message.user_id == "users/123"
+      assert message.user_email == "test@example.com"
     end
   end
 
@@ -489,18 +498,22 @@ defmodule Assistant.Channels.GoogleChatTest do
   # ---------------------------------------------------------------
 
   describe "normalize/1 v2 REMOVED_FROM_SPACE event" do
-    test "returns {:error, :ignored}" do
+    test "returns {:ok, message} with event_type REMOVED_FROM_SPACE" do
       event = %{
         "commonEventObject" => %{},
         "chat" => %{
-          "user" => %{"name" => "users/1"},
+          "user" => %{"name" => "users/1", "displayName" => "Test", "email" => "test@example.com"},
           "removedFromSpacePayload" => %{
-            "space" => %{"name" => "spaces/CCCC"}
+            "space" => %{"name" => "spaces/CCCC", "type" => "SPACE"}
           }
         }
       }
 
-      assert {:error, :ignored} = GoogleChat.normalize(event)
+      assert {:ok, message} = GoogleChat.normalize(event)
+      assert message.metadata["event_type"] == "REMOVED_FROM_SPACE"
+      assert message.metadata["format"] == "v2"
+      assert message.space_id == "spaces/CCCC"
+      assert message.user_id == "users/1"
     end
   end
 

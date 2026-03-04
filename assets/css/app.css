@@ -1972,6 +1972,83 @@ a {
   line-height: 1.5;
 }
 
+.sa-space-context {
+  width: min(760px, 100%);
+  margin-right: auto;
+  border: 1px solid rgba(144, 167, 178, 0.22);
+  border-radius: 12px;
+  background: rgba(245, 248, 250, 0.7);
+  opacity: 0.72;
+  transition: opacity 0.15s ease;
+}
+
+.sa-space-context:hover,
+.sa-space-context[open] {
+  opacity: 1;
+}
+
+.sa-space-context-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 0.78rem;
+  color: #5d7483;
+  user-select: none;
+}
+
+.sa-space-context-summary::-webkit-details-marker {
+  display: none;
+}
+
+.sa-space-context-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: #7a94a5;
+}
+
+.sa-space-context-label {
+  font-weight: 600;
+  color: #3d5a6e;
+}
+
+.sa-space-context-sub-type {
+  color: #7a94a5;
+  font-style: italic;
+}
+
+.sa-space-context-time {
+  margin-left: auto;
+  white-space: nowrap;
+  color: #8da2b0;
+  font-size: 0.72rem;
+}
+
+.sa-space-context-chevron {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: #8da2b0;
+  transition: transform 0.15s ease;
+}
+
+.sa-space-context[open] .sa-space-context-chevron {
+  transform: rotate(90deg);
+}
+
+.sa-space-context-content {
+  margin: 0;
+  padding: 4px 12px 10px 34px;
+  font-size: 0.84rem;
+  color: #4a6275;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .sa-workspace-activity-stack {
   display: grid;
   gap: 10px;
@@ -2222,7 +2299,8 @@ a {
   }
 
   .sa-workspace-message,
-  .sa-workspace-activity-stack {
+  .sa-workspace-activity-stack,
+  .sa-space-context {
     width: 100%;
   }
 

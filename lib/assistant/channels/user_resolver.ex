@@ -72,18 +72,10 @@ defmodule Assistant.Channels.UserResolver do
     with :ok <- validate_platform_id(channel, external_id) do
       case find_identity(channel, external_id, space_id) do
         {:ok, identity} ->
-          maybe_link_sole_settings_user_to_channel_user(channel, identity.user_id)
           ensure_perpetual_conversation(identity.user_id)
 
         {:error, :not_found} ->
-          case create_user_and_resolve(channel, external_id, metadata) do
-            {:ok, %{user_id: user_id} = result} ->
-              maybe_link_sole_settings_user_to_channel_user(channel, user_id)
-              {:ok, result}
-
-            {:error, _reason} = error ->
-              error
-          end
+          create_user_and_resolve(channel, external_id, metadata)
       end
     end
   end
@@ -208,49 +200,120 @@ defmodule Assistant.Channels.UserResolver do
     user_email = extract_user_email(metadata)
 
     case find_linked_user_id_by_email(user_email) do
-      linked_user_id when is_binary(linked_user_id) ->
-        Logger.info("Linking inbound channel identity to existing settings-linked user",
+      {:real, linked_user_id} ->
+        # Found a real (non-pseudo) user with this email — link identity to them
+        Logger.info("Linking inbound channel identity to existing user by email",
           channel: channel,
           external_id: external_id,
           user_id: linked_user_id
         )
 
-        identity_attrs = %{
-          user_id: linked_user_id,
-          channel: channel_str,
+        link_identity_and_resolve(linked_user_id, channel_str, external_id, space_id, display_name, channel)
+
+      {:pseudo, pseudo_user_id, settings_user_id} ->
+        # Found a pseudo-user whose settings_user has this email — upgrade
+        Logger.info("Upgrading pseudo-user: creating real user and migrating",
+          channel: channel,
           external_id: external_id,
-          space_id: space_id,
-          display_name: display_name
-        }
+          pseudo_user_id: pseudo_user_id
+        )
 
-        case %UserIdentity{} |> UserIdentity.changeset(identity_attrs) |> Repo.insert() do
-          {:ok, _identity} ->
-            ensure_perpetual_conversation(linked_user_id)
+        create_user_upgrade_pseudo_and_resolve(
+          channel, channel_str, external_id, space_id, display_name,
+          user_email, pseudo_user_id, settings_user_id
+        )
 
-          {:error, reason} ->
-            resolve_after_insert_error(channel, external_id, space_id, reason)
-        end
-
-      _ ->
-        create_new_user_and_resolve(channel, channel_str, external_id, space_id, display_name)
+      :not_found ->
+        create_new_user_and_resolve(channel, channel_str, external_id, space_id, display_name, user_email)
     end
   end
 
-  defp create_new_user_and_resolve(channel, channel_str, external_id, space_id, display_name) do
-    Repo.transaction(fn ->
-      # Create user with primary identity fields
+  defp link_identity_and_resolve(user_id, channel_str, external_id, space_id, display_name, channel) do
+    identity_attrs = %{
+      user_id: user_id,
+      channel: channel_str,
+      external_id: external_id,
+      space_id: space_id,
+      display_name: display_name
+    }
+
+    case %UserIdentity{} |> UserIdentity.changeset(identity_attrs) |> Repo.insert() do
+      {:ok, _identity} ->
+        ensure_perpetual_conversation(user_id)
+
+      {:error, reason} ->
+        resolve_after_insert_error(channel, external_id, space_id, reason)
+    end
+  end
+
+  # Create a real user, migrate pseudo-user's data, then link identity
+  defp create_user_upgrade_pseudo_and_resolve(
+         channel, channel_str, external_id, space_id, display_name,
+         user_email, pseudo_user_id, settings_user_id
+       ) do
+    case Repo.transaction(fn ->
+      # Create the real user
       user_attrs = %{
         external_id: external_id,
         channel: channel_str,
-        display_name: display_name
+        display_name: display_name,
+        email: user_email
       }
+
+      case %User{} |> User.changeset(user_attrs) |> Repo.insert() do
+        {:ok, user} ->
+          Logger.info("Created real user for pseudo-user upgrade",
+            user_id: user.id,
+            pseudo_user_id: pseudo_user_id
+          )
+
+          # Upgrade: re-link settings_user, migrate conversations
+          do_upgrade_pseudo_user(pseudo_user_id, user.id, settings_user_id)
+
+          # Create the identity row
+          identity_attrs = %{
+            user_id: user.id,
+            channel: channel_str,
+            external_id: external_id,
+            space_id: space_id,
+            display_name: display_name
+          }
+
+          case %UserIdentity{} |> UserIdentity.changeset(identity_attrs) |> Repo.insert() do
+            {:ok, _identity} -> user.id
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+
+        {:error, changeset} ->
+          Repo.rollback(changeset)
+      end
+    end) do
+      {:ok, user_id} ->
+        ensure_perpetual_conversation(user_id)
+
+      {:error, reason} ->
+        resolve_after_insert_error(channel, external_id, space_id, reason)
+    end
+  end
+
+  defp create_new_user_and_resolve(channel, channel_str, external_id, space_id, display_name, user_email) do
+    Repo.transaction(fn ->
+      # Create user with primary identity fields + email
+      user_attrs =
+        %{
+          external_id: external_id,
+          channel: channel_str,
+          display_name: display_name
+        }
+        |> maybe_put_email(user_email)
 
       case %User{} |> User.changeset(user_attrs) |> Repo.insert() do
         {:ok, user} ->
           Logger.info("Auto-created user",
             user_id: user.id,
             external_id: external_id,
-            channel: channel_str
+            channel: channel_str,
+            email: user_email
           )
 
           # Create the identity row
@@ -283,6 +346,12 @@ defmodule Assistant.Channels.UserResolver do
     end
   end
 
+  defp maybe_put_email(attrs, nil), do: attrs
+  defp maybe_put_email(attrs, email) when is_binary(email) do
+    normalized = normalize_email(email)
+    if normalized, do: Map.put(attrs, :email, normalized), else: attrs
+  end
+
   defp resolve_after_insert_error(channel, external_id, space_id, reason) do
     # Race condition: another process may have created this identity.
     # Try to find the identity that was just created.
@@ -295,24 +364,65 @@ defmodule Assistant.Channels.UserResolver do
     end
   end
 
+  # Searches for a user by email. Returns:
+  #   {:real, user_id}                     — non-pseudo user with this email
+  #   {:pseudo, pseudo_user_id, su_id}     — pseudo-user whose settings_user has this email
+  #   :not_found                           — no match
   defp find_linked_user_id_by_email(email) when is_binary(email) do
     normalized_email = normalize_email(email)
 
     if is_binary(normalized_email) do
-      query =
-        from su in SettingsUser,
-          where: not is_nil(su.user_id),
-          where: fragment("lower(?)", su.email) == ^normalized_email,
-          select: su.user_id,
+      # First: check users.email directly for a real (non-pseudo) user
+      real_user_query =
+        from u in User,
+          where: fragment("lower(?)", u.email) == ^normalized_email,
+          where: u.channel != "settings" or is_nil(u.channel),
+          select: u.id,
           limit: 1
 
-      Repo.one(query)
+      case Repo.one(real_user_query) do
+        user_id when is_binary(user_id) ->
+          {:real, user_id}
+
+        nil ->
+          # Second: check settings_users for a linked pseudo-user
+          pseudo_query =
+            from su in SettingsUser,
+              join: u in User, on: u.id == su.user_id,
+              where: fragment("lower(?)", su.email) == ^normalized_email,
+              where: not is_nil(su.user_id),
+              where: u.channel == "settings",
+              select: {su.user_id, su.id},
+              limit: 1
+
+          case Repo.one(pseudo_query) do
+            {pseudo_user_id, settings_user_id} ->
+              {:pseudo, pseudo_user_id, settings_user_id}
+
+            nil ->
+              # Third: check settings_users that have a user_id pointing to a real user
+              # (handles case where settings_user email matches but user.email wasn't set yet)
+              settings_real_query =
+                from su in SettingsUser,
+                  join: u in User, on: u.id == su.user_id,
+                  where: fragment("lower(?)", su.email) == ^normalized_email,
+                  where: not is_nil(su.user_id),
+                  where: u.channel != "settings" or is_nil(u.channel),
+                  select: su.user_id,
+                  limit: 1
+
+              case Repo.one(settings_real_query) do
+                user_id when is_binary(user_id) -> {:real, user_id}
+                nil -> :not_found
+              end
+          end
+      end
     else
-      nil
+      :not_found
     end
   end
 
-  defp find_linked_user_id_by_email(_), do: nil
+  defp find_linked_user_id_by_email(_), do: :not_found
 
   defp extract_user_email(metadata) when is_map(metadata) do
     Map.get(metadata, :user_email) ||
@@ -332,65 +442,91 @@ defmodule Assistant.Channels.UserResolver do
 
   defp normalize_email(_), do: nil
 
-  defp maybe_link_sole_settings_user_to_channel_user(:google_chat, channel_user_id)
-       when is_binary(channel_user_id) do
-    case sole_linked_settings_user() do
-      %SettingsUser{} = settings_user ->
-        cond do
-          settings_user.user_id == channel_user_id ->
-            :ok
+  @doc """
+  Upgrades a pseudo-user by migrating all data to a real user.
 
-          linked_to_pseudo_user?(settings_user.user_id) ->
-            case settings_user
-                 |> Ecto.Changeset.change(%{user_id: channel_user_id})
-                 |> Repo.update() do
-              {:ok, _updated} ->
-                Logger.info("Re-linked sole settings user from pseudo-user to channel user",
-                  settings_user_id: settings_user.id,
-                  channel_user_id: channel_user_id,
-                  channel: :google_chat
-                )
+  Atomically re-links settings_user, migrates conversations, connected_drives,
+  and oauth_tokens from the pseudo-user to the real user. Archives the
+  pseudo-user by setting channel to "settings:archived".
 
-                :ok
+  ## Parameters
 
-              {:error, changeset} ->
-                Logger.warning("Failed to re-link sole settings user from pseudo-user",
-                  settings_user_id: settings_user.id,
-                  channel_user_id: channel_user_id,
-                  errors: inspect(changeset.errors)
-                )
+    * `pseudo_user_id` - The pseudo-user UUID to migrate from
+    * `real_user_id` - The real user UUID to migrate to
 
-                :ok
-            end
+  ## Returns
 
-          true ->
-            :ok
-        end
+    * `{:ok, real_user_id}` on success
+    * `{:error, term()}` on failure
+  """
+  @spec upgrade_pseudo_user(binary(), binary()) :: {:ok, binary()} | {:error, term()}
+  def upgrade_pseudo_user(pseudo_user_id, real_user_id) do
+    Repo.transaction(fn ->
+      # Re-link all settings_users pointing to pseudo-user
+      from(su in SettingsUser,
+        where: su.user_id == ^pseudo_user_id
+      )
+      |> Repo.update_all(set: [user_id: real_user_id])
 
-      _ ->
+      do_upgrade_pseudo_user(pseudo_user_id, real_user_id, nil)
+      real_user_id
+    end)
+  end
+
+  # Internal: performs the data migration from pseudo-user to real user.
+  # Called both from upgrade_pseudo_user/2 (public) and within
+  # create_user_upgrade_pseudo_and_resolve (during identity resolution).
+  defp do_upgrade_pseudo_user(pseudo_user_id, real_user_id, settings_user_id) do
+    import Ecto.Query
+
+    # Re-link settings_user if a specific one was identified
+    if settings_user_id do
+      from(su in SettingsUser, where: su.id == ^settings_user_id)
+      |> Repo.update_all(set: [user_id: real_user_id])
+    end
+
+    # Migrate conversations (re-parent to real user)
+    {conv_count, _} =
+      from(c in Assistant.Schemas.Conversation,
+        where: c.user_id == ^pseudo_user_id
+      )
+      |> Repo.update_all(set: [user_id: real_user_id])
+
+    # Migrate connected drives
+    {drives_count, _} =
+      from(cd in Assistant.Schemas.ConnectedDrive,
+        where: cd.user_id == ^pseudo_user_id
+      )
+      |> Repo.update_all(set: [user_id: real_user_id])
+
+    # Migrate oauth tokens
+    {tokens_count, _} =
+      from(ot in Assistant.Schemas.OAuthToken,
+        where: ot.user_id == ^pseudo_user_id
+      )
+      |> Repo.update_all(set: [user_id: real_user_id])
+
+    # Archive the pseudo-user (don't delete — preserves audit trail)
+    case Repo.get(User, pseudo_user_id) do
+      nil ->
         :ok
+
+      pseudo_user ->
+        pseudo_user
+        |> Ecto.Changeset.change(%{channel: "settings:archived"})
+        |> Repo.update()
     end
+
+    Logger.info("Pseudo-user upgrade complete",
+      pseudo_user_id: pseudo_user_id,
+      real_user_id: real_user_id,
+      conversations_migrated: conv_count,
+      drives_migrated: drives_count,
+      tokens_migrated: tokens_count
+    )
+
+    :ok
   end
-
-  defp maybe_link_sole_settings_user_to_channel_user(_channel, _channel_user_id), do: :ok
-
-  defp sole_linked_settings_user do
-    query =
-      from su in SettingsUser,
-        where: not is_nil(su.user_id),
-        select: su
-
-    case Repo.all(query) do
-      [settings_user] -> settings_user
-      _ -> nil
-    end
-  end
-
-  defp linked_to_pseudo_user?(user_id) when is_binary(user_id) do
-    match?(%User{channel: "settings"}, Repo.get(User, user_id))
-  end
-
-  defp linked_to_pseudo_user?(_), do: false
 
   defp ensure_perpetual_conversation(user_id) do
     case Store.get_or_create_perpetual_conversation(user_id) do

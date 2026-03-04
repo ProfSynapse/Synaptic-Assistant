@@ -297,6 +297,8 @@ defmodule AssistantWeb.OAuthController do
   # Best-effort bridge: if a settings_user has the same email as the Google
   # account that just authorized, link them to the chat user so the settings
   # dashboard can access their OAuth tokens and connected drives.
+  # Handles pseudo-user upgrades: if settings_user is linked to a pseudo-user,
+  # upgrade to the real chat user.
   defp maybe_link_settings_user(chat_user_id, provider_email)
        when is_binary(chat_user_id) and is_binary(provider_email) do
     case Assistant.Repo.get_by(Assistant.Accounts.SettingsUser, email: provider_email) do
@@ -318,12 +320,33 @@ defmodule AssistantWeb.OAuthController do
             )
         end
 
-      %{user_id: _existing_user_id} ->
-        # Already linked, nothing to do
-        :ok
+      %{user_id: existing_user_id} = settings_user when existing_user_id != chat_user_id ->
+        # Settings user is linked to a different user — check if it's a pseudo-user
+        case Assistant.Repo.get(Assistant.Schemas.User, existing_user_id) do
+          %{channel: "settings"} ->
+            # Pseudo-user — upgrade to the real chat user
+            case Assistant.Channels.UserResolver.upgrade_pseudo_user(existing_user_id, chat_user_id) do
+              {:ok, _} ->
+                Logger.info("OAuth callback: upgraded pseudo-user to chat user",
+                  settings_user_id: settings_user.id,
+                  pseudo_user_id: existing_user_id,
+                  chat_user_id: chat_user_id
+                )
 
-      nil ->
-        # No settings_user with this email, nothing to do
+              {:error, reason} ->
+                Logger.warning("OAuth callback: failed to upgrade pseudo-user",
+                  settings_user_id: settings_user.id,
+                  error: inspect(reason)
+                )
+            end
+
+          _ ->
+            # Already linked to a different real user, nothing to do
+            :ok
+        end
+
+      _ ->
+        # Already correctly linked, or no settings_user with this email
         :ok
     end
   end

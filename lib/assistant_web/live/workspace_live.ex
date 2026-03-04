@@ -220,74 +220,88 @@ defmodule AssistantWeb.WorkspaceLive do
                 </div>
 
                 <%= for item <- @feed_items do %>
-                  <%= if item.type == :message do %>
-                    <article class={["sa-workspace-message", item.role == :user && "is-user", item.role == :assistant && "is-assistant"]}>
-                      <div class="sa-workspace-message-meta">
-                        <div class="sa-workspace-message-meta-left">
-                          <span class="sa-workspace-actor">{actor_label(item.role)}</span>
-                          <.badge :if={item.source_label} size="xs" color="gray" variant="soft">
-                            {item.source_label}
-                          </.badge>
-                        </div>
-                        <span>{format_time(item.inserted_at)}</span>
-                      </div>
-                      <p class="sa-workspace-message-content">{item.content}</p>
-                    </article>
-                  <% else %>
-                    <section class="sa-workspace-activity-stack">
-                      <.card :if={item.tools != []} class="sa-workspace-activity-card">
-                        <div class="sa-workspace-activity-title-row">
-                          <div>
-                            <p class="sa-workspace-activity-kicker">Tools</p>
-                            <h3>{tool_count_label(item.tools)}</h3>
+                  <%= cond do %>
+                    <% item.type == :message -> %>
+                      <article class={["sa-workspace-message", item.role == :user && "is-user", item.role == :assistant && "is-assistant"]}>
+                        <div class="sa-workspace-message-meta">
+                          <div class="sa-workspace-message-meta-left">
+                            <span class="sa-workspace-actor">{actor_label(item.role)}</span>
+                            <.badge :if={item.source_label} size="xs" color="gray" variant="soft">
+                              {item.source_label}
+                            </.badge>
                           </div>
-                          <span class="sa-workspace-time">{format_time(item.inserted_at)}</span>
+                          <span>{format_time(item.inserted_at)}</span>
                         </div>
+                        <p class="sa-workspace-message-content">{item.content}</p>
+                      </article>
 
-                        <div class="sa-workspace-inline-list">
-                          <article :for={tool <- item.tools} class="sa-workspace-inline-card">
-                            <div class="sa-workspace-inline-copy">
-                              <p class="sa-workspace-inline-title">{tool.name}</p>
-                              <.badge size="sm" color={status_color(tool.status)} variant="soft">
-                                {status_label(tool.status)}
-                              </.badge>
+                    <% item.type == :space_context -> %>
+                      <details class="sa-space-context">
+                        <summary class="sa-space-context-summary">
+                          <.icon name="hero-chat-bubble-left-right" class="sa-space-context-icon" />
+                          <span class="sa-space-context-label">{item.source_label}</span>
+                          <span class="sa-space-context-sub-type">{space_context_sub_type_label(item.sub_type)}</span>
+                          <span class="sa-space-context-time">{format_time(item.inserted_at)}</span>
+                          <.icon name="hero-chevron-right" class="sa-space-context-chevron" />
+                        </summary>
+                        <p class="sa-space-context-content">{item.content}</p>
+                      </details>
+
+                    <% true -> %>
+                      <section class="sa-workspace-activity-stack">
+                        <.card :if={item.tools != []} class="sa-workspace-activity-card">
+                          <div class="sa-workspace-activity-title-row">
+                            <div>
+                              <p class="sa-workspace-activity-kicker">Tools</p>
+                              <h3>{tool_count_label(item.tools)}</h3>
                             </div>
+                            <span class="sa-workspace-time">{format_time(item.inserted_at)}</span>
+                          </div>
+
+                          <div class="sa-workspace-inline-list">
+                            <article :for={tool <- item.tools} class="sa-workspace-inline-card">
+                              <div class="sa-workspace-inline-copy">
+                                <p class="sa-workspace-inline-title">{tool.name}</p>
+                                <.badge size="sm" color={status_color(tool.status)} variant="soft">
+                                  {status_label(tool.status)}
+                                </.badge>
+                              </div>
+                              <button
+                                type="button"
+                                class="sa-workspace-inspect-btn"
+                                phx-click="inspect_tool"
+                                phx-value-id={tool.inspect_id}
+                              >
+                                Inspect
+                              </button>
+                            </article>
+                          </div>
+                        </.card>
+
+                        <.card :for={sub_agent <- item.sub_agents} class="sa-workspace-activity-card">
+                          <div class="sa-workspace-activity-title-row">
+                            <div>
+                              <p class="sa-workspace-activity-kicker">Sub-agent</p>
+                              <h3>{sub_agent.agent_id}</h3>
+                              <p class="sa-workspace-inline-subtitle">{mission_excerpt(sub_agent.mission)}</p>
+                            </div>
+                            <.badge size="sm" color={status_color(sub_agent.status)} variant="soft">
+                              {status_label(sub_agent.status)}
+                            </.badge>
+                          </div>
+
+                          <div class="sa-workspace-inline-actions">
                             <button
                               type="button"
                               class="sa-workspace-inspect-btn"
-                              phx-click="inspect_tool"
-                              phx-value-id={tool.inspect_id}
+                              phx-click="inspect_sub_agent"
+                              phx-value-id={sub_agent.inspect_id}
                             >
                               Inspect
                             </button>
-                          </article>
-                        </div>
-                      </.card>
-
-                      <.card :for={sub_agent <- item.sub_agents} class="sa-workspace-activity-card">
-                        <div class="sa-workspace-activity-title-row">
-                          <div>
-                            <p class="sa-workspace-activity-kicker">Sub-agent</p>
-                            <h3>{sub_agent.agent_id}</h3>
-                            <p class="sa-workspace-inline-subtitle">{mission_excerpt(sub_agent.mission)}</p>
                           </div>
-                          <.badge size="sm" color={status_color(sub_agent.status)} variant="soft">
-                            {status_label(sub_agent.status)}
-                          </.badge>
-                        </div>
-
-                        <div class="sa-workspace-inline-actions">
-                          <button
-                            type="button"
-                            class="sa-workspace-inspect-btn"
-                            phx-click="inspect_sub_agent"
-                            phx-value-id={sub_agent.inspect_id}
-                          >
-                            Inspect
-                          </button>
-                        </div>
-                      </.card>
-                    </section>
+                        </.card>
+                      </section>
                   <% end %>
                 <% end %>
               </div>
@@ -531,6 +545,10 @@ defmodule AssistantWeb.WorkspaceLive do
   defp actor_label(:user), do: "You"
   defp actor_label(:assistant), do: "Synaptic"
   defp actor_label(_), do: "Synaptic"
+
+  defp space_context_sub_type_label(:question), do: "asked"
+  defp space_context_sub_type_label(:response), do: "responded"
+  defp space_context_sub_type_label(_), do: ""
 
   defp tool_count_label([_single]), do: "1 tool call"
   defp tool_count_label(tools), do: "#{length(tools)} tool calls"
