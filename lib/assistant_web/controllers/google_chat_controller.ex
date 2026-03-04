@@ -38,8 +38,12 @@ defmodule AssistantWeb.GoogleChatController do
 
   use AssistantWeb, :controller
 
+  import Ecto.Query, warn: false
+
   alias Assistant.Channels.Dispatcher
   alias Assistant.Channels.GoogleChat, as: ChatAdapter
+  alias Assistant.Repo
+  alias Assistant.Schemas.UserIdentity
 
   require Logger
 
@@ -86,6 +90,27 @@ defmodule AssistantWeb.GoogleChatController do
     )
 
     json(conn, ChatAdapter.wrap_response(@welcome_message, params))
+  end
+
+  # REMOVED_FROM_SPACE: soft-delete the user identity by setting left_at.
+  defp handle_normalized(conn, %{metadata: %{"event_type" => "REMOVED_FROM_SPACE"}} = message, _params) do
+    Logger.info("User removed from space",
+      space_id: message.space_id,
+      user_id: message.user_id
+    )
+
+    # Set left_at on matching user_identity rows
+    now = DateTime.utc_now()
+
+    from(ui in UserIdentity,
+      where: ui.channel == "google_chat",
+      where: ui.external_id == ^message.user_id,
+      where: ui.space_id == ^message.space_id,
+      where: is_nil(ui.left_at)
+    )
+    |> Repo.update_all(set: [left_at: now])
+
+    send_resp(conn, 200, "")
   end
 
   # MESSAGE / APP_COMMAND: process synchronously and return engine response.

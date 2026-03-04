@@ -89,6 +89,31 @@ defmodule Assistant.Workspace do
   defp maybe_append(items, nil), do: items
   defp maybe_append(items, item), do: items ++ [item]
 
+  defp build_message_item(%Message{role: "system", content: content, metadata: metadata} = message)
+       when is_binary(content) do
+    # Only render space context system messages in the feed
+    case metadata do
+      %{"type" => "space_context"} ->
+        sender_name =
+          get_in(metadata, ["source", "sender_display_name"]) || "A colleague"
+
+        sub_type = Map.get(metadata, "sub_type", "question")
+
+        %{
+          id: "message:#{message.id}",
+          type: :space_context,
+          sub_type: String.to_existing_atom(sub_type),
+          role: :system,
+          content: content,
+          inserted_at: message.inserted_at,
+          source_label: "Space: #{sender_name}"
+        }
+
+      _ ->
+        nil
+    end
+  end
+
   defp build_message_item(%Message{role: role, content: content} = message)
        when role in ["user", "assistant"] do
     if present?(content) do

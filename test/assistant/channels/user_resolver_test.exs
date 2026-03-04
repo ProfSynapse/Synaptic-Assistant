@@ -120,44 +120,57 @@ defmodule Assistant.Channels.UserResolverTest do
       assert result1.conversation_id == result2.conversation_id
     end
 
-    test "links Google Chat identity to settings-linked user by email when available" do
-      existing_user =
+    test "upgrades pseudo-user when GChat email matches settings_user linked to pseudo" do
+      # Settings user has a pseudo-user link
+      pseudo_user =
         chat_user_fixture(%{
           channel: "settings",
           external_id: "settings:gc-link-#{System.unique_integer([:positive])}"
         })
 
+      email = "gc-link-#{System.unique_integer([:positive])}@example.com"
+
       {:ok, settings_user} =
         %Assistant.Accounts.SettingsUser{}
         |> Assistant.Accounts.SettingsUser.email_changeset(
-          %{
-            email: "gc-link-#{System.unique_integer([:positive])}@example.com"
-          },
+          %{email: email},
           validate_changed: false
         )
         |> Repo.insert()
 
-      settings_user =
+      _settings_user =
         settings_user
-        |> Ecto.Changeset.change(%{user_id: existing_user.id})
+        |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
         |> Repo.update!()
 
       external_id = "users/#{System.unique_integer([:positive])}"
 
+      # Resolve with matching email — should create real user and upgrade pseudo
       assert {:ok, %{user_id: resolved_user_id}} =
                UserResolver.resolve(:google_chat, external_id, %{
-                 user_email: settings_user.email,
+                 user_email: email,
                  display_name: "GC User",
                  space_id: "spaces/AAAA"
                })
 
-      assert resolved_user_id == existing_user.id
+      # Should NOT be the pseudo-user
+      refute resolved_user_id == pseudo_user.id
 
+      # New real user should have the email set
+      real_user = Repo.get!(Assistant.Schemas.User, resolved_user_id)
+      assert real_user.email == String.downcase(email)
+      assert real_user.channel == "google_chat"
+
+      # Settings user should be re-linked to the real user
+      reloaded_su = Repo.get!(Assistant.Accounts.SettingsUser, settings_user.id)
+      assert reloaded_su.user_id == resolved_user_id
+
+      # Identity should be created for the new user
       identity =
         Repo.one!(
           from(ui in UserIdentity,
             where:
-              ui.user_id == ^existing_user.id and
+              ui.user_id == ^resolved_user_id and
                 ui.channel == "google_chat" and
                 ui.external_id == ^external_id and
                 ui.space_id == "spaces/AAAA"
@@ -167,72 +180,39 @@ defmodule Assistant.Channels.UserResolverTest do
       assert identity.display_name == "GC User"
     end
 
-    test "re-links sole settings user from pseudo-user on first Google Chat resolve" do
-      pseudo_user =
-        chat_user_fixture(%{
-          channel: "settings",
-          external_id: "settings:gc-pseudo-#{System.unique_integer([:positive])}"
-        })
-
-      {:ok, settings_user} =
-        %Assistant.Accounts.SettingsUser{}
-        |> Assistant.Accounts.SettingsUser.email_changeset(
-          %{email: "gc-pseudo-#{System.unique_integer([:positive])}@example.com"},
-          validate_changed: false
-        )
-        |> Repo.insert()
-
-      settings_user =
-        settings_user
-        |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
-        |> Repo.update!()
-
+    test "creates new user without email when no email provided" do
       external_id = "users/#{System.unique_integer([:positive])}"
 
       assert {:ok, %{user_id: resolved_user_id}} =
                UserResolver.resolve(:google_chat, external_id, %{display_name: "GC User"})
 
-      refute resolved_user_id == pseudo_user.id
-
-      reloaded_settings_user = Repo.get!(Assistant.Accounts.SettingsUser, settings_user.id)
-      assert reloaded_settings_user.user_id == resolved_user_id
+      user = Repo.get!(Assistant.Schemas.User, resolved_user_id)
+      assert user.channel == "google_chat"
+      assert is_nil(user.email)
     end
 
-    test "re-links sole settings user from pseudo-user when Google Chat identity already exists" do
-      google_chat_user =
+    test "links to existing real user by email when users.email matches" do
+      # Create a real user with email set
+      email = "known-user-#{System.unique_integer([:positive])}@example.com"
+
+      real_user =
         chat_user_fixture(%{
-          channel: "google_chat",
-          external_id: "users/#{System.unique_integer([:positive])}"
+          channel: "telegram",
+          external_id: "#{System.unique_integer([:positive])}",
+          email: String.downcase(email)
         })
 
-      _identity = user_identity_fixture(google_chat_user)
+      external_id = "users/#{System.unique_integer([:positive])}"
 
-      pseudo_user =
-        chat_user_fixture(%{
-          channel: "settings",
-          external_id: "settings:gc-existing-#{System.unique_integer([:positive])}"
-        })
-
-      {:ok, settings_user} =
-        %Assistant.Accounts.SettingsUser{}
-        |> Assistant.Accounts.SettingsUser.email_changeset(
-          %{email: "gc-existing-#{System.unique_integer([:positive])}@example.com"},
-          validate_changed: false
-        )
-        |> Repo.insert()
-
-      settings_user =
-        settings_user
-        |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
-        |> Repo.update!()
-
+      # Resolve with matching email — should link to existing real user
       assert {:ok, %{user_id: resolved_user_id}} =
-               UserResolver.resolve(:google_chat, google_chat_user.external_id)
+               UserResolver.resolve(:google_chat, external_id, %{
+                 user_email: email,
+                 display_name: "GC User",
+                 space_id: "spaces/BBBB"
+               })
 
-      assert resolved_user_id == google_chat_user.id
-
-      reloaded_settings_user = Repo.get!(Assistant.Accounts.SettingsUser, settings_user.id)
-      assert reloaded_settings_user.user_id == google_chat_user.id
+      assert resolved_user_id == real_user.id
     end
   end
 
@@ -546,6 +526,184 @@ defmodule Assistant.Channels.UserResolverTest do
       # All should resolve to the same conversation_id
       conv_ids = Enum.map(results, fn {:ok, %{conversation_id: cid}} -> cid end)
       assert length(Enum.uniq(conv_ids)) == 1
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # P2: email case insensitivity in UserResolver
+  # ---------------------------------------------------------------
+
+  describe "resolve/3 — email case insensitivity" do
+    test "matches email regardless of case when linking by email" do
+      email = "CaSeTest-#{System.unique_integer([:positive])}@Example.COM"
+
+      real_user =
+        chat_user_fixture(%{
+          channel: "telegram",
+          external_id: "#{System.unique_integer([:positive])}",
+          email: String.downcase(email)
+        })
+
+      external_id = "users/case_resolve_#{System.unique_integer([:positive])}"
+
+      # Resolve with mixed-case email
+      assert {:ok, %{user_id: resolved_user_id}} =
+               UserResolver.resolve(:google_chat, external_id, %{
+                 user_email: email,
+                 display_name: "Case User",
+                 space_id: "spaces/CASE"
+               })
+
+      assert resolved_user_id == real_user.id
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # P1: concurrent resolve with same email → converge
+  # ---------------------------------------------------------------
+
+  describe "resolve/3 — sequential resolution with same email" do
+    test "sequential resolves with the same email converge to same user" do
+      email = "converge-#{System.unique_integer([:positive])}@example.com"
+
+      results =
+        for i <- 1..3 do
+          ext = "users/seq_#{i}_#{System.unique_integer([:positive])}"
+
+          UserResolver.resolve(:google_chat, ext, %{
+            user_email: email,
+            display_name: "Sequential #{i}",
+            space_id: "spaces/SEQ_#{i}"
+          })
+        end
+
+      # All should succeed
+      assert Enum.all?(results, fn
+               {:ok, _} -> true
+               _ -> false
+             end)
+
+      # All should resolve to the same user_id (first create, rest link)
+      user_ids = Enum.map(results, fn {:ok, %{user_id: uid}} -> uid end)
+      assert length(Enum.uniq(user_ids)) == 1
+    end
+
+    # NOTE: True concurrent (parallel Task.async) resolution with the same
+    # email can hit a users_email_unique constraint race. This is a known
+    # gap in UserResolver.create_new_user_and_resolve — it lacks
+    # unique_constraint/3 on the email field. Filed as a finding.
+  end
+
+  # ---------------------------------------------------------------
+  # P2: GChat with no user_email → normal create path
+  # ---------------------------------------------------------------
+
+  describe "resolve/3 — no email provided" do
+    test "creates standalone user when metadata has no user_email" do
+      external_id = "users/noemail_#{System.unique_integer([:positive])}"
+
+      assert {:ok, %{user_id: user_id}} =
+               UserResolver.resolve(:google_chat, external_id, %{
+                 display_name: "No Email User",
+                 space_id: "spaces/NOEMAIL"
+               })
+
+      user = Repo.get!(User, user_id)
+      assert is_nil(user.email)
+      assert user.channel == "google_chat"
+    end
+
+    test "creates standalone user when user_email is empty string" do
+      external_id = "users/emptyemail_#{System.unique_integer([:positive])}"
+
+      assert {:ok, %{user_id: user_id}} =
+               UserResolver.resolve(:google_chat, external_id, %{
+                 user_email: "",
+                 display_name: "Empty Email User",
+                 space_id: "spaces/EMPTYEMAIL"
+               })
+
+      user = Repo.get!(User, user_id)
+      assert is_nil(user.email)
+    end
+
+    test "creates standalone user when user_email is whitespace" do
+      external_id = "users/wsemail_#{System.unique_integer([:positive])}"
+
+      assert {:ok, %{user_id: user_id}} =
+               UserResolver.resolve(:google_chat, external_id, %{
+                 user_email: "   ",
+                 display_name: "WS Email User",
+                 space_id: "spaces/WSEMAIL"
+               })
+
+      user = Repo.get!(User, user_id)
+      assert is_nil(user.email)
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # upgrade_pseudo_user/2 smoke tests
+  # ---------------------------------------------------------------
+
+  describe "upgrade_pseudo_user/2" do
+    test "migrates conversations from pseudo-user to real user" do
+      # Create a pseudo-user (channel = "settings")
+      pseudo = chat_user_fixture(%{channel: "settings", external_id: "settings:pseudo-1"})
+
+      # Create a conversation owned by the pseudo-user
+      now = DateTime.utc_now()
+
+      {:ok, conv} =
+        %Conversation{}
+        |> Conversation.changeset(%{
+          channel: "unified",
+          user_id: pseudo.id,
+          agent_type: "orchestrator",
+          status: "active",
+          started_at: now,
+          last_active_at: now
+        })
+        |> Repo.insert()
+
+      # Create a real user to upgrade to
+      real = chat_user_fixture(%{channel: "google_chat", external_id: "users/real_upgrade"})
+      real_id = real.id
+
+      # Perform the upgrade
+      assert {:ok, ^real_id} = UserResolver.upgrade_pseudo_user(pseudo.id, real.id)
+
+      # Conversation should now belong to the real user
+      updated_conv = Repo.get!(Conversation, conv.id)
+      assert updated_conv.user_id == real.id
+
+      # Pseudo-user should be archived
+      updated_pseudo = Repo.get!(User, pseudo.id)
+      assert updated_pseudo.channel == "settings:archived"
+    end
+
+    test "re-links settings_users from pseudo to real user" do
+      # Create a pseudo-user
+      pseudo = chat_user_fixture(%{channel: "settings", external_id: "settings:pseudo-2"})
+
+      # Create a settings_user linked to the pseudo-user using the fixture helper
+      settings_user = Assistant.AccountsFixtures.settings_user_fixture()
+
+      settings_user =
+        settings_user
+        |> Ecto.Changeset.change(%{user_id: pseudo.id})
+        |> Repo.update!()
+
+      # Create a real user
+      real = chat_user_fixture(%{channel: "google_chat", external_id: "users/real_upgrade2"})
+      real_id = real.id
+
+      # Perform the upgrade
+      assert {:ok, ^real_id} = UserResolver.upgrade_pseudo_user(pseudo.id, real.id)
+
+      # settings_user should now point to the real user
+      updated_su = Repo.get!(Assistant.Accounts.SettingsUser, settings_user.id)
+      assert updated_su.user_id == real.id
     end
   end
 end

@@ -860,21 +860,24 @@ defmodule Assistant.AccountsTest do
   end
 
   describe "ensure_linked_user/1 auto-link" do
-    test "auto-links to existing chat user when exactly one exists" do
-      # Create a single real chat user
+    test "auto-links to existing chat user by email match" do
+      email = "autolink-#{System.unique_integer([:positive])}@example.com"
+
+      # Create a real chat user with matching email
       {:ok, chat_user} =
         %Assistant.Schemas.User{}
         |> Assistant.Schemas.User.changeset(%{
           external_id: "tg-autolink-#{System.unique_integer([:positive])}",
-          channel: "telegram"
+          channel: "telegram",
+          email: String.downcase(email)
         })
         |> Repo.insert()
 
-      # Create an unlinked settings_user (user_id = nil)
-      settings_user = settings_user_fixture()
+      # Create an unlinked settings_user (user_id = nil) with matching email
+      settings_user = settings_user_fixture(%{email: email})
       assert is_nil(settings_user.user_id)
 
-      # ensure_linked_user should auto-link to the sole chat user
+      # ensure_linked_user should auto-link via email match
       assert {:ok, linked_user_id} =
                AssistantWeb.SettingsLive.Context.ensure_linked_user(settings_user)
 
@@ -885,12 +888,15 @@ defmodule Assistant.AccountsTest do
       assert reloaded.user_id == chat_user.id
     end
 
-    test "repairs pseudo-user link to sole real chat user" do
+    test "upgrades pseudo-user to real user by email match" do
+      email = "repair-#{System.unique_integer([:positive])}@example.com"
+
       {:ok, chat_user} =
         %Assistant.Schemas.User{}
         |> Assistant.Schemas.User.changeset(%{
           external_id: "tg-repair-#{System.unique_integer([:positive])}",
-          channel: "telegram"
+          channel: "telegram",
+          email: String.downcase(email)
         })
         |> Repo.insert()
 
@@ -903,13 +909,14 @@ defmodule Assistant.AccountsTest do
         |> Repo.insert()
 
       settings_user =
-        settings_user_fixture()
+        settings_user_fixture(%{email: email})
         |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
         |> Repo.update!()
 
       assert {:ok, linked_user_id} =
                AssistantWeb.SettingsLive.Context.ensure_linked_user(settings_user)
 
+      # Should upgrade to the real chat user via email match
       assert linked_user_id == chat_user.id
 
       reloaded = Repo.get!(SettingsUser, settings_user.id)

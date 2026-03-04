@@ -16,6 +16,7 @@ defmodule Assistant.Schemas.UserIdentity do
     field :space_id, :string
     field :display_name, :string
     field :metadata, :map, default: %{}
+    field :left_at, :utc_datetime_usec
 
     belongs_to :user, Assistant.Schemas.User
 
@@ -23,7 +24,7 @@ defmodule Assistant.Schemas.UserIdentity do
   end
 
   @required_fields [:channel, :external_id, :user_id]
-  @optional_fields [:space_id, :display_name, :metadata]
+  @optional_fields [:space_id, :display_name, :metadata, :left_at]
 
   def changeset(identity, attrs) do
     identity

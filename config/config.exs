@@ -57,7 +57,8 @@ config :assistant, Oban,
     scheduled: 5,
     oauth_replay: 5,
     sync: 5,
-    maintenance: 3
+    maintenance: 3,
+    space_context: 5
   ],
   plugins: [
     {Oban.Plugins.Cron,
