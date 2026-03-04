@@ -5,6 +5,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
     [
       {"admin", "Admin"},
       {"profile", "Profile"},
+      {"workspace", "Chat"},
       {"models", "Models"},
       {"analytics", "Analytics"},
       {"memory", "Memory"},
@@ -29,6 +30,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
   def icon_for(section) do
     case section do
       "profile" -> "hero-user-circle"
+      "workspace" -> "hero-chat-bubble-left-right"
       "models" -> "hero-cube"
       "analytics" -> "hero-chart-bar"
       "memory" -> "hero-circle-stack"

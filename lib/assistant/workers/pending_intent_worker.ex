@@ -112,7 +112,9 @@ defmodule Assistant.Workers.PendingIntentWorker do
     # not conversation_id — conversation_id is passed via opts).
     case ensure_engine_started(user_id, conversation_id, channel, mode) do
       :ok ->
-        case Engine.send_message(user_id, message) do
+        message_metadata = build_engine_message_metadata(channel, reply_context)
+
+        case Engine.send_message(user_id, message, metadata: message_metadata) do
           {:ok, response_text} ->
             deliver_reply(channel, response_text, reply_context)
             :ok
@@ -200,4 +202,46 @@ defmodule Assistant.Workers.PendingIntentWorker do
       channel: channel
     )
   end
+
+  defp build_engine_message_metadata(channel, reply_context) do
+    channel_name =
+      case channel do
+        value when is_binary(value) and value != "" -> value
+        _ -> "unknown"
+      end
+
+    source =
+      %{
+        "kind" => "channel_replay",
+        "channel" => channel_name,
+        "replayed" => true,
+        "space_id" => present_or_nil(reply_context["space_id"]),
+        "thread_id" => present_or_nil(reply_context["thread_name"])
+      }
+      |> compact_map()
+
+    %{"source" => source}
+  end
+
+  defp compact_map(map) when is_map(map) do
+    Enum.reduce(map, %{}, fn
+      {_key, nil}, acc ->
+        acc
+
+      {_key, ""}, acc ->
+        acc
+
+      {key, value}, acc ->
+        Map.put(acc, key, value)
+    end)
+  end
+
+  defp present_or_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp present_or_nil(value), do: value
 end

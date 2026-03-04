@@ -111,19 +111,22 @@ defmodule Assistant.Orchestrator.Engine do
 
     * `user_id` - The user UUID whose engine to send the message to
     * `message` - The user's message text
+    * `opts` - Optional keyword list:
+      * `:metadata` - Persisted metadata for the user message row
 
   ## Returns
 
     * `{:ok, response_text}` — Final assistant response
     * `{:error, reason}` — LLM failure, timeout, or engine not found
   """
-  @spec send_message(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def send_message(user_id, message) do
+  @spec send_message(String.t(), String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def send_message(user_id, message, opts \\ []) do
     if byte_size(message) > @max_message_bytes do
       {:error, :message_too_long}
     else
+      metadata = normalize_message_metadata(Keyword.get(opts, :metadata))
       timeout = Application.get_env(:assistant, :engine_call_timeout, 300_000)
-      GenServer.call(via_tuple(user_id), {:send_message, message}, timeout)
+      GenServer.call(via_tuple(user_id), {:send_message, message, metadata}, timeout)
     end
   end
 
@@ -186,7 +189,11 @@ defmodule Assistant.Orchestrator.Engine do
   end
 
   @impl true
-  def handle_call({:send_message, message}, _from, state) do
+  def handle_call({:send_message, message}, from, state) do
+    handle_call({:send_message, message, %{}}, from, state)
+  end
+
+  def handle_call({:send_message, message, message_metadata}, _from, state) do
     Logger.debug("Engine received message",
       conversation_id: state.conversation_id,
       message_length: String.length(message)
@@ -219,7 +226,7 @@ defmodule Assistant.Orchestrator.Engine do
         final_state = Map.update!(final_state, :messages, &(&1 ++ [assistant_msg]))
 
         # Async: persist this turn's new messages to DB (non-blocking)
-        persist_turn_messages(final_state, pre_turn_message_count)
+        persist_turn_messages(final_state, pre_turn_message_count, message_metadata)
 
         # Broadcast token usage for ContextMonitor
         broadcast_token_usage(final_state)
@@ -850,7 +857,7 @@ defmodule Assistant.Orchestrator.Engine do
 
   # Asynchronously persists the new messages from this turn to the DB.
   # Runs in a separate task so it doesn't block the reply to the user.
-  defp persist_turn_messages(state, pre_turn_message_count) do
+  defp persist_turn_messages(state, pre_turn_message_count, user_message_metadata) do
     conversation_id = state.conversation_id
     new_messages = Enum.drop(state.messages, pre_turn_message_count)
 
@@ -860,7 +867,9 @@ defmodule Assistant.Orchestrator.Engine do
         fn ->
           try do
             db_messages =
-              Enum.map(new_messages, fn msg ->
+              new_messages
+              |> Enum.with_index()
+              |> Enum.map(fn {msg, idx} ->
                 base = %{role: llm_role_to_db_role(msg[:role] || "assistant")}
 
                 base =
@@ -875,6 +884,15 @@ defmodule Assistant.Orchestrator.Engine do
                   if msg[:tool_call_id],
                     do: Map.put(base, :tool_results, %{"tool_call_id" => msg[:tool_call_id]}),
                     else: base
+
+                base =
+                  if idx == 0 and msg[:role] == "user" and
+                       is_map(user_message_metadata) and
+                       map_size(user_message_metadata) > 0 do
+                    Map.put(base, :metadata, user_message_metadata)
+                  else
+                    base
+                  end
 
                 base
               end)
@@ -915,6 +933,10 @@ defmodule Assistant.Orchestrator.Engine do
   @doc false
   def db_role_to_llm_role("tool_result"), do: "tool"
   def db_role_to_llm_role(role), do: role
+
+  defp normalize_message_metadata(nil), do: %{}
+  defp normalize_message_metadata(%{} = metadata), do: metadata
+  defp normalize_message_metadata(_), do: %{}
 
   defp via_tuple(user_id) do
     {:via, Registry, {Assistant.Orchestrator.EngineRegistry, user_id}}

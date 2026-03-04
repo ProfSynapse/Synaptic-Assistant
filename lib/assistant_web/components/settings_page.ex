@@ -46,7 +46,13 @@ defmodule AssistantWeb.Components.SettingsPage do
         <nav class="sa-sidebar-nav">
           <.link
             :for={{section, label} <- Helpers.nav_items_for(@is_admin)}
-            navigate={if(section == "profile", do: ~p"/settings", else: ~p"/settings/#{section}")}
+            navigate={
+              cond do
+                section == "profile" -> ~p"/settings"
+                section == "workspace" -> ~p"/workspace"
+                true -> ~p"/settings/#{section}"
+              end
+            }
             class={["sa-sidebar-link", section == @section && "is-active"]}
             title={label}
           >

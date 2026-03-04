@@ -190,8 +190,9 @@ defmodule Assistant.Channels.Dispatcher do
 
   defp sync_engine_response(user_id, message, start_time, metadata) do
     engine_start = System.monotonic_time()
+    engine_message_metadata = build_engine_message_metadata(message)
 
-    case Engine.send_message(user_id, message.content) do
+    case Engine.send_message(user_id, message.content, metadata: engine_message_metadata) do
       {:ok, response_text} ->
         engine_time = System.monotonic_time()
 
@@ -315,9 +316,10 @@ defmodule Assistant.Channels.Dispatcher do
 
   defp handle_engine_response(origin, user_id, message, start_time, metadata) do
     engine_start = System.monotonic_time()
+    engine_message_metadata = build_engine_message_metadata(message)
 
     # Engine is now registered by user_id UUID
-    case Engine.send_message(user_id, message.content) do
+    case Engine.send_message(user_id, message.content, metadata: engine_message_metadata) do
       {:ok, response_text} ->
         engine_time = System.monotonic_time()
 
@@ -449,4 +451,56 @@ defmodule Assistant.Channels.Dispatcher do
       []
     end
   end
+
+  defp build_engine_message_metadata(message) do
+    source =
+      %{
+        "kind" => "channel",
+        "channel" => to_string(message.channel),
+        "message_id" => present_or_nil(message.channel_message_id),
+        "space_id" => present_or_nil(message.space_id),
+        "thread_id" => present_or_nil(message.thread_id),
+        "external_user_id" => present_or_nil(message.user_id),
+        "user_display_name" => present_or_nil(message.user_display_name),
+        "user_email" => present_or_nil(message.user_email)
+      }
+      |> compact_map()
+
+    channel_metadata =
+      case message.metadata do
+        %{} = metadata when map_size(metadata) > 0 -> metadata
+        _ -> nil
+      end
+
+    %{
+      "source" => source,
+      "channel_metadata" => channel_metadata
+    }
+    |> compact_map()
+  end
+
+  defp compact_map(map) when is_map(map) do
+    Enum.reduce(map, %{}, fn
+      {_key, nil}, acc ->
+        acc
+
+      {_key, ""}, acc ->
+        acc
+
+      {_key, %{} = value}, acc when map_size(value) == 0 ->
+        acc
+
+      {key, value}, acc ->
+        Map.put(acc, key, value)
+    end)
+  end
+
+  defp present_or_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp present_or_nil(value), do: value
 end

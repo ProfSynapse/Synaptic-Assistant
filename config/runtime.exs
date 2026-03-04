@@ -110,14 +110,17 @@ if project_number = System.get_env("GOOGLE_CLOUD_PROJECT_NUMBER") do
 end
 
 # Google write concurrency rollout flags (Drive/Docs conflict protection)
-config :assistant, :google_write_conflict_protection,
-  parse_bool.(System.get_env("GOOGLE_WRITE_CONFLICT_PROTECTION"))
+config :assistant,
+       :google_write_conflict_protection,
+       parse_bool.(System.get_env("GOOGLE_WRITE_CONFLICT_PROTECTION"))
 
-config :assistant, :google_write_lease_enforcement,
-  parse_bool.(System.get_env("GOOGLE_WRITE_LEASE_ENFORCEMENT"))
+config :assistant,
+       :google_write_lease_enforcement,
+       parse_bool.(System.get_env("GOOGLE_WRITE_LEASE_ENFORCEMENT"))
 
-config :assistant, :google_write_audit_history,
-  parse_bool.(System.get_env("GOOGLE_WRITE_AUDIT_HISTORY"))
+config :assistant,
+       :google_write_audit_history,
+       parse_bool.(System.get_env("GOOGLE_WRITE_AUDIT_HISTORY"))
 
 # ElevenLabs — Text-to-Speech
 if api_key = System.get_env("ELEVENLABS_API_KEY") do

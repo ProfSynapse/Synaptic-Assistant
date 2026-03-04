@@ -422,7 +422,10 @@ defmodule Assistant.Sync.StateStoreTest do
       assert length(entries) == 8
     end
 
-    test "record_write_coordinator_event stores upload operation", %{user: user, synced_file: file} do
+    test "record_write_coordinator_event stores upload operation", %{
+      user: user,
+      synced_file: file
+    } do
       event = %{
         type: :success,
         measurements: %{attempt: 0},
@@ -444,7 +447,10 @@ defmodule Assistant.Sync.StateStoreTest do
       assert entry.details["event_type"] == "success"
     end
 
-    test "record_write_coordinator_event stores conflict as conflict_detect", %{user: user, synced_file: file} do
+    test "record_write_coordinator_event stores conflict as conflict_detect", %{
+      user: user,
+      synced_file: file
+    } do
       event = %{
         type: :failure,
         measurements: %{attempt: 0},
