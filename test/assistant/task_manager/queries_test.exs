@@ -12,6 +12,7 @@ defmodule Assistant.TaskManager.QueriesTest do
 
   describe "module compilation" do
     test "module is loaded and has expected functions" do
+      assert Code.ensure_loaded?(Queries)
       assert function_exported?(Queries, :create_task, 1)
       assert function_exported?(Queries, :get_task, 1)
       assert function_exported?(Queries, :update_task, 2)

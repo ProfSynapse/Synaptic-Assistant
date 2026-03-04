@@ -51,7 +51,9 @@ defmodule Assistant.Skills.Context do
           optional(:calendar) => module(),
           optional(:hubspot) => module(),
           optional(:openai) => module(),
-          optional(:openrouter) => module()
+          optional(:openrouter) => module(),
+          optional(:web_fetcher) => module(),
+          optional(:web_extractor) => module()
         }
 
   @enforce_keys [:conversation_id, :execution_id, :user_id]

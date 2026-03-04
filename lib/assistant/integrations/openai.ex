@@ -148,6 +148,58 @@ defmodule Assistant.Integrations.OpenAI do
   def list_models(_), do: {:error, :invalid_api_key}
 
   @doc """
+  Run a cited web search through the OpenAI Responses API.
+  """
+  @spec web_search(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def web_search(query, opts \\ []) when is_binary(query) do
+    with {:ok, body} <- build_web_search_response_body(query, opts) do
+      case do_responses_request(body, Keyword.get(opts, :api_key)) do
+        {:ok, %{status: 200, body: response_body}} ->
+          parse_web_search_response(response_body)
+
+        {:ok, %{status: 429} = response} ->
+          retry_after = extract_retry_after(response)
+          {:error, {:rate_limited, retry_after}}
+
+        {:ok, %{status: status, body: resp_body}} when status >= 400 ->
+          error_message = safe_error_message(resp_body)
+          {:error, {:api_error, status, error_message}}
+
+        {:error, %Req.TransportError{reason: reason}} ->
+          {:error, {:connection_error, reason}}
+
+        {:error, reason} ->
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  @doc false
+  def build_web_search_response_body(query, opts) do
+    case Keyword.fetch(opts, :model) do
+      {:ok, model} ->
+        tool =
+          %{"type" => "web_search", "external_web_access" => true}
+          |> maybe_put("user_location", Keyword.get(opts, :user_location))
+
+        body =
+          %{
+            model: model,
+            input: query,
+            tools: [tool],
+            tool_choice: "auto",
+            include: ["web_search_call.action.sources"]
+          }
+          |> maybe_put(:max_output_tokens, Keyword.get(opts, :max_output_tokens))
+
+        {:ok, body}
+
+      :error ->
+        {:error, :no_model_specified}
+    end
+  end
+
+  @doc """
   Returns the known set of Codex-compatible model IDs available via ChatGPT OAuth.
   """
   @spec codex_model_ids() :: [String.t()]
@@ -252,6 +304,8 @@ defmodule Assistant.Integrations.OpenAI do
   end
 
   defp parse_completion(body) do
+    body = decode_json_body(body)
+
     with %{"choices" => [choice | _]} <- body,
          %{"message" => message, "finish_reason" => finish_reason} <- choice do
       {:ok,
@@ -284,6 +338,30 @@ defmodule Assistant.Integrations.OpenAI do
   end
 
   defp parse_tool_calls(_), do: []
+
+  defp parse_web_search_response(body) do
+    body = decode_json_body(body)
+    output = List.wrap(body["output"])
+    citations = parse_responses_citations(output)
+    content = parse_responses_output_text(body, output)
+    usage = parse_responses_usage(body["usage"])
+
+    if is_binary(content) and content != "" do
+      {:ok,
+       %{
+         id: body["id"] || "response_#{System.unique_integer([:positive])}",
+         model: body["model"],
+         content: content,
+         citations: citations,
+         finish_reason: body["status"] || "completed",
+         usage: usage,
+         provider: :openai
+       }}
+    else
+      Logger.error("OpenAI unexpected web search response format", body: inspect(body))
+      {:error, {:unexpected_response, body}}
+    end
+  end
 
   defp extract_text_content(content) when is_binary(content), do: content
   defp extract_text_content(nil), do: nil
@@ -322,6 +400,78 @@ defmodule Assistant.Integrations.OpenAI do
   end
 
   defp parse_usage(_), do: empty_usage()
+
+  defp parse_responses_output_text(body, output) do
+    cond do
+      is_binary(body["output_text"]) and body["output_text"] != "" ->
+        body["output_text"]
+
+      true ->
+        output
+        |> Enum.flat_map(fn item ->
+          case item do
+            %{"type" => "message", "content" => content} when is_list(content) -> content
+            _ -> []
+          end
+        end)
+        |> Enum.map(fn
+          %{"type" => "output_text", "text" => text} when is_binary(text) -> text
+          %{"type" => "text", "text" => text} when is_binary(text) -> text
+          _ -> ""
+        end)
+        |> Enum.join("")
+        |> blank_to_nil()
+    end
+  end
+
+  defp parse_responses_citations(output) do
+    output
+    |> Enum.reduce([], fn item, acc ->
+      citations =
+        case item do
+          %{"type" => "message", "content" => content} when is_list(content) ->
+            Enum.flat_map(content, fn
+              %{"annotations" => annotations} when is_list(annotations) -> annotations
+              _ -> []
+            end)
+
+          %{"type" => "web_search_call", "action" => %{"sources" => sources}}
+          when is_list(sources) ->
+            Enum.map(sources, fn source ->
+              %{
+                "type" => "url_citation",
+                "url" => source["url"],
+                "title" => source["title"]
+              }
+            end)
+
+          _ ->
+            []
+        end
+
+      acc ++ Enum.map(citations, &annotation_to_citation/1)
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> dedupe_citations()
+  end
+
+  defp parse_responses_usage(%{} = usage) do
+    %{
+      prompt_tokens: usage["input_tokens"] || usage["prompt_tokens"] || 0,
+      completion_tokens: usage["output_tokens"] || usage["completion_tokens"] || 0,
+      total_tokens:
+        usage["total_tokens"] ||
+          (usage["input_tokens"] || usage["prompt_tokens"] || 0) +
+            (usage["output_tokens"] || usage["completion_tokens"] || 0),
+      cached_tokens: get_in(usage, ["input_tokens_details", "cached_tokens"]) || 0,
+      cache_write_tokens: get_in(usage, ["input_tokens_details", "cache_write_tokens"]) || 0,
+      audio_tokens: get_in(usage, ["input_tokens_details", "audio_tokens"]) || 0,
+      reasoning_tokens: get_in(usage, ["output_tokens_details", "reasoning_tokens"]) || 0,
+      cost: usage["cost"]
+    }
+  end
+
+  defp parse_responses_usage(_), do: empty_usage()
 
   defp handle_sse_line("data: [DONE]", _callback), do: :ok
 
@@ -963,6 +1113,29 @@ defmodule Assistant.Integrations.OpenAI do
   defp safe_error_message(body) when is_binary(body) and body != "", do: body
   defp safe_error_message(_), do: "Unknown error"
 
+  defp annotation_to_citation(%{"type" => "url_citation", "url_citation" => citation})
+       when is_map(citation) do
+    %{
+      url: citation["url"],
+      title: citation["title"],
+      snippet: citation["content"],
+      start_index: citation["start_index"],
+      end_index: citation["end_index"]
+    }
+  end
+
+  defp annotation_to_citation(%{"type" => "url_citation"} = annotation) do
+    %{
+      url: annotation["url"],
+      title: annotation["title"],
+      snippet: annotation["content"],
+      start_index: annotation["start_index"],
+      end_index: annotation["end_index"]
+    }
+  end
+
+  defp annotation_to_citation(_), do: nil
+
   defp blank_to_nil(value) when is_binary(value) do
     trimmed = String.trim(value)
     if trimmed == "", do: nil, else: trimmed
@@ -970,10 +1143,44 @@ defmodule Assistant.Integrations.OpenAI do
 
   defp blank_to_nil(_), do: nil
 
+  defp dedupe_citations(citations) do
+    citations
+    |> Enum.reduce(%{}, fn citation, acc ->
+      key = {citation.url, citation.title}
+      Map.update(acc, key, citation, &prefer_richer_citation(&1, citation))
+    end)
+    |> Map.values()
+  end
+
+  defp prefer_richer_citation(existing, candidate) do
+    if citation_score(candidate) > citation_score(existing), do: candidate, else: existing
+  end
+
+  defp citation_score(citation) do
+    Enum.count([citation.snippet, citation.start_index, citation.end_index], &(!is_nil(&1)))
+  end
+
+  defp decode_json_body(body) when is_map(body), do: body
+
+  defp decode_json_body(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} when is_map(decoded) -> decoded
+      _ -> body
+    end
+  end
+
+  defp decode_json_body(body), do: body
+
   defp do_request(body, override_key) do
     http = ConfigLoader.http_config()
     req = build_req_client(http, :request, override_key)
     Req.post(req, url: "/chat/completions", json: body)
+  end
+
+  defp do_responses_request(body, override_key) do
+    http = ConfigLoader.http_config()
+    req = build_req_client(http, :request, override_key)
+    Req.post(req, url: "/responses", json: body)
   end
 
   defp build_req_client(http, mode, override_key) do
@@ -1020,6 +1227,10 @@ defmodule Assistant.Integrations.OpenAI do
   end
 
   defp extract_retry_after(_), do: 60
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp empty_usage do
     %{

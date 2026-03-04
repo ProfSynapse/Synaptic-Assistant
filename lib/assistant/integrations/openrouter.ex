@@ -272,6 +272,67 @@ defmodule Assistant.Integrations.OpenRouter do
   def list_models(_), do: {:error, :invalid_api_key}
 
   @doc """
+  Run a cited web search through OpenRouter's web plugin.
+  """
+  @spec web_search(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def web_search(query, opts \\ []) when is_binary(query) do
+    with {:ok, body} <- build_web_search_request_body(query, opts) do
+      case do_request(body, Keyword.get(opts, :api_key)) do
+        {:ok, %{status: 200, body: response_body}} ->
+          parse_web_search_response(response_body)
+
+        {:ok, %{status: 429} = response} ->
+          retry_after = extract_retry_after(response)
+          {:error, {:rate_limited, retry_after}}
+
+        {:ok, %{status: 402, body: resp_body}} ->
+          {:error, {:insufficient_credits, get_in(resp_body, ["error", "message"])}}
+
+        {:ok, %{status: status, body: resp_body}} when status >= 400 ->
+          error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+          {:error, {:api_error, status, error_message}}
+
+        {:error, %Req.TransportError{reason: reason}} ->
+          {:error, {:connection_error, reason}}
+
+        {:error, reason} ->
+          {:error, {:request_failed, reason}}
+      end
+    end
+  end
+
+  @doc false
+  def build_web_search_request_body(query, opts) do
+    case Keyword.fetch(opts, :model) do
+      {:ok, model} ->
+        plugin =
+          %{"id" => "web"}
+          |> maybe_put("engine", Keyword.get(opts, :engine))
+          |> maybe_put("max_results", Keyword.get(opts, :max_results))
+
+        web_search_options =
+          %{}
+          |> maybe_put("search_context_size", Keyword.get(opts, :search_context_size))
+
+        body =
+          %{
+            model: model,
+            messages: [%{role: "user", content: query}],
+            plugins: [plugin]
+          }
+          |> maybe_put(
+            :web_search_options,
+            if(map_size(web_search_options) == 0, do: nil, else: web_search_options)
+          )
+
+        {:ok, body}
+
+      :error ->
+        {:error, :no_model_specified}
+    end
+  end
+
+  @doc """
   Lists detailed OpenRouter model metadata for model catalog browsing.
 
   Returns normalized maps with:
@@ -495,6 +556,8 @@ defmodule Assistant.Integrations.OpenRouter do
   # --- Response Parsing ---
 
   defp parse_completion(body) do
+    body = decode_json_body(body)
+
     with %{"choices" => [choice | _]} <- body,
          %{"message" => message, "finish_reason" => finish_reason} <- choice do
       tool_calls = parse_tool_calls(message)
@@ -517,6 +580,8 @@ defmodule Assistant.Integrations.OpenRouter do
   end
 
   defp parse_image_completion(body) do
+    body = decode_json_body(body)
+
     with %{"choices" => [choice | _]} <- body,
          %{"message" => message, "finish_reason" => finish_reason} <- choice do
       usage = parse_usage(body)
@@ -552,6 +617,31 @@ defmodule Assistant.Integrations.OpenRouter do
 
   defp parse_tool_calls(_), do: []
 
+  defp parse_web_search_response(body) do
+    body = decode_json_body(body)
+
+    with %{"choices" => [choice | _]} <- body,
+         %{"message" => message, "finish_reason" => finish_reason} <- choice do
+      citations = parse_annotations(Map.get(message, "annotations"))
+      usage = parse_usage(body)
+
+      {:ok,
+       %{
+         id: body["id"],
+         model: body["model"],
+         content: extract_text_content(message["content"]),
+         citations: citations,
+         finish_reason: finish_reason,
+         usage: usage,
+         provider: :openrouter
+       }}
+    else
+      _ ->
+        Logger.error("OpenRouter unexpected web search response format", body: inspect(body))
+        {:error, {:unexpected_response, body}}
+    end
+  end
+
   defp parse_images(%{"images" => images}) when is_list(images) do
     images
     |> Enum.map(fn image ->
@@ -572,6 +662,40 @@ defmodule Assistant.Integrations.OpenRouter do
 
   defp parse_images(_), do: []
 
+  defp parse_annotations(annotations) when is_list(annotations) do
+    annotations
+    |> Enum.map(&annotation_to_citation/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq_by(fn citation ->
+      {citation.url, citation.title, citation.start_index, citation.end_index}
+    end)
+  end
+
+  defp parse_annotations(_), do: []
+
+  defp annotation_to_citation(%{"type" => "url_citation", "url_citation" => citation})
+       when is_map(citation) do
+    %{
+      url: citation["url"],
+      title: citation["title"],
+      snippet: citation["content"],
+      start_index: citation["start_index"],
+      end_index: citation["end_index"]
+    }
+  end
+
+  defp annotation_to_citation(%{"type" => "url_citation"} = annotation) do
+    %{
+      url: annotation["url"],
+      title: annotation["title"],
+      snippet: annotation["content"],
+      start_index: annotation["start_index"],
+      end_index: annotation["end_index"]
+    }
+  end
+
+  defp annotation_to_citation(_), do: nil
+
   defp extract_mime_type("data:" <> _ = data_url) do
     case Regex.run(~r/^data:([^;]+);base64,/, data_url, capture: :all_but_first) do
       [mime_type] -> mime_type
@@ -580,6 +704,17 @@ defmodule Assistant.Integrations.OpenRouter do
   end
 
   defp extract_mime_type(_url), do: "image/png"
+
+  defp decode_json_body(body) when is_map(body), do: body
+
+  defp decode_json_body(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} when is_map(decoded) -> decoded
+      _ -> body
+    end
+  end
+
+  defp decode_json_body(body), do: body
 
   # Strip reasoning trace content from LLM responses, keeping only final text.
   #
@@ -757,6 +892,10 @@ defmodule Assistant.Integrations.OpenRouter do
 
   defp valid_positive_integer?(value), do: is_integer(value) and value > 0
   defp valid_non_empty_string?(value), do: is_binary(value) and String.trim(value) != ""
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   # --- HTTP Client ---
 
