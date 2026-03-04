@@ -43,6 +43,11 @@ defmodule AssistantWeb.GoogleChatController do
   The GoogleChatAuth plug has already verified the JWT by this point.
   """
   def event(conn, params) do
+    Logger.info("Google Chat webhook received",
+      event_type: params["type"],
+      keys: Map.keys(params) |> Enum.join(", ")
+    )
+
     case ChatAdapter.normalize(params) do
       {:ok, message} ->
         handle_normalized(conn, message, params)

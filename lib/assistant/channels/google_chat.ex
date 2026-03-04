@@ -32,6 +32,8 @@ defmodule Assistant.Channels.GoogleChat do
 
   @behaviour Assistant.Channels.Adapter
 
+  require Logger
+
   alias Assistant.Channels.Message
   alias Assistant.Integrations.Google.Chat, as: ChatClient
 
@@ -62,7 +64,11 @@ defmodule Assistant.Channels.GoogleChat do
     {:error, :ignored}
   end
 
-  def normalize(_event) do
+  def normalize(event) do
+    Logger.warning("Google Chat event ignored",
+      type: event["type"],
+      keys: Map.keys(event) |> Enum.join(", ")
+    )
     {:error, :ignored}
   end
 
