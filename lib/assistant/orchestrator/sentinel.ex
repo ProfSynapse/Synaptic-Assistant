@@ -147,8 +147,8 @@ defmodule Assistant.Orchestrator.Sentinel do
   """
   @spec check(String.t() | nil, String.t(), proposed_action()) ::
           {:ok, :approved} | {:ok, {:rejected, String.t()}}
-  def check(original_request, agent_mission, proposed_action) do
-    model = resolve_sentinel_model()
+  def check(original_request, agent_mission, proposed_action, opts \\ []) do
+    model = resolve_sentinel_model(opts)
     messages = build_messages(original_request, agent_mission, proposed_action)
 
     Logger.info("Sentinel check",
@@ -289,13 +289,13 @@ defmodule Assistant.Orchestrator.Sentinel do
 
   # --- Model Resolution ---
 
-  defp resolve_sentinel_model do
-    case ConfigLoader.model_for(:sentinel) do
+  defp resolve_sentinel_model(opts) do
+    case ConfigLoader.model_for(:sentinel, opts) do
       %{id: id} ->
         id
 
       nil ->
-        case ConfigLoader.model_for(:compaction) do
+        case ConfigLoader.model_for(:compaction, opts) do
           %{id: id} -> id
           nil -> @hardcoded_fallback_model
         end

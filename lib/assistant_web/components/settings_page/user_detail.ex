@@ -10,7 +10,12 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
 
   def user_detail_section(assigns) do
     is_self = assigns.user.id == assigns.current_user_id
-    assigns = assign(assigns, :is_self, is_self)
+    model_defaults_toggle_disabled = assigns.user.is_admin
+
+    assigns =
+      assigns
+      |> assign(:is_self, is_self)
+      |> assign(:model_defaults_toggle_disabled, model_defaults_toggle_disabled)
 
     ~H"""
     <section class="space-y-6">
@@ -70,6 +75,12 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
               {if @user.access_scopes && @user.access_scopes != [], do: Enum.join(@user.access_scopes, ", "), else: "None"}
             </span>
           </div>
+          <div class="sa-detail-item">
+            <span class="sa-detail-label">Model Defaults Scope</span>
+            <span class="sa-detail-value">
+              {model_defaults_scope_label(@user)}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -122,6 +133,102 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
             <span class="sa-switch-slider"></span>
           </label>
         </div>
+
+        <div class="sa-row" style="margin-bottom: 0;">
+          <div>
+            <span style="font-weight: 500;">Can Manage Personal Model Defaults</span>
+            <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 2px 0 0 0;">
+              When enabled, this user can edit the user-specific defaults below from their own settings page.
+            </p>
+            <p :if={@model_defaults_toggle_disabled} style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 4px 0 0 0;">
+              Admin accounts always manage the app-wide defaults instead of personal overrides.
+            </p>
+          </div>
+          <label class={["sa-switch", @model_defaults_toggle_disabled && "sa-switch-disabled"]}>
+            <input
+              type="checkbox"
+              checked={@user.can_manage_model_defaults}
+              class="sa-switch-input"
+              role="switch"
+              aria-checked={to_string(@user.can_manage_model_defaults)}
+              aria-label={"Toggle personal model defaults for #{@user.email}"}
+              phx-click="toggle_user_model_defaults_access"
+              phx-value-id={@user.id}
+              phx-value-enabled={to_string(!@user.can_manage_model_defaults)}
+              disabled={@model_defaults_toggle_disabled}
+            />
+            <span class="sa-switch-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="sa-card">
+        <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0 0 8px 0;">User Model Defaults</h3>
+        <p class="sa-muted" style="margin: 0 0 16px 0;">{@user.model_defaults_description}</p>
+
+        <div :if={@user.is_admin} class="sa-empty">
+          Admin accounts use the shared app-wide defaults configured on the Models page.
+        </div>
+
+        <.form
+          :if={!@user.is_admin}
+          for={to_form(@user.effective_model_defaults || %{}, as: :admin_defaults)}
+          id={"admin-user-model-defaults-form-#{@user.id}"}
+          phx-change="change_admin_user_model_defaults"
+          class="sa-model-defaults-form"
+        >
+          <input type="hidden" name="user_id" value={@user.id} />
+
+          <div class="sa-model-defaults-grid">
+            <div :for={role <- @user.model_default_roles} class="sa-model-default-row">
+              <div class="sa-model-default-meta">
+                <div class="sa-model-default-title">
+                  <span class="sa-model-default-role">{role.label}</span>
+                  <span class="sa-muted" style="font-size: 0.8rem;">
+                    {admin_model_default_source_label(@user.model_default_sources, role.key)}
+                  </span>
+                  <button
+                    type="button"
+                    class="sa-role-tooltip"
+                    aria-label={"About #{role.label}"}
+                    title={role.tooltip}
+                  >
+                    <.icon name="hero-information-circle" class="h-4 w-4" />
+                    <span class="sa-role-tooltip-bubble">{role.tooltip}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="sa-model-default-select">
+                <.field
+                  type="select"
+                  name={"defaults[#{role.key}]"}
+                  label={"Default model for #{role.label}"}
+                  label_class="sr-only"
+                  no_margin={true}
+                  options={@user.model_options}
+                  selected={Map.get(@user.effective_model_defaults || %{}, Atom.to_string(role.key))}
+                  prompt="Select model"
+                  disabled={!@user.model_defaults_editable}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="sa-row" style="margin-top: 16px; align-items: center;">
+            <p class="sa-muted" style="margin: 0; flex: 1;">{@user.model_defaults_notice}</p>
+            <button
+              :if={@user.model_defaults_resettable}
+              type="button"
+              phx-click="apply_global_admin_user_model_defaults"
+              phx-value-id={@user.id}
+              class="sa-btn secondary"
+              data-confirm="Clear this user's overrides and apply the global defaults instead?"
+            >
+              Apply Global Defaults
+            </button>
+          </div>
+        </.form>
       </div>
 
       <div class="sa-card">
@@ -181,5 +288,28 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
       </div>
     </section>
     """
+  end
+
+  defp model_defaults_scope_label(%{is_admin: true}), do: "App-wide admin"
+
+  defp model_defaults_scope_label(%{can_manage_model_defaults: true, model_defaults: overrides})
+       when map_size(overrides) > 0 do
+    "User-managed (#{map_size(overrides)} override#{if map_size(overrides) == 1, do: "", else: "s"})"
+  end
+
+  defp model_defaults_scope_label(%{can_manage_model_defaults: true}), do: "User-managed"
+
+  defp model_defaults_scope_label(%{model_defaults: overrides}) when map_size(overrides) > 0 do
+    "Admin-managed (#{map_size(overrides)} override#{if map_size(overrides) == 1, do: "", else: "s"})"
+  end
+
+  defp model_defaults_scope_label(_), do: "Global only"
+
+  defp admin_model_default_source_label(source_map, role_key) do
+    case Map.get(source_map || %{}, Atom.to_string(role_key), :system) do
+      :user -> "User-specific override"
+      :global -> "Global default"
+      :system -> "System fallback"
+    end
   end
 end

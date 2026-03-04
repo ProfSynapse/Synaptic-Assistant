@@ -26,8 +26,8 @@ defmodule Assistant.Repo.Migrations.CreateUserIdentities do
     # COALESCE handles nullable space_id so (telegram, 123, NULL) and
     # (telegram, 123, NULL) correctly conflict.
     create unique_index(:user_identities, ["channel", "external_id", "COALESCE(space_id, '')"],
-      name: :user_identities_channel_external_id_space_unique
-    )
+             name: :user_identities_channel_external_id_space_unique
+           )
 
     create index(:user_identities, [:user_id])
     create index(:user_identities, [:channel, :external_id])

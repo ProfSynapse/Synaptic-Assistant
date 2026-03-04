@@ -273,6 +273,25 @@ defmodule Assistant.Accounts do
   """
   def get_settings_user!(id), do: Repo.get!(SettingsUser, id)
 
+  @doc """
+  Gets a single settings_user by id.
+  """
+  def get_settings_user(id) when is_binary(id), do: Repo.get(SettingsUser, id)
+  def get_settings_user(_), do: nil
+
+  @doc """
+  Gets a settings_user by linked chat user ID.
+  """
+  def get_settings_user_by_user_id(user_id) when is_binary(user_id) do
+    with {:ok, cast_user_id} <- Ecto.UUID.cast(user_id) do
+      Repo.get_by(SettingsUser, user_id: cast_user_id)
+    else
+      :error -> nil
+    end
+  end
+
+  def get_settings_user_by_user_id(_), do: nil
+
   ## Settings user registration
 
   @doc """
@@ -360,6 +379,16 @@ defmodule Assistant.Accounts do
   def update_settings_user_profile(settings_user, attrs) do
     settings_user
     |> SettingsUser.profile_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Updates the per-user model default overrides for a settings_user.
+  """
+  def update_settings_user_model_defaults(%SettingsUser{} = settings_user, defaults)
+      when is_map(defaults) do
+    settings_user
+    |> SettingsUser.model_defaults_changeset(defaults)
     |> Repo.update()
   end
 
@@ -814,6 +843,7 @@ defmodule Assistant.Accounts do
         display_name: su.display_name,
         is_admin: su.is_admin,
         disabled_at: su.disabled_at,
+        can_manage_model_defaults: su.can_manage_model_defaults,
         has_openrouter_key: not is_nil(su.openrouter_api_key),
         has_openai_key: not is_nil(su.openai_api_key),
         has_linked_user: not is_nil(su.user_id)
@@ -887,10 +917,28 @@ defmodule Assistant.Accounts do
            has_linked_user: not is_nil(su.user_id),
            user_id: su.user_id,
            access_scopes: su.access_scopes,
+           model_defaults: su.model_defaults || %{},
+           can_manage_model_defaults: su.can_manage_model_defaults,
            confirmed_at: su.confirmed_at,
            inserted_at: su.inserted_at,
            updated_at: su.updated_at
          }}
+    end
+  end
+
+  @doc """
+  Toggles whether a settings_user can manage their own model defaults.
+  """
+  def toggle_user_model_defaults_access(settings_user_id, enabled?)
+      when is_binary(settings_user_id) and is_boolean(enabled?) do
+    case Repo.get(SettingsUser, settings_user_id) do
+      nil ->
+        {:error, :not_found}
+
+      %SettingsUser{} = settings_user ->
+        settings_user
+        |> SettingsUser.model_defaults_access_changeset(enabled?)
+        |> Repo.update()
     end
   end
 
@@ -1053,14 +1101,19 @@ defmodule Assistant.Accounts do
         nil ->
           # Direct lookup failed — try single-admin fallback
           case CrossChannelBridge.sole_key(:openrouter_api_key) do
-            nil -> nil
+            nil ->
+              nil
+
             key ->
               CrossChannelBridge.log_fallback(user_id, :openrouter_api_key)
               key
           end
 
-        "" -> nil
-        key when is_binary(key) -> key
+        "" ->
+          nil
+
+        key when is_binary(key) ->
+          key
       end
     else
       :error -> nil
@@ -1147,14 +1200,19 @@ defmodule Assistant.Accounts do
         nil ->
           # Direct lookup failed — try single-admin fallback
           case CrossChannelBridge.sole_key(:openai_api_key) do
-            nil -> nil
+            nil ->
+              nil
+
             key ->
               CrossChannelBridge.log_fallback(user_id, :openai_api_key)
               key
           end
 
-        "" -> nil
-        key when is_binary(key) -> key
+        "" ->
+          nil
+
+        key when is_binary(key) ->
+          key
       end
     else
       :error -> nil
@@ -1200,7 +1258,9 @@ defmodule Assistant.Accounts do
         true ->
           # Direct lookup failed — try single-admin fallback
           case CrossChannelBridge.sole_credentials(:openai) do
-            nil -> nil
+            nil ->
+              nil
+
             creds ->
               CrossChannelBridge.log_fallback(user_id, :openai_credentials)
               creds
@@ -1212,5 +1272,4 @@ defmodule Assistant.Accounts do
   end
 
   def openai_credentials_for_user(_), do: nil
-
 end

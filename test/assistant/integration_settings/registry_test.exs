@@ -96,7 +96,7 @@ defmodule Assistant.IntegrationSettings.RegistryTest do
       assert is_map(groups)
 
       expected_groups =
-        ~w(ai_providers google_workspace telegram slack discord google_chat hubspot elevenlabs)
+        ~w(ai_providers models google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
       for group_id <- expected_groups do
         assert Map.has_key?(groups, group_id), "missing group: #{group_id}"

@@ -6,9 +6,9 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume 01fa3941-d983-42cb-9f48-5bd507bc05ad`
-- Team: `pact-01fa3941`
-- Started: 2026-02-21 15:48:02 UTC
+- Resume: `claude --resume b8acb651-84a0-473f-b0c4-3d7983b607ca`
+- Team: `pact-b8acb651`
+- Started: 2026-03-04 12:10:54 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -83,9 +83,36 @@ Settings-user-level PKCE OAuth connect flow. Key patterns:
 - **Controller**: `OpenRouterOAuthController` — `request/2` + `callback/2` only; disconnect handled by LiveView `phx-click="disconnect_openrouter"`
 - **Configurable keys URL**: `Application.get_env(:assistant, :openrouter_keys_url, "https://openrouter.ai/api/v1/auth/keys")` — needed for Bypass in tests
 
+### Connection Validation Architecture (PR #29)
+Real API handshake validation replaces key-existence checks for integration status.
+- **Module**: `IntegrationSettings.ConnectionValidator` — `validate_all/1` runs 7 validators in parallel via `Task.async_stream` (5s timeout, `on_timeout: :kill_task`)
+- **Registry pattern**: `@validators` list of `{group, :validate_fn}` tuples — adding integration = 1 tuple + 1 `defp`
+- **Tri-state**: `:connected | :not_connected | :not_configured` (UI derives 4th state `:disabled` from toggle)
+- **Per-integration**: Telegram `get_me`, Discord `get_gateway`, Slack `auth_test(token)`, Google `user_token(user_id)` / `service_token()`, HubSpot `Client.health_check/1`, ElevenLabs `Client.health_check/1`
+- **Admin-gated**: `load_connection_status/1` only runs for `is_admin` users (non-admins get `%{}`)
+- **validate_one/2**: Single-integration recheck without full parallel sweep
+- **Client modules**: `HubSpot.Client` and `ElevenLabs.Client` with `health_check/1` — configurable base URLs for test mocking
+- **Icon states**: connected=green check, disabled=gray X, not_connected=red X, not_configured=gray X (with aria-labels)
+
+### Unified Cross-Channel Conversation Architecture (PR #31)
+Single dispatch pipeline for all channels (Telegram, Discord, Slack, Google Chat). Key patterns:
+- **Dispatch pipeline**: Webhook → `Dispatcher.dispatch/2` → `UserResolver.resolve/3` → `Engine.send_message/2` → `ReplyRouter.reply/2`
+- **UserResolver**: Platform identity → DB user. Uses `user_identities` table for cross-channel identity linking. Config-backed allowlist via `Application.get_env(:assistant, :user_allowlist, :open)`
+- **ReplyRouter**: Registry-based channel lookup (NOT `String.to_existing_atom`). Rate limiting via `broadcast_delay_ms` config. Retry with exponential backoff (3 attempts: 100ms, 500ms, 2000ms)
+- **CircuitBreaker**: Agent-based per-adapter circuit breaker. States: `:closed` → `:open` (after 5 failures) → `:half_open` (after 30s cooldown). Registered in Application supervision tree
+- **ConversationArchiver**: Oban cron worker archiving conversations with `last_active_at` older than 30 days (configurable)
+- **Engine input validation**: `byte_size(content) > 200_000` guard (~50K tokens). Configurable timeout via `:engine_call_timeout` (default 300s)
+- **Telemetry events**: `[:assistant, :channels, :dispatch, :start|:resolve|:engine|:reply|:error]` + correlation IDs via `Logger.metadata`
+- **Conversation schema**: `root_conversation_id/1` recursive with DB fallback for multi-level nesting
+- **Migrations**: 3 new — `create_user_identities`, `update_conversations_for_unified` (channel, thread_id, last_active_at), `backfill_user_identities`
+- **User schema**: `external_id` and `channel` moved to `@optional_fields` — identity now authoritative in `user_identities`
+
 ### Phase Status
 - Phase 1-4 complete and merged (PR #9). Branch: `main`.
 - Phase 4 covers: Gmail (5 skills), Calendar (3 skills), Workflow scheduler (4 skills + WorkflowWorker + QuantumLoader).
 - Phase 5 (PR #11): Per-user Google OAuth2 with magic link authorization flow.
 - Phase 6 (PR #15): Scoped Drive access + OAuth2 improvements (race fix, revocation, encrypted code_verifier, cleanup worker).
 - Phase 7 (PR #19): OpenRouter PKCE OAuth connect button + per-user key threading.
+- Phase 12 (PR #29): Connection validation — real API handshakes for integration status.
+- PR #31: Unified cross-channel conversation architecture (UserResolver, Dispatcher, ReplyRouter, CircuitBreaker, ConversationArchiver).
+- PR #32: Cross-channel OAuth key resolution fix — CrossChannelBridge module, ensure_linked_user dedup, data repair migration.

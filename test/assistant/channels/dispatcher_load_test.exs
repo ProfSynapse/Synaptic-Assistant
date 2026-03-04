@@ -26,7 +26,10 @@ defmodule Assistant.Channels.DispatcherLoadTest do
 
     def send_reply(space_id, text, opts \\ []) do
       try do
-        :ets.insert(:load_test_replies, {space_id, text, opts, self(), System.monotonic_time(:microsecond)})
+        :ets.insert(
+          :load_test_replies,
+          {space_id, text, opts, self(), System.monotonic_time(:microsecond)}
+        )
       rescue
         ArgumentError -> :ok
       end

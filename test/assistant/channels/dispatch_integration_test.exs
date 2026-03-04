@@ -251,11 +251,12 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
     test "dispatch with invalid platform ID sends error reply directly" do
       space = "invalid-integ-#{System.unique_integer([:positive])}"
 
-      msg = build_message(%{
-        user_id: "not;numeric",
-        space_id: space,
-        channel: :telegram
-      })
+      msg =
+        build_message(%{
+          user_id: "not;numeric",
+          space_id: space,
+          channel: :telegram
+        })
 
       assert {:ok, :dispatched} = Dispatcher.dispatch(IntegrationAdapter, msg)
 
@@ -274,11 +275,12 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
           external_id: ext_id
         })
 
-      msg = build_message(%{
-        user_id: ext_id,
-        space_id: space,
-        channel: :telegram
-      })
+      msg =
+        build_message(%{
+          user_id: ext_id,
+          space_id: space,
+          channel: :telegram
+        })
 
       assert {:ok, :dispatched} = Dispatcher.dispatch(IntegrationAdapter, msg)
 
@@ -295,12 +297,13 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
     test "dispatch preserves thread_id through error path" do
       space = "thread-err-#{System.unique_integer([:positive])}"
 
-      msg = build_message(%{
-        user_id: "bad;id",
-        space_id: space,
-        channel: :telegram,
-        thread_id: "thread-integ-123"
-      })
+      msg =
+        build_message(%{
+          user_id: "bad;id",
+          space_id: space,
+          channel: :telegram,
+          thread_id: "thread-integ-123"
+        })
 
       assert {:ok, :dispatched} = Dispatcher.dispatch(IntegrationAdapter, msg)
 
@@ -329,12 +332,13 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
       expected_response = "This is the FakeEngine response for integration test!"
       {:ok, fake_pid} = FakeEngine.start_link(user.id, response: expected_response)
 
-      msg = build_message(%{
-        user_id: ext_id,
-        space_id: space,
-        channel: :telegram,
-        content: "Hello FakeEngine!"
-      })
+      msg =
+        build_message(%{
+          user_id: ext_id,
+          space_id: space,
+          channel: :telegram,
+          content: "Hello FakeEngine!"
+        })
 
       assert {:ok, :dispatched} = Dispatcher.dispatch(IntegrationAdapter, msg)
 
@@ -361,11 +365,12 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
 
       {:ok, fake_pid} = FakeEngine.start_link(user.id, response: "origin test reply")
 
-      msg = build_message(%{
-        user_id: ext_id,
-        space_id: space,
-        channel: :telegram
-      })
+      msg =
+        build_message(%{
+          user_id: ext_id,
+          space_id: space,
+          channel: :telegram
+        })
 
       assert {:ok, :dispatched} = Dispatcher.dispatch(IntegrationAdapter, msg)
 
@@ -388,12 +393,13 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
 
       {:ok, fake_pid} = FakeEngine.start_link(user.id, response: "threaded response")
 
-      msg = build_message(%{
-        user_id: ext_id,
-        space_id: space,
-        channel: :telegram,
-        thread_id: "thread-success-456"
-      })
+      msg =
+        build_message(%{
+          user_id: ext_id,
+          space_id: space,
+          channel: :telegram,
+          thread_id: "thread-success-456"
+        })
 
       assert {:ok, :dispatched} = Dispatcher.dispatch(IntegrationAdapter, msg)
 
@@ -439,12 +445,13 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
       # Dispatch all concurrently
       tasks =
         Enum.map(user_data, fn ud ->
-          msg = build_message(%{
-            user_id: ud.ext_id,
-            space_id: ud.space,
-            channel: :telegram,
-            content: "Hello from user with ext_id #{ud.ext_id}"
-          })
+          msg =
+            build_message(%{
+              user_id: ud.ext_id,
+              space_id: ud.space,
+              channel: :telegram,
+              content: "Hello from user with ext_id #{ud.ext_id}"
+            })
 
           Task.async(fn ->
             Dispatcher.dispatch(IntegrationAdapter, msg)
@@ -475,11 +482,12 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
     test "dispatch to unknown channel type still delivers via adapter" do
       space = "unknown-ch-#{System.unique_integer([:positive])}"
 
-      msg = build_message(%{
-        channel: :unknown_channel,
-        user_id: "anything-goes-#{System.unique_integer([:positive])}",
-        space_id: space
-      })
+      msg =
+        build_message(%{
+          channel: :unknown_channel,
+          user_id: "anything-goes-#{System.unique_integer([:positive])}",
+          space_id: space
+        })
 
       # Unknown channels pass platform ID validation (no pattern to match against)
       # UserResolver will auto-create the user, then Engine will fail
@@ -509,6 +517,7 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
         assert {:ok, :dispatched} = Dispatcher.dispatch(IntegrationAdapter, msg)
 
         {_sid, text, _opts, _pid} = await_reply_for(space, 5_000)
+
         assert is_binary(text),
                "Expected binary reply for #{inspect(tc)}, got: #{inspect(text)}"
       end

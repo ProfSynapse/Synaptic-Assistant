@@ -380,6 +380,7 @@ defmodule Assistant.AccountsAdminTest do
       assert Map.has_key?(detail, :disabled_at)
       assert Map.has_key?(detail, :user_id)
       assert Map.has_key?(detail, :access_scopes)
+      assert Map.has_key?(detail, :can_manage_model_defaults)
       assert Map.has_key?(detail, :confirmed_at)
       assert Map.has_key?(detail, :inserted_at)
       assert Map.has_key?(detail, :updated_at)
@@ -419,6 +420,15 @@ defmodule Assistant.AccountsAdminTest do
   # ──────────────────────────────────────────────
 
   describe "list_settings_users_for_admin/0 — admin and disabled fields" do
+    test "includes can_manage_model_defaults field" do
+      user = settings_user_fixture()
+
+      results = Accounts.list_settings_users_for_admin()
+      result = Enum.find(results, &(&1.id == user.id))
+
+      assert result.can_manage_model_defaults == false
+    end
+
     test "includes is_admin field" do
       admin = admin_fixture()
 
@@ -463,6 +473,28 @@ defmodule Assistant.AccountsAdminTest do
       result = Enum.find(results, &(&1.id == user.id))
 
       assert is_nil(result.disabled_at)
+    end
+  end
+
+  describe "toggle_user_model_defaults_access/2" do
+    test "enables personal model defaults access for a user" do
+      user = settings_user_fixture()
+
+      assert {:ok, updated} = Accounts.toggle_user_model_defaults_access(user.id, true)
+      assert updated.can_manage_model_defaults
+    end
+
+    test "disables personal model defaults access for a user" do
+      user = settings_user_fixture()
+      {:ok, _updated} = Accounts.toggle_user_model_defaults_access(user.id, true)
+
+      assert {:ok, updated} = Accounts.toggle_user_model_defaults_access(user.id, false)
+      refute updated.can_manage_model_defaults
+    end
+
+    test "returns :not_found for nonexistent user" do
+      assert {:error, :not_found} =
+               Accounts.toggle_user_model_defaults_access(Ecto.UUID.generate(), true)
     end
   end
 

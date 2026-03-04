@@ -600,7 +600,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
 
       # Verify message count grew
       {:ok, state} = Engine.get_state(user.id)
-      assert state.message_count >= 4  # user1, asst1, user2, asst2
+      # user1, asst1, user2, asst2
+      assert state.message_count >= 4
 
       safe_stop(pid)
     end

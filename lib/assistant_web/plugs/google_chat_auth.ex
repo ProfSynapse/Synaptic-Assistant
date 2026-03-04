@@ -251,7 +251,9 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
         {:error, :invalid_issuer}
 
       not valid_audience?(claims["aud"], project_number) ->
-        Logger.warning("Google Chat JWT audience mismatch: expected=#{inspect(project_number)} actual=#{inspect(claims["aud"])}")
+        Logger.warning(
+          "Google Chat JWT audience mismatch: expected=#{inspect(project_number)} actual=#{inspect(claims["aud"])}"
+        )
 
         {:error, :invalid_audience}
 

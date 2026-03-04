@@ -348,15 +348,16 @@ defmodule Assistant.Channels.GoogleChatTest do
     end
 
     test "uses argumentText over text when available" do
-      event = build_v2_message_event(%{
-        "message" => %{
-          "name" => "spaces/AAAA/messages/msg1",
-          "text" => "@Bot do something",
-          "argumentText" => "do something",
-          "sender" => %{"name" => "users/1", "displayName" => "User"},
-          "thread" => %{"name" => "spaces/AAAA/threads/t1"}
-        }
-      })
+      event =
+        build_v2_message_event(%{
+          "message" => %{
+            "name" => "spaces/AAAA/messages/msg1",
+            "text" => "@Bot do something",
+            "argumentText" => "do something",
+            "sender" => %{"name" => "users/1", "displayName" => "User"},
+            "thread" => %{"name" => "spaces/AAAA/threads/t1"}
+          }
+        })
 
       {:ok, msg} = GoogleChat.normalize(event)
       assert msg.content == "do something"
@@ -364,34 +365,36 @@ defmodule Assistant.Channels.GoogleChatTest do
     end
 
     test "handles missing thread gracefully" do
-      event = build_v2_message_event(%{
-        "message" => %{
-          "name" => "spaces/AAAA/messages/msg1",
-          "text" => "no thread",
-          "sender" => %{"name" => "users/1"}
-        }
-      })
+      event =
+        build_v2_message_event(%{
+          "message" => %{
+            "name" => "spaces/AAAA/messages/msg1",
+            "text" => "no thread",
+            "sender" => %{"name" => "users/1"}
+          }
+        })
 
       {:ok, msg} = GoogleChat.normalize(event)
       assert msg.thread_id == nil
     end
 
     test "extracts attachments when present" do
-      event = build_v2_message_event(%{
-        "message" => %{
-          "name" => "spaces/AAAA/messages/msg1",
-          "text" => "see attached",
-          "sender" => %{"name" => "users/1"},
-          "thread" => %{"name" => "spaces/AAAA/threads/t1"},
-          "attachment" => [
-            %{
-              "attachmentDataRef" => %{"resourceName" => "res/456"},
-              "contentType" => "application/pdf",
-              "contentName" => "doc.pdf"
-            }
-          ]
-        }
-      })
+      event =
+        build_v2_message_event(%{
+          "message" => %{
+            "name" => "spaces/AAAA/messages/msg1",
+            "text" => "see attached",
+            "sender" => %{"name" => "users/1"},
+            "thread" => %{"name" => "spaces/AAAA/threads/t1"},
+            "attachment" => [
+              %{
+                "attachmentDataRef" => %{"resourceName" => "res/456"},
+                "contentType" => "application/pdf",
+                "contentName" => "doc.pdf"
+              }
+            ]
+          }
+        })
 
       {:ok, msg} = GoogleChat.normalize(event)
       assert length(msg.attachments) == 1

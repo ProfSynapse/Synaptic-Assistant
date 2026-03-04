@@ -4,12 +4,16 @@ defmodule Assistant.Accounts.SettingsUser do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
+  @model_default_roles ~w(orchestrator sub_agent sentinel compaction)
+
   schema "settings_users" do
     field :display_name, :string
     field :timezone, :string, default: "UTC"
     field :email, :string
     field :is_admin, :boolean, default: false
     field :access_scopes, {:array, :string}, default: []
+    field :model_defaults, :map, default: %{}
+    field :can_manage_model_defaults, :boolean, default: false
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
     field :confirmed_at, :utc_datetime
@@ -210,6 +214,20 @@ defmodule Assistant.Accounts.SettingsUser do
   end
 
   @doc """
+  A changeset for updating per-user model default overrides.
+  """
+  def model_defaults_changeset(settings_user, defaults) when is_map(defaults) do
+    change(settings_user, model_defaults: sanitize_model_defaults(defaults))
+  end
+
+  @doc """
+  A changeset for updating whether the user may manage their own model defaults.
+  """
+  def model_defaults_access_changeset(settings_user, enabled?) when is_boolean(enabled?) do
+    change(settings_user, can_manage_model_defaults: enabled?)
+  end
+
+  @doc """
   Verifies the password.
 
   If there is no settings_user or the settings_user doesn't have a password, we call
@@ -226,5 +244,26 @@ defmodule Assistant.Accounts.SettingsUser do
   def valid_password?(_, _) do
     Bcrypt.no_user_verify()
     false
+  end
+
+  defp sanitize_model_defaults(defaults) do
+    defaults
+    |> Enum.reduce(%{}, fn {role, model_id}, acc ->
+      role_key = role |> to_string() |> String.trim()
+
+      cond do
+        role_key not in @model_default_roles ->
+          acc
+
+        true ->
+          model_value = model_id |> to_string() |> String.trim()
+
+          if model_value == "" do
+            acc
+          else
+            Map.put(acc, role_key, model_value)
+          end
+      end
+    end)
   end
 end

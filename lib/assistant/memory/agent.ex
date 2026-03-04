@@ -611,7 +611,12 @@ defmodule Assistant.Memory.Agent do
 
         original_request = get_in(gen_state, [:current_mission, :original_request])
 
-        case Sentinel.check(original_request, "memory management", proposed_action) do
+        case Sentinel.check(
+               original_request,
+               "memory management",
+               proposed_action,
+               user_id: gen_state.user_id
+             ) do
           {:ok, :approved} ->
             execute_with_search_first(tc, skill_name, skill_args, gen_state, executor_session)
 
@@ -934,8 +939,8 @@ defmodule Assistant.Memory.Agent do
     }
   end
 
-  defp build_model_opts(context, _user_id) do
-    model = LLMHelpers.resolve_model(:sub_agent)
+  defp build_model_opts(context, user_id) do
+    model = LLMHelpers.resolve_model(:sub_agent, user_id: user_id)
     LLMHelpers.build_llm_opts(context.tools, model)
   end
 

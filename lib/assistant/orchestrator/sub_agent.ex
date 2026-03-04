@@ -234,9 +234,12 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   @impl true
   def init(opts) do
-    dispatch_params = Keyword.fetch!(opts, :dispatch_params)
     dep_results = Keyword.get(opts, :dep_results, %{})
     engine_state = Keyword.get(opts, :engine_state, %{})
+
+    dispatch_params =
+      Keyword.fetch!(opts, :dispatch_params)
+      |> Map.put_new(:user_id, engine_state[:user_id])
 
     agent_id = dispatch_params.agent_id
     started_at = System.monotonic_time(:millisecond)
@@ -781,7 +784,12 @@ defmodule Assistant.Orchestrator.SubAgent do
 
         original_request = engine_state[:original_request]
 
-        case Sentinel.check(original_request, dispatch_params.mission, proposed_action) do
+        case Sentinel.check(
+               original_request,
+               dispatch_params.mission,
+               proposed_action,
+               user_id: engine_state[:user_id]
+             ) do
           {:ok, :approved} ->
             execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state)
 
@@ -1135,7 +1143,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     model_info =
       case dispatch_params[:model_override] do
         nil ->
-          Loader.model_for(:sub_agent)
+          Loader.model_for(:sub_agent, user_id: dispatch_params[:user_id])
 
         model_id ->
           Loader.model_for(:sub_agent, id: model_id)
@@ -1583,10 +1591,10 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp resolve_google_token(_user_id, _skills), do: nil
 
-  defp build_model_opts(dispatch_params, context, _engine_state) do
+  defp build_model_opts(dispatch_params, context, engine_state) do
     model =
       case dispatch_params[:model_override] do
-        nil -> LLMHelpers.resolve_model(:sub_agent)
+        nil -> LLMHelpers.resolve_model(:sub_agent, user_id: engine_state[:user_id])
         override -> override
       end
 

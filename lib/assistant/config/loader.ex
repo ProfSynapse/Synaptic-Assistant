@@ -114,7 +114,7 @@ defmodule Assistant.Config.Loader do
 
     case Keyword.get(opts, :id) do
       nil ->
-        override_id = ModelDefaults.default_model_id(use_case)
+        override_id = ModelDefaults.default_model_id(use_case, opts)
         tier = Keyword.get(opts, :prefer) || Map.get(defaults, use_case)
 
         case find_model_by_id_for_use_case(models, override_id, use_case) do

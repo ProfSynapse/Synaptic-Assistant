@@ -64,14 +64,17 @@ defmodule Assistant.Memory.Compaction do
     * `{:error, :no_compaction_model}` - No model configured for :compaction use case
     * `{:error, reason}` - LLM or prompt rendering failure
   """
+  @spec compact(binary()) :: {:ok, map()} | {:error, term()}
+  def compact(conversation_id), do: compact(conversation_id, [])
+
   @spec compact(binary(), keyword()) :: {:ok, map()} | {:error, term()}
-  def compact(conversation_id, opts \\ []) do
+  def compact(conversation_id, opts) do
     token_budget = Keyword.get(opts, :token_budget, @default_token_budget)
     message_limit = Keyword.get(opts, :message_limit, @default_message_batch_size)
 
     with {:ok, conversation} <- Store.get_conversation(conversation_id),
          {:ok, messages} <- fetch_new_messages(conversation, message_limit),
-         {:ok, model} <- resolve_compaction_model(),
+         {:ok, model} <- resolve_compaction_model(conversation.user_id),
          {:ok, system_prompt} <- render_system_prompt(token_budget),
          {:ok, user_prompt} <- build_user_prompt(conversation, messages),
          {:ok, summary_text} <- call_llm(model, system_prompt, user_prompt, conversation.user_id) do
@@ -164,8 +167,8 @@ defmodule Assistant.Memory.Compaction do
   # Model resolution
   # ---------------------------------------------------------------------------
 
-  defp resolve_compaction_model do
-    case ConfigLoader.model_for(:compaction) do
+  defp resolve_compaction_model(user_id) do
+    case ConfigLoader.model_for(:compaction, user_id: user_id) do
       nil ->
         Logger.error("No model configured for :compaction use case")
         {:error, :no_compaction_model}

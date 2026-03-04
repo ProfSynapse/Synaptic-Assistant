@@ -6,7 +6,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   require Logger
 
   alias Assistant.Accounts
-  alias Assistant.Accounts.SettingsUserAllowlistEntry
+  alias Assistant.Accounts.{SettingsUser, SettingsUserAllowlistEntry}
   alias Assistant.Analytics
   alias Assistant.Auth.TokenStore
   alias Assistant.Config.Loader, as: ConfigLoader
@@ -55,6 +55,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   end
 
   def load_models(socket) do
+    settings_user = Context.current_settings_user(socket)
     {openrouter_key, openai_key, openai_auth_type} = provider_keys(socket)
     openrouter_connected = present?(openrouter_key)
     openai_connected = present?(openai_key)
@@ -65,17 +66,12 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       |> filter_models_for_connected_providers(openrouter_connected, openai_connected)
       |> filter_models_by_provider_availability(openrouter_key, openai_key, openai_auth_type)
 
-    roles = model_roles()
-    explicit_defaults = ModelDefaults.list_defaults()
+    mode = ModelDefaults.mode(settings_user)
+    editable? = ModelDefaults.editable?(settings_user)
+    model_data = model_defaults_editor_data(settings_user, models)
 
-    current_defaults =
-      Enum.reduce(roles, %{}, fn role, acc ->
-        key = Atom.to_string(role.key)
-        value = Map.get(explicit_defaults, key) || resolved_default_model_id(role.key)
-        Map.put(acc, key, value || "")
-      end)
+    {defaults_description, defaults_notice} = model_defaults_copy(mode)
 
-    options = model_options_with_unavailable_defaults(models, current_defaults)
     provider_options = active_model_provider_options(models)
     query = socket.assigns[:active_model_query] || ""
 
@@ -88,6 +84,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     |> assign(:openrouter_connected, openrouter_connected)
     |> assign(:openai_connected, openai_connected)
     |> assign(:catalog_model_ids, catalog_ids)
+    |> assign(:model_catalog_editable, settings_user && settings_user.is_admin == true)
     |> assign(:active_model_all_models, models)
     |> assign(:models, filtered_models)
     |> assign(:active_model_provider, provider)
@@ -96,10 +93,15 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       :active_model_filter_form,
       to_form(%{"q" => query, "provider" => provider}, as: :active_models)
     )
-    |> assign(:model_options, options)
-    |> assign(:model_defaults, current_defaults)
-    |> assign(:model_default_roles, roles)
-    |> assign(:model_defaults_form, to_form(current_defaults, as: :defaults))
+    |> assign(:model_options, model_data.model_options)
+    |> assign(:model_defaults_mode, mode)
+    |> assign(:model_defaults_editable, editable?)
+    |> assign(:model_defaults_description, defaults_description)
+    |> assign(:model_defaults_notice, defaults_notice)
+    |> assign(:model_default_sources, model_data.model_default_sources)
+    |> assign(:model_defaults, model_data.model_defaults)
+    |> assign(:model_default_roles, model_data.model_default_roles)
+    |> assign(:model_defaults_form, to_form(model_data.model_defaults, as: :defaults))
   end
 
   def load_analytics(socket) do
@@ -263,6 +265,15 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     |> maybe_refresh_current_admin_user()
   end
 
+  def admin_user_detail(user_id) when is_binary(user_id) do
+    with {:ok, user} <- Accounts.get_user_for_admin(user_id),
+         %SettingsUser{} = settings_user <- Accounts.get_settings_user(user_id) do
+      {:ok, Map.merge(user, admin_user_model_defaults(settings_user))}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
   def filter_admin_users(users, query) do
     normalized = query |> to_string() |> String.trim() |> String.downcase()
 
@@ -282,7 +293,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         socket
 
       %{id: user_id} ->
-        case Accounts.get_user_for_admin(user_id) do
+        case admin_user_detail(user_id) do
           {:ok, user} -> assign(socket, :current_admin_user, user)
           {:error, :not_found} -> assign(socket, :current_admin_user, nil)
         end
@@ -484,15 +495,88 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     ]
   end
 
-  defp resolved_default_model_id(role) do
+  defp model_defaults_editor_data(settings_user, models) do
+    roles = model_roles()
+    effective_defaults = ModelDefaults.effective_defaults(settings_user)
+
+    current_defaults =
+      Enum.reduce(roles, %{}, fn role, acc ->
+        key = Atom.to_string(role.key)
+
+        value =
+          Map.get(effective_defaults, key) || resolved_default_model_id(role.key, settings_user)
+
+        Map.put(acc, key, value || "")
+      end)
+
+    default_sources =
+      Enum.reduce(roles, %{}, fn role, acc ->
+        Map.put(acc, Atom.to_string(role.key), ModelDefaults.source_for(settings_user, role.key))
+      end)
+
+    %{
+      model_default_roles: roles,
+      model_default_sources: default_sources,
+      model_defaults: current_defaults,
+      model_options: model_options_with_unavailable_defaults(models, current_defaults)
+    }
+  end
+
+  defp admin_user_model_defaults(%SettingsUser{} = settings_user) do
+    model_data = model_defaults_editor_data(settings_user, ModelCatalog.list_models())
+    {description, notice} = admin_user_model_defaults_copy(settings_user)
+
+    %{
+      effective_model_defaults: model_data.model_defaults,
+      model_default_roles: model_data.model_default_roles,
+      model_default_sources: model_data.model_default_sources,
+      model_options: model_data.model_options,
+      model_defaults_description: description,
+      model_defaults_notice: notice,
+      model_defaults_editable: not settings_user.is_admin,
+      model_defaults_resettable: map_size(ModelDefaults.user_defaults(settings_user)) > 0
+    }
+  end
+
+  defp admin_user_model_defaults_copy(%SettingsUser{is_admin: true}) do
+    {"Admin accounts use the app-wide defaults from the Models section.",
+     "User-specific overrides are disabled for admin accounts."}
+  end
+
+  defp admin_user_model_defaults_copy(%SettingsUser{can_manage_model_defaults: true}) do
+    {"Set user-specific defaults for this account. This user can also edit them from their own settings page.",
+     "Changes save automatically. Apply Global Defaults clears every user-specific override."}
+  end
+
+  defp admin_user_model_defaults_copy(%SettingsUser{}) do
+    {"Set user-specific defaults for this account. This user cannot edit them unless you enable access above.",
+     "Changes save automatically. Apply Global Defaults clears every user-specific override."}
+  end
+
+  defp resolved_default_model_id(role, settings_user) do
     try do
-      case ConfigLoader.model_for(role) do
+      case ConfigLoader.model_for(role, settings_user: settings_user) do
         nil -> nil
         model -> model.id
       end
     rescue
       _ -> nil
     end
+  end
+
+  defp model_defaults_copy(:global) do
+    {"Choose the app-wide default model used for each system role.",
+     "Changes save automatically."}
+  end
+
+  defp model_defaults_copy(:personal) do
+    {"Choose personal model overrides for your account. Roles that match the admin defaults continue to inherit them.",
+     "Changes save automatically."}
+  end
+
+  defp model_defaults_copy(:readonly) do
+    {"Your admin controls these defaults. You're viewing the effective model currently applied to your account.",
+     "Managed by your admin."}
   end
 
   defp provider_keys(socket) do

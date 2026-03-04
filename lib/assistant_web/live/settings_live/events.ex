@@ -385,20 +385,24 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("open_model_modal", params, socket) do
-    query =
-      params
-      |> Map.get("query", socket.assigns[:model_library_query] || "")
-      |> to_string()
-      |> String.trim()
+    if socket.assigns.current_scope.settings_user.is_admin do
+      query =
+        params
+        |> Map.get("query", socket.assigns[:model_library_query] || "")
+        |> to_string()
+        |> String.trim()
 
-    socket =
-      socket
-      |> assign(:model_modal_open, true)
-      |> assign(:model_library_query, query)
-      |> assign(:model_library_form, to_form(%{"q" => query}, as: :model_library))
-      |> load_model_library()
+      socket =
+        socket
+        |> assign(:model_modal_open, true)
+        |> assign(:model_library_query, query)
+        |> assign(:model_library_form, to_form(%{"q" => query}, as: :model_library))
+        |> load_model_library()
 
-    {:noreply, socket}
+      {:noreply, socket}
+    else
+      {:noreply, put_flash(socket, :error, "Only admins can manage the model catalog.")}
+    end
   end
 
   def handle_event("close_model_modal", _params, socket) do
@@ -445,75 +449,78 @@ defmodule AssistantWeb.SettingsLive.Events do
      |> assign(:models, Loaders.filter_active_models(all_models, query, normalized_provider))}
   end
 
+  def handle_event("change_model_defaults", %{"defaults" => params}, socket) do
+    {:noreply, persist_model_defaults(socket, params)}
+  end
+
   def handle_event("refresh_model_library", _params, socket) do
     {:noreply, load_model_library(socket)}
   end
 
   def handle_event("save_model", %{"model" => params}, socket) do
-    case ModelCatalog.add_model(params) do
-      {:ok, _model} ->
-        {:noreply,
-         socket
-         |> assign(:model_modal_open, false)
-         |> Loaders.load_models()
-         |> put_flash(:info, "Model catalog saved")}
+    if socket.assigns.current_scope.settings_user.is_admin do
+      case ModelCatalog.add_model(params) do
+        {:ok, _model} ->
+          {:noreply,
+           socket
+           |> assign(:model_modal_open, false)
+           |> Loaders.load_models()
+           |> put_flash(:info, "Model catalog saved")}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to save model: #{inspect(reason)}")}
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to save model: #{inspect(reason)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Only admins can manage the model catalog.")}
     end
   end
 
   def handle_event("add_model_from_library", params, socket) do
-    attrs = %{
-      "id" => Map.get(params, "id", ""),
-      "name" => Map.get(params, "name", ""),
-      "input_cost" => Map.get(params, "input_cost", "n/a"),
-      "output_cost" => Map.get(params, "output_cost", "n/a"),
-      "max_context_tokens" => Map.get(params, "max_context_tokens", "n/a")
-    }
+    if socket.assigns.current_scope.settings_user.is_admin do
+      attrs = %{
+        "id" => Map.get(params, "id", ""),
+        "name" => Map.get(params, "name", ""),
+        "input_cost" => Map.get(params, "input_cost", "n/a"),
+        "output_cost" => Map.get(params, "output_cost", "n/a"),
+        "max_context_tokens" => Map.get(params, "max_context_tokens", "n/a")
+      }
 
-    case ModelCatalog.add_model(attrs) do
-      {:ok, _model} ->
-        {:noreply,
-         socket
-         |> Loaders.load_models()
-         |> maybe_reload_model_library()
-         |> put_flash(:info, "Model added to your catalog")}
+      case ModelCatalog.add_model(attrs) do
+        {:ok, _model} ->
+          {:noreply,
+           socket
+           |> Loaders.load_models()
+           |> maybe_reload_model_library()
+           |> put_flash(:info, "Model added to your catalog")}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to add model: #{inspect(reason)}")}
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to add model: #{inspect(reason)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Only admins can manage the model catalog.")}
     end
   end
 
   def handle_event("remove_model_from_catalog", %{"id" => model_id}, socket) do
-    case ModelCatalog.remove_model(model_id) do
-      :ok ->
-        {:noreply,
-         socket
-         |> Loaders.load_models()
-         |> maybe_reload_model_library()
-         |> put_flash(:info, "Model removed from your catalog")}
+    if socket.assigns.current_scope.settings_user.is_admin do
+      case ModelCatalog.remove_model(model_id) do
+        :ok ->
+          {:noreply,
+           socket
+           |> Loaders.load_models()
+           |> maybe_reload_model_library()
+           |> put_flash(:info, "Model removed from your catalog")}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to remove model: #{inspect(reason)}")}
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to remove model: #{inspect(reason)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Only admins can manage the model catalog.")}
     end
   end
 
   def handle_event("save_model_defaults", %{"defaults" => params}, socket) do
-    merged_defaults =
-      ModelDefaults.list_defaults()
-      |> Map.merge(params)
-
-    case ModelDefaults.save_defaults(merged_defaults) do
-      :ok ->
-        {:noreply,
-         socket
-         |> Loaders.load_models()
-         |> put_flash(:info, "Default models updated")}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to save defaults: #{inspect(reason)}")}
-    end
+    {:noreply, persist_model_defaults(socket, params, flash?: true)}
   end
 
   def handle_event("toggle_skill_permission", %{"skill" => skill, "enabled" => enabled}, socket) do
@@ -752,7 +759,7 @@ defmodule AssistantWeb.SettingsLive.Events do
     unless socket.assigns.current_scope.settings_user.is_admin do
       {:noreply, put_flash(socket, :error, "Not authorized.")}
     else
-      case Accounts.get_user_for_admin(user_id) do
+      case Loaders.admin_user_detail(user_id) do
         {:ok, user} ->
           {:noreply, assign(socket, :current_admin_user, user)}
 
@@ -793,6 +800,56 @@ defmodule AssistantWeb.SettingsLive.Events do
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Unable to update user status.")}
       end
+    end
+  end
+
+  def handle_event(
+        "toggle_user_model_defaults_access",
+        %{"id" => user_id, "enabled" => enabled},
+        socket
+      ) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      enabled? = enabled == "true"
+
+      case Accounts.toggle_user_model_defaults_access(user_id, enabled?) do
+        {:ok, _user} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Model defaults access updated.")
+           |> Loaders.reload_admin_users()}
+
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "User not found.")}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to update model defaults access.")}
+      end
+    end
+  end
+
+  def handle_event(
+        "change_admin_user_model_defaults",
+        %{"user_id" => user_id, "defaults" => params},
+        socket
+      ) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      {:noreply, persist_admin_user_model_defaults(socket, user_id, params)}
+    end
+  end
+
+  def handle_event("apply_global_admin_user_model_defaults", %{"id" => user_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      {:noreply,
+       persist_admin_user_model_defaults(socket, user_id, %{},
+         flash: "User defaults reset to global defaults.",
+         replace?: true
+       )}
     end
   end
 
@@ -1157,6 +1214,90 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   defp api_key_form(form_name) do
     to_form(%{"api_key" => ""}, as: form_name)
+  end
+
+  defp persist_model_defaults(socket, params, opts \\ []) when is_map(params) do
+    case Context.current_settings_user(socket) do
+      nil ->
+        put_flash(socket, :error, "You must be logged in.")
+
+      settings_user ->
+        base_defaults =
+          case ModelDefaults.mode(settings_user) do
+            :global -> ModelDefaults.global_defaults()
+            :personal -> ModelDefaults.user_defaults(settings_user)
+            :readonly -> %{}
+          end
+
+        merged_defaults =
+          base_defaults
+          |> Map.merge(params)
+
+        case ModelDefaults.save_defaults(settings_user, merged_defaults) do
+          :ok ->
+            updated_socket =
+              socket
+              |> reload_current_user_scope()
+              |> Loaders.load_models()
+
+            if Keyword.get(opts, :flash?, false) do
+              put_flash(updated_socket, :info, "Default models updated")
+            else
+              updated_socket
+            end
+
+          {:error, :not_authorized} ->
+            put_flash(socket, :error, "You do not have permission to update model defaults.")
+
+          {:error, reason} ->
+            put_flash(socket, :error, "Failed to save defaults: #{inspect(reason)}")
+        end
+    end
+  end
+
+  defp persist_admin_user_model_defaults(socket, user_id, params, opts \\ [])
+       when is_map(params) do
+    actor = Context.current_settings_user(socket)
+    target = Accounts.get_settings_user(user_id)
+
+    cond do
+      is_nil(actor) ->
+        put_flash(socket, :error, "You must be logged in.")
+
+      is_nil(target) ->
+        put_flash(socket, :error, "User not found.")
+
+      true ->
+        merged_defaults =
+          if Keyword.get(opts, :replace?, false) do
+            params
+          else
+            target
+            |> ModelDefaults.user_defaults()
+            |> Map.merge(params)
+          end
+
+        case ModelDefaults.save_defaults(actor, target, merged_defaults) do
+          :ok ->
+            updated_socket = Loaders.reload_admin_users(socket)
+
+            case Keyword.get(opts, :flash) do
+              message when is_binary(message) -> put_flash(updated_socket, :info, message)
+              _ -> updated_socket
+            end
+
+          {:error, :not_authorized} ->
+            socket
+            |> Loaders.reload_admin_users()
+            |> put_flash(
+              :error,
+              "You do not have permission to update this user's model defaults."
+            )
+
+          {:error, reason} ->
+            put_flash(socket, :error, "Failed to save user defaults: #{inspect(reason)}")
+        end
+    end
   end
 
   defp load_model_library(socket) do

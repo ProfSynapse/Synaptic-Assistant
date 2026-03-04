@@ -680,7 +680,7 @@ defmodule Assistant.Orchestrator.Engine do
         :ok
 
       prompt_tokens when is_integer(prompt_tokens) and prompt_tokens > 0 ->
-        model = ConfigLoader.model_for(:orchestrator)
+        model = ConfigLoader.model_for(:orchestrator, user_id: state.user_id)
         max_tokens = (model && model.max_context_tokens) || 200_000
         utilization = prompt_tokens / max_tokens
 
@@ -738,7 +738,7 @@ defmodule Assistant.Orchestrator.Engine do
   # Enqueues a background Oban job to export the current turn as JSONL.
   # Fire-and-forget: failures are logged but never affect the user response.
   defp enqueue_trajectory_export(state, user_message, assistant_response) do
-    model = ConfigLoader.model_for(:orchestrator)
+    model = ConfigLoader.model_for(:orchestrator, user_id: state.user_id)
     model_id = if model, do: model.id, else: nil
 
     # Serialize messages for the Oban job args (must be JSON-encodable).

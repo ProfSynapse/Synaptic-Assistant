@@ -239,7 +239,10 @@ defmodule Assistant.Memory.Store do
       {:ok, results} ->
         inserted =
           results
-          |> Enum.filter(fn {{:message, _idx}, _msg} -> true; _ -> false end)
+          |> Enum.filter(fn
+            {{:message, _idx}, _msg} -> true
+            _ -> false
+          end)
           |> Enum.sort_by(fn {{:message, idx}, _msg} -> idx end)
           |> Enum.map(fn {_key, msg} -> msg end)
 
@@ -572,7 +575,10 @@ defmodule Assistant.Memory.Store do
       {:ok, list_memory_entries(Keyword.put(opts, :user_id, target_user_id))}
     else
       if is_admin do
-        Logger.info("Admin memory access: admin=#{requesting_user_id} viewing user=#{target_user_id}")
+        Logger.info(
+          "Admin memory access: admin=#{requesting_user_id} viewing user=#{target_user_id}"
+        )
+
         {:ok, list_memory_entries(Keyword.put(opts, :user_id, target_user_id))}
       else
         {:error, :unauthorized}
@@ -604,7 +610,9 @@ defmodule Assistant.Memory.Store do
       {:error, :unauthorized}
     else
       if target_user_id != requesting_user_id do
-        Logger.info("Admin conversation access: admin=#{requesting_user_id} viewing user=#{target_user_id}")
+        Logger.info(
+          "Admin conversation access: admin=#{requesting_user_id} viewing user=#{target_user_id}"
+        )
       end
 
       limit = Keyword.get(opts, :limit, 20)

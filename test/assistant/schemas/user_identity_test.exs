@@ -143,9 +143,9 @@ defmodule Assistant.Schemas.UserIdentityTest do
                })
                |> Repo.insert()
 
+      # The unique_constraint name maps to the composite key
       assert errors_on(cs)[:channel] != nil ||
                errors_on(cs)[:external_id] != nil ||
-               # The unique_constraint name maps to the composite key
                Enum.any?(cs.errors, fn {_field, {_msg, opts}} ->
                  Keyword.get(opts, :constraint) == :unique
                end)

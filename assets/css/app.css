@@ -1088,11 +1088,6 @@ a {
   background: transparent;
 }
 
-.sa-model-defaults-actions {
-  display: flex;
-  justify-content: flex-start;
-}
-
 .sa-role-tooltip {
   position: relative;
   display: inline-flex;

@@ -69,7 +69,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
 
     model =
       case Keyword.get(opts, :model) do
-        nil -> LLMHelpers.resolve_model(:orchestrator)
+        nil -> LLMHelpers.resolve_model(:orchestrator, user_id: loop_state[:user_id])
         override -> override
       end
 

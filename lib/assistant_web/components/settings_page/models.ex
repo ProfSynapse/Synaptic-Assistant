@@ -122,11 +122,12 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
 
       <div class="sa-card">
         <h2>Role Defaults</h2>
-        <p class="sa-muted">Choose the default model used for each system role.</p>
+        <p class="sa-muted">{@model_defaults_description}</p>
 
         <.form
           for={@model_defaults_form}
           id="model-defaults-form"
+          phx-change="change_model_defaults"
           phx-submit="save_model_defaults"
           class="sa-model-defaults-form"
         >
@@ -135,6 +136,9 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
               <div class="sa-model-default-meta">
                 <div class="sa-model-default-title">
                   <span class="sa-model-default-role">{role.label}</span>
+                  <span class="sa-muted" style="font-size: 0.8rem;">
+                    {model_default_source_label(@model_default_sources, @model_defaults_mode, role.key)}
+                  </span>
                   <button
                     type="button"
                     class="sa-role-tooltip"
@@ -156,23 +160,30 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
                   options={@model_options}
                   selected={Map.get(@model_defaults, Atom.to_string(role.key))}
                   prompt="Select model"
+                  disabled={!@model_defaults_editable}
                 />
               </div>
             </div>
           </div>
-          <div class="sa-model-defaults-actions">
-            <button type="submit" class="sa-btn">Save Defaults</button>
-          </div>
+          <p class="sa-muted">{@model_defaults_notice}</p>
         </.form>
       </div>
 
       <div class="sa-card">
         <div class="sa-row">
           <h2>Active Model List</h2>
-          <button class="sa-btn secondary" type="button" phx-click="open_model_modal">
+          <button
+            :if={@model_catalog_editable}
+            class="sa-btn secondary"
+            type="button"
+            phx-click="open_model_modal"
+          >
             <.icon name="hero-plus" class="h-4 w-4" /> Add Model
           </button>
         </div>
+        <p :if={!@model_catalog_editable} class="sa-muted">
+          Admins manage the shared model catalog. You can still use any models already in the list above.
+        </p>
 
         <.form
           for={@active_model_filter_form}
@@ -230,6 +241,7 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
                 <td>{model.max_context_tokens}</td>
                 <td>
                   <button
+                    :if={@model_catalog_editable}
                     type="button"
                     class="sa-icon-btn danger"
                     phx-click="remove_model_from_catalog"
@@ -244,10 +256,10 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
               </tr>
             </tbody>
           </table>
-        </div>
+      </div>
 
-        <.modal
-          :if={@model_modal_open}
+      <.modal
+          :if={@model_modal_open and @model_catalog_editable}
           id="model-modal"
           title="Add OpenRouter Models"
           max_width="xl"
@@ -331,5 +343,14 @@ defmodule AssistantWeb.Components.SettingsPage.Models do
       </div>
     </div>
     """
+  end
+
+  defp model_default_source_label(source_map, mode, role_key) do
+    case Map.get(source_map || %{}, Atom.to_string(role_key), :system) do
+      :user when mode == :personal -> "Your override"
+      :user -> "Admin override"
+      :global -> "Admin default"
+      :system -> "System fallback"
+    end
   end
 end

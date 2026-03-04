@@ -229,6 +229,33 @@ defmodule AssistantWeb.AdminUserManagementTest do
       assert html =~ "OpenAI API Key"
     end
 
+    test "detail view shows personal model defaults control", %{conn: conn} do
+      target = create_target_user(%{email: "model-access-view@example.com"})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+
+      html =
+        lv
+        |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+        |> render_click()
+
+      assert html =~ "Can Manage Personal Model Defaults"
+    end
+
+    test "detail view shows user model defaults editor", %{conn: conn} do
+      target = create_target_user(%{email: "user-model-defaults-view@example.com"})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+
+      html =
+        lv
+        |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+        |> render_click()
+
+      assert html =~ "User Model Defaults"
+      assert html =~ "Changes save automatically."
+    end
+
     test "detail view shows user metadata fields", %{conn: conn} do
       target = create_target_user(%{email: "metadata-view@example.com"})
 
@@ -337,6 +364,96 @@ defmodule AssistantWeb.AdminUserManagementTest do
       html = render_click(lv, "toggle_user_disabled", %{"id" => fake_id})
 
       assert html =~ "User not found"
+    end
+  end
+
+  describe "toggle_user_model_defaults_access event" do
+    test "enables personal model defaults access and shows flash", %{conn: conn} do
+      target = create_target_user(%{email: "model-access@example.com"})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html =
+        render_click(lv, "toggle_user_model_defaults_access", %{
+          "id" => target.id,
+          "enabled" => "true"
+        })
+
+      assert html =~ "Model defaults access updated"
+      assert Accounts.get_settings_user!(target.id).can_manage_model_defaults
+    end
+
+    test "disables personal model defaults access and shows flash", %{conn: conn} do
+      target = create_target_user(%{email: "model-access-off@example.com"})
+
+      target
+      |> Ecto.Changeset.change(can_manage_model_defaults: true)
+      |> Assistant.Repo.update!()
+
+      {:ok, lv, _html} = live(conn, admin_path())
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html =
+        render_click(lv, "toggle_user_model_defaults_access", %{
+          "id" => target.id,
+          "enabled" => "false"
+        })
+
+      assert html =~ "Model defaults access updated"
+      refute Accounts.get_settings_user!(target.id).can_manage_model_defaults
+    end
+  end
+
+  describe "admin-managed user model defaults" do
+    test "admin can save per-user defaults even when self-management is disabled", %{conn: conn} do
+      target = create_target_user(%{email: "admin-managed-defaults@example.com"})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html =
+        lv
+        |> form("#admin-user-model-defaults-form-#{target.id}", %{
+          "user_id" => target.id,
+          "defaults" => %{"orchestrator" => "openai/gpt-5.2"}
+        })
+        |> render_change()
+
+      assert html =~ "User Model Defaults"
+
+      assert Accounts.get_settings_user!(target.id).model_defaults == %{
+               "orchestrator" => "openai/gpt-5.2"
+             }
+    end
+
+    test "apply global defaults clears a user's scoped overrides", %{conn: conn} do
+      target = create_target_user(%{email: "clear-user-defaults@example.com"})
+
+      target
+      |> Ecto.Changeset.change(model_defaults: %{"orchestrator" => "openai/gpt-5.2"})
+      |> Assistant.Repo.update!()
+
+      {:ok, lv, _html} = live(conn, admin_path())
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html =
+        render_click(lv, "apply_global_admin_user_model_defaults", %{"id" => target.id})
+
+      assert html =~ "User defaults reset to global defaults"
+      assert Accounts.get_settings_user!(target.id).model_defaults == %{}
     end
   end
 

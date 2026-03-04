@@ -253,7 +253,7 @@ defmodule Assistant.Orchestrator.Context do
       end
 
     # Compute available token budget from model context window and limits config
-    token_budget = compute_history_token_budget(role)
+    token_budget = compute_history_token_budget(role, loop_state)
     last_prompt_tokens = loop_state[:last_prompt_tokens]
     last_message_count = loop_state[:last_message_count] || 0
 
@@ -262,11 +262,12 @@ defmodule Assistant.Orchestrator.Context do
     context_messages ++ trimmed
   end
 
-  defp compute_history_token_budget(role) do
+  defp compute_history_token_budget(role, loop_state) do
     limits = ConfigLoader.limits_config()
+    user_id = loop_state[:user_id]
 
     max_context =
-      case ConfigLoader.model_for(role) do
+      case ConfigLoader.model_for(role, user_id: user_id) do
         %{max_context_tokens: tokens} -> tokens
         nil -> 200_000
       end

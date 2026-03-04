@@ -296,6 +296,7 @@ defmodule Assistant.Memory.CompactionTest do
 
   describe "module API" do
     test "compact/1 and compact/2 are exported" do
+      Code.ensure_loaded!(Compaction)
       assert function_exported?(Compaction, :compact, 1)
       assert function_exported?(Compaction, :compact, 2)
     end

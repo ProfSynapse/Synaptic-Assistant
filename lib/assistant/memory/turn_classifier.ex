@@ -128,7 +128,7 @@ defmodule Assistant.Memory.TurnClassifier do
       |> String.replace("{{user_message}}", truncate(user_message, 2000))
       |> String.replace("{{assistant_response}}", truncate(assistant_response, 2000))
 
-    model = resolve_classification_model()
+    model = resolve_classification_model(user_id)
 
     messages = [
       %{role: "user", content: prompt}
@@ -241,14 +241,14 @@ defmodule Assistant.Memory.TurnClassifier do
 
   @hardcoded_fallback_model "openai/gpt-5-mini"
 
-  defp resolve_classification_model do
+  defp resolve_classification_model(user_id) do
     # Prefer sentinel role (cheapest fast-tier model), fall back to compaction, then hardcoded
-    case ConfigLoader.model_for(:sentinel) do
+    case ConfigLoader.model_for(:sentinel, user_id: user_id) do
       %{id: id} ->
         id
 
       nil ->
-        case ConfigLoader.model_for(:compaction) do
+        case ConfigLoader.model_for(:compaction, user_id: user_id) do
           %{id: id} -> id
           nil -> @hardcoded_fallback_model
         end

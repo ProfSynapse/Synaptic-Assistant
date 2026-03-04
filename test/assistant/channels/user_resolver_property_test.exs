@@ -56,7 +56,13 @@ defmodule Assistant.Channels.UserResolverPropertyTest do
           len <- integer(1..20),
           chars <-
             list_of(
-              one_of([integer(?a..?z), integer(?A..?Z), integer(?0..?9), constant(?_), constant(?-)]),
+              one_of([
+                integer(?a..?z),
+                integer(?A..?Z),
+                integer(?0..?9),
+                constant(?_),
+                constant(?-)
+              ]),
               length: len
             )
         ) do

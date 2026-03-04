@@ -39,9 +39,9 @@ defmodule Assistant.Orchestrator.LLMHelpers do
 
     * A model ID string, or `nil`
   """
-  @spec resolve_model(atom()) :: String.t() | nil
-  def resolve_model(role) do
-    case ConfigLoader.model_for(role) do
+  @spec resolve_model(atom(), keyword()) :: String.t() | nil
+  def resolve_model(role, opts \\ []) do
+    case ConfigLoader.model_for(role, opts) do
       %{id: id} -> id
       nil -> nil
     end
