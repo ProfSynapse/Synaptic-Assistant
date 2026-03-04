@@ -117,7 +117,7 @@ defmodule AssistantWeb.GoogleChatController do
   # Uses a Task with timeout to stay within Google Chat's ~30s deadline.
   defp handle_normalized(conn, message, params) do
     Logger.info(
-      "Google Chat message received: user_id=#{inspect(message.user_id)} space_id=#{inspect(message.space_id)} event=#{message.metadata["event_type"]}"
+      "Google Chat message received: user_id=#{inspect(message.user_id)} space_id=#{inspect(message.space_id)} email=#{inspect(message.user_email)} event=#{message.metadata["event_type"]}"
     )
 
     response_text = sync_dispatch_with_timeout(message)

@@ -414,6 +414,125 @@ defmodule Assistant.Channels.GoogleChatTest do
   end
 
   # ---------------------------------------------------------------
+  # v2 JWT email fallback (authorizationEventObject.userIdToken)
+  # ---------------------------------------------------------------
+
+  describe "normalize/1 v2 JWT email fallback" do
+    test "extracts email from userIdToken when chat.user has no email" do
+      event = build_v2_message_event(%{}, user_email: nil, id_token_email: "jwt@example.com")
+
+      {:ok, msg} = GoogleChat.normalize(event)
+
+      assert msg.user_email == "jwt@example.com"
+    end
+
+    test "prefers chat.user email over JWT email when both present" do
+      event =
+        build_v2_message_event(%{}, user_email: "user@example.com", id_token_email: "jwt@example.com")
+
+      {:ok, msg} = GoogleChat.normalize(event)
+
+      assert msg.user_email == "user@example.com"
+    end
+
+    test "returns nil email when neither chat.user nor JWT provides email" do
+      event = build_v2_message_event(%{}, user_email: nil)
+
+      {:ok, msg} = GoogleChat.normalize(event)
+
+      assert msg.user_email == nil
+    end
+
+    test "handles malformed JWT (not 3 segments) gracefully" do
+      event =
+        build_v2_message_event(%{}, user_email: nil)
+        |> Map.put("authorizationEventObject", %{"userIdToken" => "not-a-jwt"})
+
+      {:ok, msg} = GoogleChat.normalize(event)
+
+      assert msg.user_email == nil
+    end
+
+    test "handles JWT with invalid base64 payload gracefully" do
+      event =
+        build_v2_message_event(%{}, user_email: nil)
+        |> Map.put("authorizationEventObject", %{"userIdToken" => "aaa.!!!invalid!!!.bbb"})
+
+      {:ok, msg} = GoogleChat.normalize(event)
+
+      assert msg.user_email == nil
+    end
+
+    test "handles JWT payload missing email claim" do
+      jwt = build_test_jwt(%{"sub" => "12345", "name" => "Jane"})
+
+      event =
+        build_v2_message_event(%{}, user_email: nil)
+        |> Map.put("authorizationEventObject", %{"userIdToken" => jwt})
+
+      {:ok, msg} = GoogleChat.normalize(event)
+
+      assert msg.user_email == nil
+    end
+
+    test "extracts email from JWT for v2 APP_COMMAND events" do
+      event = %{
+        "commonEventObject" => %{"parameters" => %{}},
+        "authorizationEventObject" => %{
+          "userIdToken" => build_test_jwt(%{"email" => "cmd@example.com"})
+        },
+        "chat" => %{
+          "user" => %{"name" => "users/1", "displayName" => "Jane"},
+          "eventTime" => "2026-02-18T10:00:00Z",
+          "appCommandPayload" => %{
+            "appCommandMetadata" => %{"commandId" => "1", "commandType" => "SLASH_COMMAND"}
+          },
+          "messagePayload" => %{
+            "message" => %{
+              "name" => "spaces/AAAA/messages/cmd1",
+              "text" => "/search report",
+              "argumentText" => "report",
+              "sender" => %{"name" => "users/1"},
+              "thread" => %{"name" => "spaces/AAAA/threads/t2"}
+            },
+            "space" => %{"name" => "spaces/AAAA", "type" => "DM"}
+          }
+        }
+      }
+
+      {:ok, msg} = GoogleChat.normalize(event)
+
+      assert msg.user_email == "cmd@example.com"
+      assert msg.metadata["event_type"] == "APP_COMMAND"
+    end
+
+    test "extracts email from JWT for v2 ADDED_TO_SPACE events" do
+      event = %{
+        "commonEventObject" => %{},
+        "authorizationEventObject" => %{
+          "userIdToken" => build_test_jwt(%{"email" => "added@example.com"})
+        },
+        "chat" => %{
+          "user" => %{"name" => "users/99", "displayName" => "Admin"},
+          "eventTime" => "2026-02-18T12:00:00Z",
+          "addedToSpacePayload" => %{
+            "space" => %{
+              "name" => "spaces/BBBB",
+              "type" => "ROOM",
+              "displayName" => "Project Room"
+            }
+          }
+        }
+      }
+
+      {:ok, msg} = GoogleChat.normalize(event)
+
+      assert msg.user_email == "added@example.com"
+      assert msg.metadata["event_type"] == "ADDED_TO_SPACE"
+    end
+  end
+
+  # ---------------------------------------------------------------
   # v2 APP_COMMAND event
   # ---------------------------------------------------------------
 
@@ -610,7 +729,14 @@ defmodule Assistant.Channels.GoogleChatTest do
 
   # Build a v2 (Workspace Add-on) format message event.
   # Accepts overrides for the messagePayload fields (message, space).
-  defp build_v2_message_event(payload_overrides \\ %{}) do
+  # Options:
+  #   - payload_overrides: map with "message" and/or "space" keys
+  #   - opts: keyword list with :user_email (email in chat.user, default "jane@example.com"),
+  #           :id_token_email (email in JWT, default nil — no authorizationEventObject added)
+  defp build_v2_message_event(payload_overrides \\ %{}, opts \\ []) do
+    user_email = Keyword.get(opts, :user_email, "jane@example.com")
+    id_token_email = Keyword.get(opts, :id_token_email)
+
     base_message = %{
       "name" => "spaces/AAAA/messages/msg1",
       "text" => "Hello from v2",
@@ -630,14 +756,14 @@ defmodule Assistant.Channels.GoogleChatTest do
     message = Map.get(payload_overrides, "message", base_message)
     space = Map.get(payload_overrides, "space", base_space)
 
-    %{
+    user =
+      %{"name" => "users/12345", "displayName" => "Jane Doe"}
+      |> then(fn u -> if user_email, do: Map.put(u, "email", user_email), else: u end)
+
+    event = %{
       "commonEventObject" => %{"parameters" => %{}},
       "chat" => %{
-        "user" => %{
-          "name" => "users/12345",
-          "displayName" => "Jane Doe",
-          "email" => "jane@example.com"
-        },
+        "user" => user,
         "eventTime" => "2026-02-18T10:00:00Z",
         "messagePayload" => %{
           "message" => message,
@@ -645,5 +771,22 @@ defmodule Assistant.Channels.GoogleChatTest do
         }
       }
     }
+
+    if id_token_email do
+      Map.put(event, "authorizationEventObject", %{
+        "userIdToken" => build_test_jwt(%{"email" => id_token_email})
+      })
+    else
+      event
+    end
+  end
+
+  # Build a minimal unsigned JWT with the given claims payload.
+  # Structure: base64url(header).base64url(payload).signature
+  defp build_test_jwt(claims) do
+    header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "typ" => "JWT"}), padding: false)
+    payload = Base.url_encode64(Jason.encode!(claims), padding: false)
+    signature = Base.url_encode64("fake-signature", padding: false)
+    "#{header}.#{payload}.#{signature}"
   end
 end

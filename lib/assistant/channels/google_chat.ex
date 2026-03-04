@@ -75,16 +75,16 @@ defmodule Assistant.Channels.GoogleChat do
   # command events may include BOTH keys (the messagePayload carries the
   # triggering message). The more specific payload takes priority.
 
-  def normalize(%{"chat" => %{"appCommandPayload" => _payload} = chat} = _event) do
-    normalize_v2_app_command(chat)
+  def normalize(%{"chat" => %{"appCommandPayload" => _payload} = chat} = event) do
+    normalize_v2_app_command(chat, event)
   end
 
-  def normalize(%{"chat" => %{"messagePayload" => _payload} = chat} = _event) do
-    normalize_v2_message(chat)
+  def normalize(%{"chat" => %{"messagePayload" => _payload} = chat} = event) do
+    normalize_v2_message(chat, event)
   end
 
-  def normalize(%{"chat" => %{"addedToSpacePayload" => _payload} = chat} = _event) do
-    normalize_v2_added_to_space(chat)
+  def normalize(%{"chat" => %{"addedToSpacePayload" => _payload} = chat} = event) do
+    normalize_v2_added_to_space(chat, event)
   end
 
   def normalize(%{"chat" => %{"removedFromSpacePayload" => payload} = chat}) do
@@ -218,7 +218,7 @@ defmodule Assistant.Channels.GoogleChat do
 
   # --- v2 Normalizers ---
 
-  defp normalize_v2_message(chat) do
+  defp normalize_v2_message(chat, event) do
     payload = chat["messagePayload"] || %{}
     message = payload["message"] || %{}
     user = chat["user"] || message["sender"] || %{}
@@ -227,6 +227,7 @@ defmodule Assistant.Channels.GoogleChat do
 
     slash_command = extract_slash_command(message)
     content = message["argumentText"] || message["text"] || ""
+    email = user["email"] || extract_email_from_id_token(event)
 
     {:ok,
      %Message{
@@ -237,7 +238,7 @@ defmodule Assistant.Channels.GoogleChat do
        thread_id: thread,
        user_id: user["name"] || "",
        user_display_name: user["displayName"],
-       user_email: user["email"],
+       user_email: email,
        content: String.trim(content),
        argument_text: message["argumentText"],
        slash_command: slash_command,
@@ -252,7 +253,7 @@ defmodule Assistant.Channels.GoogleChat do
      }}
   end
 
-  defp normalize_v2_app_command(chat) do
+  defp normalize_v2_app_command(chat, event) do
     # v2 appCommandPayload contains appCommandMetadata and may also have
     # a messagePayload sibling with the triggering message
     payload = chat["appCommandPayload"] || %{}
@@ -267,6 +268,7 @@ defmodule Assistant.Channels.GoogleChat do
 
     slash_command = extract_slash_command(message)
     content = message["argumentText"] || message["text"] || ""
+    email = user["email"] || extract_email_from_id_token(event)
 
     {:ok,
      %Message{
@@ -277,7 +279,7 @@ defmodule Assistant.Channels.GoogleChat do
        thread_id: thread,
        user_id: user["name"] || "",
        user_display_name: user["displayName"],
-       user_email: user["email"],
+       user_email: email,
        content: String.trim(content),
        argument_text: message["argumentText"],
        slash_command: slash_command,
@@ -292,10 +294,11 @@ defmodule Assistant.Channels.GoogleChat do
      }}
   end
 
-  defp normalize_v2_added_to_space(chat) do
+  defp normalize_v2_added_to_space(chat, event) do
     payload = chat["addedToSpacePayload"] || %{}
     user = chat["user"] || %{}
     space = payload["space"] || %{}
+    email = user["email"] || extract_email_from_id_token(event)
 
     {:ok,
      %Message{
@@ -306,7 +309,7 @@ defmodule Assistant.Channels.GoogleChat do
        thread_id: nil,
        user_id: user["name"] || "",
        user_display_name: user["displayName"],
-       user_email: user["email"],
+       user_email: email,
        content: "",
        argument_text: nil,
        slash_command: nil,
@@ -381,6 +384,40 @@ defmodule Assistant.Channels.GoogleChat do
   end
 
   # --- Helpers ---
+
+  # Extract the user's email from the authorizationEventObject.userIdToken JWT.
+  # v2 Workspace Add-on events may not include the email in chat.user, but the
+  # OIDC id_token in authorizationEventObject always contains the email claim.
+  # No signature verification needed — the GoogleChatAuth plug already verified
+  # the webhook JWT.
+  defp extract_email_from_id_token(event) do
+    with id_token when is_binary(id_token) <-
+           get_in(event, ["authorizationEventObject", "userIdToken"]),
+         {:ok, email} <- decode_jwt_email(id_token) do
+      email
+    else
+      _ -> nil
+    end
+  end
+
+  defp decode_jwt_email(jwt) do
+    case String.split(jwt, ".") do
+      [_header, payload, _signature] ->
+        with {:ok, json} <- Base.url_decode64(payload, padding: false),
+             {:ok, claims} <- Jason.decode(json),
+             email when is_binary(email) <- claims["email"] do
+          {:ok, email}
+        else
+          _ ->
+            Logger.warning("Failed to decode email from userIdToken JWT payload")
+            :error
+        end
+
+      _ ->
+        Logger.warning("Invalid JWT format in userIdToken: expected 3 segments")
+        :error
+    end
+  end
 
   # Extract the slash command name from annotations if present.
   defp extract_slash_command(%{"annotations" => annotations}) when is_list(annotations) do
