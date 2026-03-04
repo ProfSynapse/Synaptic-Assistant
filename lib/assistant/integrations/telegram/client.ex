@@ -115,10 +115,15 @@ defmodule Assistant.Integrations.Telegram.Client do
     get("getMe")
   end
 
+  @spec get_me(String.t()) :: {:ok, map()} | {:error, term()}
+  def get_me(bot_token) when is_binary(bot_token) do
+    get("getMe", bot_token)
+  end
+
   # --- HTTP Helpers ---
 
-  defp post(method, body) do
-    with {:ok, token} <- get_token() do
+  defp post(method, body, bot_token \\ nil) do
+    with {:ok, token} <- resolve_token(bot_token) do
       url = "#{base_url()}/bot#{token}/#{method}"
 
       case Req.post(url, json: body) do
@@ -154,8 +159,8 @@ defmodule Assistant.Integrations.Telegram.Client do
     end
   end
 
-  defp get(method) do
-    with {:ok, token} <- get_token() do
+  defp get(method, bot_token \\ nil) do
+    with {:ok, token} <- resolve_token(bot_token) do
       url = "#{base_url()}/bot#{token}/#{method}"
 
       case Req.get(url) do
@@ -205,6 +210,11 @@ defmodule Assistant.Integrations.Telegram.Client do
         {:ok, token}
     end
   end
+
+  defp resolve_token(bot_token) when is_binary(bot_token) and bot_token != "",
+    do: {:ok, bot_token}
+
+  defp resolve_token(_bot_token), do: get_token()
 
   defp truncate_message(text) do
     if String.length(text) <= @max_message_length do

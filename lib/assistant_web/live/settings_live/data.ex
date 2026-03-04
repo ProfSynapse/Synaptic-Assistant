@@ -32,8 +32,9 @@ defmodule AssistantWeb.SettingsLive.Data do
       setup_instructions: [
         "Open @BotFather on Telegram",
         "Create a new bot with /newbot",
-        "Copy the bot token provided by BotFather",
-        "Set a webhook secret (any random string) for verification"
+        "Copy the bot token provided by BotFather into this page",
+        "Use the generated connect link to attach your Telegram account",
+        "Only linked Telegram accounts will be able to chat with the bot"
       ],
       portal_url: "https://t.me/BotFather",
       docs_url: "https://core.telegram.org/bots/tutorial"

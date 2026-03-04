@@ -65,7 +65,7 @@ defmodule Assistant.Integrations.Telegram.WebhookManager do
     webhook_secret = IntegrationSettings.get(:telegram_webhook_secret)
 
     cond do
-      enabled != "true" ->
+      explicitly_disabled?(enabled) ->
         deregister_webhook()
 
       is_nil(bot_token) or bot_token == "" ->
@@ -83,11 +83,9 @@ defmodule Assistant.Integrations.Telegram.WebhookManager do
     case build_webhook_url() do
       {:ok, url} ->
         opts =
-          if is_binary(webhook_secret) and webhook_secret != "" do
-            [secret_token: webhook_secret]
-          else
-            []
-          end
+          []
+          |> maybe_put_secret_token(webhook_secret)
+          |> Keyword.put(:allowed_updates, ["message"])
 
         case Client.set_webhook(url, opts) do
           {:ok, _result} ->
@@ -138,10 +136,28 @@ defmodule Assistant.Integrations.Telegram.WebhookManager do
   defp build_webhook_url do
     base_url = AssistantWeb.Endpoint.url()
 
-    if base_url in [nil, "", "http://localhost:4000"] do
-      {:error, "endpoint URL not suitable for webhook (#{inspect(base_url)})"}
-    else
+    with true <- is_binary(base_url) and base_url != "",
+         %URI{scheme: scheme, host: host} <- URI.parse(base_url),
+         :ok <- validate_public_endpoint(scheme, host) do
       {:ok, base_url <> @webhook_path}
+    else
+      _ -> {:error, "endpoint URL not suitable for webhook (#{inspect(base_url)})"}
     end
   end
+
+  defp explicitly_disabled?(value), do: value == "false"
+
+  defp maybe_put_secret_token(opts, secret)
+       when is_binary(secret) and secret != "" do
+    Keyword.put(opts, :secret_token, secret)
+  end
+
+  defp maybe_put_secret_token(opts, _secret), do: opts
+
+  defp validate_public_endpoint("https", host)
+       when is_binary(host) and host not in ["localhost", "127.0.0.1"] do
+    :ok
+  end
+
+  defp validate_public_endpoint(_, _), do: {:error, :invalid_endpoint}
 end

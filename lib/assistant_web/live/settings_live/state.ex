@@ -100,6 +100,12 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:connection_status, %{})
     |> assign(:current_app, nil)
     |> assign(:app_integration_settings, [])
+    |> assign(:telegram_bot_configured, false)
+    |> assign(:telegram_enabled, false)
+    |> assign(:telegram_identity, nil)
+    |> assign(:telegram_connect_url, nil)
+    |> assign(:telegram_bot_username, nil)
+    |> assign(:telegram_connect_expires_at, nil)
     |> Loaders.load_profile()
     |> Loaders.load_orchestrator_prompt()
   end
@@ -133,6 +139,9 @@ defmodule AssistantWeb.SettingsLive.State do
       socket
       |> assign(:section, section)
       |> assign(:current_app, nil)
+      |> assign(:telegram_connect_url, nil)
+      |> assign(:telegram_bot_username, nil)
+      |> assign(:telegram_connect_expires_at, nil)
       |> assign(:help_topic, Data.selected_help_article(section, help_topic))
       |> Loaders.load_section_data(section)
     end

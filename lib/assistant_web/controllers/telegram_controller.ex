@@ -30,8 +30,14 @@ defmodule AssistantWeb.TelegramController do
 
   alias Assistant.Channels.Dispatcher
   alias Assistant.Channels.Telegram, as: TelegramAdapter
+  alias Assistant.Integrations.Telegram.AccountLink
 
   require Logger
+
+  @link_success_message "Telegram connected. You can now chat with this bot."
+  @link_invalid_message "This Telegram connect link is invalid or expired."
+  @link_conflict_message "This Telegram account is already linked to another user."
+  @link_existing_message "Disconnect your current Telegram account before linking a new one."
 
   @doc """
   Handle a Telegram webhook Update.
@@ -41,13 +47,26 @@ defmodule AssistantWeb.TelegramController do
   def webhook(conn, params) do
     case TelegramAdapter.normalize(params) do
       {:ok, message} ->
-        Logger.info("Telegram message received",
-          chat_id: message.space_id,
-          user_id: message.user_id,
-          has_command: message.slash_command != nil
-        )
+        cond do
+          telegram_start?(message) ->
+            handle_start_message(message)
 
-        Dispatcher.dispatch(TelegramAdapter, message)
+          AccountLink.authorized?(message) ->
+            Logger.info("Telegram message received",
+              chat_id: message.space_id,
+              user_id: message.user_id,
+              has_command: message.slash_command != nil
+            )
+
+            Dispatcher.dispatch(TelegramAdapter, message)
+
+          true ->
+            Logger.info("Ignoring unauthorized Telegram message",
+              chat_id: message.space_id,
+              user_id: message.user_id,
+              chat_type: message.metadata["chat_type"]
+            )
+        end
 
         # Telegram expects 200 — always acknowledge
         json(conn, %{})
@@ -57,4 +76,34 @@ defmodule AssistantWeb.TelegramController do
         json(conn, %{})
     end
   end
+
+  defp handle_start_message(message) do
+    case AccountLink.consume_start_link(message) do
+      {:ok, :linked} ->
+        TelegramAdapter.send_reply(message.space_id, @link_success_message)
+
+      {:error, :missing_token} ->
+        if AccountLink.authorized?(message) do
+          TelegramAdapter.send_reply(message.space_id, @link_success_message)
+        end
+
+      {:error, reason}
+      when reason in [:invalid_token, :expired_token, :already_used_token] ->
+        TelegramAdapter.send_reply(message.space_id, @link_invalid_message)
+
+      {:error, :already_linked} ->
+        TelegramAdapter.send_reply(message.space_id, @link_conflict_message)
+
+      {:error, :user_already_linked} ->
+        TelegramAdapter.send_reply(message.space_id, @link_existing_message)
+
+      {:error, :not_private_chat} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Telegram start link handling failed", reason: inspect(reason))
+    end
+  end
+
+  defp telegram_start?(message), do: message.slash_command == "/start"
 end

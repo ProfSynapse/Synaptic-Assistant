@@ -14,7 +14,7 @@ defmodule Assistant.Schemas.AuthToken do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @purposes ~w(oauth_google)
+  @purposes ~w(oauth_google telegram_connect)
 
   schema "auth_tokens" do
     field :token_hash, :string
@@ -38,6 +38,7 @@ defmodule Assistant.Schemas.AuthToken do
     |> cast(attrs, @required_fields ++ @optional_fields)
     |> validate_required(@required_fields)
     |> validate_inclusion(:purpose, @purposes)
+    |> check_constraint(:purpose, name: :valid_purpose)
     |> unique_constraint(:token_hash)
   end
 end

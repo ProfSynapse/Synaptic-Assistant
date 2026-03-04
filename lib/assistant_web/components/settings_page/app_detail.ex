@@ -94,6 +94,109 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
         </div>
       </section>
 
+      <section :if={@current_app.id == "telegram"} class="sa-card" style="margin-top: 1.5rem;">
+        <h2>Telegram Account</h2>
+        <p style="margin-top: 0.25rem; margin-bottom: 1rem;" class="sa-page-subtitle">
+          Link your own Telegram account with a one-time deep link. Only linked Telegram accounts can chat with this bot.
+        </p>
+
+        <div :if={!@telegram_bot_configured} class="sa-drive-notice sa-drive-notice--info">
+          <.icon name="hero-information-circle" class="h-5 w-5" />
+          <span :if={@is_admin}>
+            Save your Telegram bot token below to generate a connect link.
+          </span>
+          <span :if={!@is_admin}>
+            Your workspace admin must configure the Telegram bot before you can link your account.
+          </span>
+        </div>
+
+        <div
+          :if={@telegram_bot_configured and !@telegram_enabled}
+          class="sa-drive-notice sa-drive-notice--warning"
+        >
+          <.icon name="hero-exclamation-triangle" class="h-5 w-5" />
+          <span :if={@is_admin}>
+            Telegram is currently disabled. Re-enable it from the Apps list to receive messages.
+          </span>
+          <span :if={!@is_admin}>
+            Telegram is currently disabled by your workspace admin.
+          </span>
+        </div>
+
+        <div
+          :if={@telegram_bot_configured and @telegram_enabled and @telegram_identity}
+          style="display: flex; flex-direction: column; gap: 0.75rem;"
+        >
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <.icon name="hero-check-circle" class="h-6 w-6 text-green-500" />
+            <div>
+              <p style="margin: 0; font-weight: 600;">
+                Connected as {telegram_identity_label(@telegram_identity)}
+              </p>
+              <p class="sa-page-subtitle" style="margin: 0;">
+                Telegram ID {@telegram_identity.external_id}
+              </p>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <button type="button" class="sa-btn secondary" phx-click="refresh_telegram_link_status">
+              <.icon name="hero-arrow-path" class="h-4 w-4" /> Refresh Status
+            </button>
+            <button
+              type="button"
+              class="sa-btn secondary"
+              phx-click="disconnect_telegram"
+              data-confirm="Disconnect your linked Telegram account?"
+            >
+              Disconnect Telegram
+            </button>
+          </div>
+        </div>
+
+        <div
+          :if={@telegram_bot_configured and @telegram_enabled and is_nil(@telegram_identity)}
+          style="display: flex; flex-direction: column; gap: 0.75rem;"
+        >
+          <p style="margin: 0;">
+            Generate a one-time link, open it in Telegram, and Telegram will attach your account to this workspace user.
+          </p>
+
+          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <button type="button" class="sa-btn" phx-click="generate_telegram_connect_link">
+              <.icon name="hero-link" class="h-4 w-4" /> Generate Connect Link
+            </button>
+            <button
+              :if={@telegram_connect_url}
+              type="button"
+              class="sa-btn secondary"
+              phx-click="refresh_telegram_link_status"
+            >
+              <.icon name="hero-arrow-path" class="h-4 w-4" /> Refresh Status
+            </button>
+          </div>
+
+          <div :if={@telegram_connect_url} class="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+            <p style="margin: 0 0 0.5rem; font-weight: 600;">Link Ready</p>
+            <p class="sa-page-subtitle" style="margin: 0 0 0.75rem;">
+              Open this link in Telegram{if(@telegram_bot_username, do: " for @" <> @telegram_bot_username, else: "")}. It expires {telegram_expiry_text(@telegram_connect_expires_at)} and only works once.
+            </p>
+            <a
+              href={@telegram_connect_url}
+              target="_blank"
+              rel="noopener"
+              class="sa-btn"
+              style="display: inline-flex; text-decoration: none;"
+            >
+              <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" /> Open Telegram Link
+            </a>
+            <p class="sa-page-subtitle" style="margin: 0.75rem 0 0; word-break: break-all;">
+              {@telegram_connect_url}
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section :if={@is_admin and @app_integration_settings != []} class="sa-card" style="margin-top: 1.5rem;">
         <h2>Configuration</h2>
         <p style="margin-top: 0.25rem; margin-bottom: 1rem;" class="sa-page-subtitle">
@@ -102,7 +205,11 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
         <.admin_integrations settings={@app_integration_settings} />
       </section>
 
-      <div :if={!@is_admin and @current_app.connect_type == :api_key} class="sa-card" style="margin-top: 1.5rem;">
+      <div
+        :if={!@is_admin and @current_app.connect_type == :api_key and @current_app.id != "telegram"}
+        class="sa-card"
+        style="margin-top: 1.5rem;"
+      >
         <div style="display: flex; align-items: center; gap: 0.75rem;">
           <.icon name="hero-information-circle" class="h-5 w-5 text-zinc-400" />
           <span>Contact your workspace admin to configure this integration.</span>
@@ -111,4 +218,17 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
     </div>
     """
   end
+
+  defp telegram_identity_label(%{display_name: display_name, external_id: external_id}) do
+    case display_name do
+      name when is_binary(name) and name != "" -> name
+      _ -> "Telegram user #{external_id}"
+    end
+  end
+
+  defp telegram_expiry_text(%DateTime{} = expires_at) do
+    Calendar.strftime(expires_at, "%b %d at %I:%M %p UTC")
+  end
+
+  defp telegram_expiry_text(_expires_at), do: "soon"
 end

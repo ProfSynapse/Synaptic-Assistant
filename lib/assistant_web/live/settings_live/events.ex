@@ -18,6 +18,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.Integrations.Google.Drive.Changes
   alias Assistant.Integrations.Google.Drive, as: GoogleDrive
   alias Assistant.Integrations.OpenRouter
+  alias Assistant.Integrations.Telegram.AccountLink
   alias Assistant.MemoryExplorer
   alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
@@ -32,6 +33,8 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias AssistantWeb.SettingsLive.Loaders
   alias AssistantWeb.SettingsLive.Profile
   alias AssistantWeb.SettingsUserAuth
+
+  require Logger
 
   def handle_event("toggle_sidebar", _params, socket) do
     {:noreply, assign(socket, :sidebar_collapsed, !socket.assigns.sidebar_collapsed)}
@@ -92,13 +95,86 @@ defmodule AssistantWeb.SettingsLive.Events do
         enabled_key ->
           admin_id = socket.assigns.current_scope.settings_user.id
 
-          case IntegrationSettings.put(enabled_key, enabled, admin_id) do
+          case maybe_prepare_integration_toggle(group, enabled, admin_id) do
+            :ok ->
+              :ok
+
+            {:error, _reason} ->
+              :error
+          end
+          |> case do
+            :error ->
+              {:noreply, put_flash(socket, :error, "Unable to toggle integration.")}
+
+            :ok ->
+              case IntegrationSettings.put(enabled_key, enabled, admin_id) do
+                {:ok, _setting} ->
+                  {:noreply, reload_integration_settings(socket)}
+
+                {:error, _} ->
+                  {:noreply, put_flash(socket, :error, "Unable to toggle integration.")}
+              end
+          end
+      end
+    end
+  end
+
+  def handle_event("generate_telegram_connect_link", _params, socket) do
+    {:noreply, generate_telegram_connect_link(socket)}
+  end
+
+  def handle_event("refresh_telegram_link_status", _params, socket) do
+    {:noreply,
+     socket
+     |> Loaders.load_app_detail_settings(socket.assigns.current_app)
+     |> clear_telegram_link_assigns_if_connected()}
+  end
+
+  def handle_event("disconnect_telegram", _params, socket) do
+    Context.with_settings_user(socket, fn settings_user ->
+      user_id =
+        case settings_user do
+          %{user_id: value} when is_binary(value) -> value
+          _ -> nil
+        end
+
+      case AccountLink.disconnect_user(user_id) do
+        {:ok, _count} ->
+          {:noreply,
+           socket
+           |> assign(:telegram_identity, nil)
+           |> clear_telegram_link_assigns()
+           |> put_flash(:info, "Telegram account disconnected.")}
+      end
+    end)
+  end
+
+  def handle_event("save_integration", %{"key" => key, "value" => value}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      unless Registry.known_key?(key) do
+        {:noreply, put_flash(socket, :error, "Unknown integration key.")}
+      else
+        value = String.trim(value)
+
+        if value == "" do
+          {:noreply, put_flash(socket, :error, "Value cannot be blank.")}
+        else
+          admin_id = socket.assigns.current_scope.settings_user.id
+
+          case save_integration_setting(key, value, admin_id, socket) do
             {:ok, _setting} ->
-              {:noreply, reload_integration_settings(socket)}
+              {:noreply,
+               socket
+               |> maybe_generate_telegram_connect_link_after_save(key, value)
+               |> maybe_put_saved_integration_flash(key)
+               |> maybe_reload_integration_settings_after_save(key)}
 
             {:error, _} ->
-              {:noreply, put_flash(socket, :error, "Unable to toggle integration.")}
+              {:noreply, put_flash(socket, :error, "Unable to save integration setting.")}
           end
+        end
       end
     end
   end
@@ -136,7 +212,6 @@ defmodule AssistantWeb.SettingsLive.Events do
             end
 
           {:error, reason} ->
-            require Logger
             Logger.error("connect_google: ensure_linked_user failed", reason: inspect(reason))
 
             {:noreply,
@@ -782,35 +857,6 @@ defmodule AssistantWeb.SettingsLive.Events do
     end
   end
 
-  def handle_event("save_integration", %{"key" => key, "value" => value}, socket) do
-    unless socket.assigns.current_scope.settings_user.is_admin do
-      {:noreply, put_flash(socket, :error, "Not authorized.")}
-    else
-      unless Registry.known_key?(key) do
-        {:noreply, put_flash(socket, :error, "Unknown integration key.")}
-      else
-        value = String.trim(value)
-
-        if value == "" do
-          {:noreply, put_flash(socket, :error, "Value cannot be blank.")}
-        else
-          admin_id = socket.assigns.current_scope.settings_user.id
-
-          case IntegrationSettings.put(String.to_existing_atom(key), value, admin_id) do
-            {:ok, _setting} ->
-              {:noreply,
-               socket
-               |> put_flash(:info, "Integration setting saved.")
-               |> reload_integration_settings()}
-
-            {:error, _} ->
-              {:noreply, put_flash(socket, :error, "Unable to save integration setting.")}
-          end
-        end
-      end
-    end
-  end
-
   def handle_event("delete_integration", %{"key" => key}, socket) do
     unless socket.assigns.current_scope.settings_user.is_admin do
       {:noreply, put_flash(socket, :error, "Not authorized.")}
@@ -822,6 +868,7 @@ defmodule AssistantWeb.SettingsLive.Events do
           {:ok, _} ->
             {:noreply,
              socket
+             |> maybe_clear_deleted_telegram_setting(key)
              |> put_flash(:info, "Integration setting reverted to environment variable.")
              |> reload_integration_settings()}
 
@@ -1297,6 +1344,162 @@ defmodule AssistantWeb.SettingsLive.Events do
       true ->
         socket
     end
+  end
+
+  defp save_integration_setting("telegram_bot_token", value, admin_id, _socket) do
+    with :ok <- ensure_telegram_webhook_secret(admin_id),
+         {:ok, _enabled} <- IntegrationSettings.put(:telegram_enabled, "true", admin_id),
+         {:ok, setting} <- IntegrationSettings.put(:telegram_bot_token, value, admin_id) do
+      {:ok, setting}
+    end
+  end
+
+  defp save_integration_setting(key, value, admin_id, _socket) do
+    IntegrationSettings.put(String.to_existing_atom(key), value, admin_id)
+  end
+
+  defp maybe_prepare_integration_toggle("telegram", "true", admin_id) do
+    ensure_telegram_webhook_secret(admin_id)
+  end
+
+  defp maybe_prepare_integration_toggle(_group, _enabled, _admin_id), do: :ok
+
+  defp ensure_telegram_webhook_secret(admin_id) do
+    case IntegrationSettings.get(:telegram_webhook_secret) do
+      secret when is_binary(secret) and secret != "" ->
+        :ok
+
+      _ ->
+        case IntegrationSettings.put(:telegram_webhook_secret, random_secret(), admin_id) do
+          {:ok, _setting} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp maybe_generate_telegram_connect_link_after_save(
+         %{assigns: %{current_app: %{id: "telegram"}}} = socket,
+         "telegram_bot_token",
+         bot_token
+       ) do
+    generate_telegram_connect_link(socket, bot_token: bot_token)
+  end
+
+  defp maybe_generate_telegram_connect_link_after_save(socket, _key, _value), do: socket
+
+  defp generate_telegram_connect_link(socket, opts \\ []) do
+    Context.with_settings_user(socket, fn settings_user ->
+      cond do
+        socket.assigns[:telegram_identity] != nil ->
+          {:noreply, put_flash(socket, :info, "Telegram is already linked to your account.")}
+
+        (not socket.assigns[:telegram_bot_configured] and socket.assigns[:current_app]) &&
+            socket.assigns.current_scope.settings_user.is_admin == false ->
+          {:noreply,
+           put_flash(socket, :error, "Your admin must configure the Telegram bot first.")}
+
+        true ->
+          case Context.ensure_linked_user(settings_user) do
+            {:ok, user_id} ->
+              updated_socket = reload_current_user_scope(socket)
+              generate_telegram_connect_link_result(updated_socket, user_id, opts)
+
+            {:error, reason} ->
+              Logger.error("generate_telegram_connect_link: ensure_linked_user failed",
+                reason: inspect(reason)
+              )
+
+              {:noreply,
+               put_flash(
+                 socket,
+                 :error,
+                 "Failed to prepare your account for Telegram linking. Please try again."
+               )}
+          end
+      end
+    end)
+    |> case do
+      {:noreply, updated_socket} -> updated_socket
+    end
+  end
+
+  defp generate_telegram_connect_link_result(updated_socket, user_id, opts) do
+    bot_token = Keyword.get(opts, :bot_token)
+
+    case AccountLink.generate_connect_link(user_id, bot_token) do
+      {:ok, %{url: url, bot_username: bot_username, expires_at: expires_at}} ->
+        {:noreply,
+         updated_socket
+         |> assign(:telegram_connect_url, url)
+         |> assign(:telegram_bot_username, bot_username)
+         |> assign(:telegram_connect_expires_at, expires_at)
+         |> put_flash(:info, "Open the Telegram link to connect your account.")}
+
+      {:error, :bot_not_configured} ->
+        {:noreply, put_flash(updated_socket, :error, "Save a Telegram bot token first.")}
+
+      {:error, :bot_username_missing} ->
+        {:noreply, put_flash(updated_socket, :error, "Telegram did not return a bot username.")}
+
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(
+           updated_socket,
+           :error,
+           "Telegram could not verify this bot token. Check the token and try again."
+         )}
+    end
+  end
+
+  defp clear_telegram_link_assigns(socket) do
+    socket
+    |> assign(:telegram_connect_url, nil)
+    |> assign(:telegram_bot_username, nil)
+    |> assign(:telegram_connect_expires_at, nil)
+  end
+
+  defp clear_telegram_link_assigns_if_connected(socket) do
+    if socket.assigns[:telegram_identity] do
+      clear_telegram_link_assigns(socket)
+    else
+      socket
+    end
+  end
+
+  defp maybe_clear_deleted_telegram_setting(socket, key)
+       when key in ["telegram_bot_token", "telegram_webhook_secret"] do
+    clear_telegram_link_assigns(socket)
+  end
+
+  defp maybe_clear_deleted_telegram_setting(socket, _key), do: socket
+
+  defp maybe_put_saved_integration_flash(
+         %{assigns: %{current_app: %{id: "telegram"}}} = socket,
+         "telegram_bot_token"
+       ) do
+    socket
+  end
+
+  defp maybe_put_saved_integration_flash(socket, _key) do
+    put_flash(socket, :info, "Integration setting saved.")
+  end
+
+  defp maybe_reload_integration_settings_after_save(
+         %{assigns: %{current_app: %{id: "telegram"}}} = socket,
+         "telegram_bot_token"
+       ) do
+    socket
+    |> assign(:telegram_bot_configured, true)
+    |> assign(:telegram_enabled, true)
+  end
+
+  defp maybe_reload_integration_settings_after_save(socket, _key) do
+    reload_integration_settings(socket)
+  end
+
+  defp random_secret do
+    :crypto.strong_rand_bytes(32)
+    |> Base.url_encode64(padding: false)
   end
 
   defp normalize_transcript_filters(params) when is_map(params) do

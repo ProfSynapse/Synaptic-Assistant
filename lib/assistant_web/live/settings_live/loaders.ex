@@ -15,6 +15,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.IntegrationSettings.ConnectionValidator
   alias Assistant.Integrations.OpenAI
   alias Assistant.Integrations.OpenRouter
+  alias Assistant.Integrations.Telegram.AccountLink
   alias Assistant.MemoryExplorer
   alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
@@ -307,15 +308,24 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   def load_app_detail_settings(socket, app) do
     settings_user = Context.current_settings_user(socket)
 
-    if settings_user && settings_user.is_admin do
-      all_settings = IntegrationSettings.list_all()
+    socket =
+      if settings_user && settings_user.is_admin do
+        all_settings = IntegrationSettings.list_all()
 
-      filtered =
-        Enum.filter(all_settings, fn setting -> setting.group == app.integration_group end)
+        filtered =
+          all_settings
+          |> Enum.filter(fn setting -> setting.group == app.integration_group end)
+          |> maybe_filter_hidden_settings(app)
 
-      assign(socket, :app_integration_settings, filtered)
+        assign(socket, :app_integration_settings, filtered)
+      else
+        assign(socket, :app_integration_settings, [])
+      end
+
+    if app.id == "telegram" do
+      load_telegram_app_detail(socket, settings_user)
     else
-      assign(socket, :app_integration_settings, [])
+      socket
     end
   end
 
@@ -354,6 +364,34 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       Logger.warning("Connection validation failed: #{Exception.message(e)}")
       assign(socket, :connection_status, %{})
   end
+
+  defp load_telegram_app_detail(socket, settings_user) do
+    user_id =
+      case settings_user do
+        %{user_id: value} when is_binary(value) -> value
+        _ -> nil
+      end
+
+    telegram_enabled = IntegrationSettings.get(:telegram_enabled) != "false"
+    telegram_bot_configured = present?(IntegrationSettings.get(:telegram_bot_token))
+
+    telegram_identity =
+      case AccountLink.linked_identity_for_user(user_id) do
+        {:ok, identity} -> identity
+        {:error, :not_connected} -> nil
+      end
+
+    socket
+    |> assign(:telegram_enabled, telegram_enabled)
+    |> assign(:telegram_bot_configured, telegram_bot_configured)
+    |> assign(:telegram_identity, telegram_identity)
+  end
+
+  defp maybe_filter_hidden_settings(settings, %{id: "telegram"}) do
+    Enum.reject(settings, &(&1.key == :telegram_webhook_secret))
+  end
+
+  defp maybe_filter_hidden_settings(settings, _app), do: settings
 
   def load_google_status(socket) do
     case Context.current_settings_user(socket) do
