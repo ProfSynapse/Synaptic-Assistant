@@ -6,6 +6,11 @@
 
 import Config
 
+parse_bool = fn
+  value when value in ["1", "true", "TRUE", "yes", "YES", "on", "ON"] -> true
+  _ -> false
+end
+
 # Load .env file in dev so `mix phx.server` works without manual exports.
 # Existing shell env vars take precedence over .env values.
 if config_env() == :dev && File.exists?(".env") do
@@ -103,6 +108,16 @@ end
 if project_number = System.get_env("GOOGLE_CLOUD_PROJECT_NUMBER") do
   config :assistant, :google_cloud_project_number, project_number
 end
+
+# Google write concurrency rollout flags (Drive/Docs conflict protection)
+config :assistant, :google_write_conflict_protection,
+  parse_bool.(System.get_env("GOOGLE_WRITE_CONFLICT_PROTECTION"))
+
+config :assistant, :google_write_lease_enforcement,
+  parse_bool.(System.get_env("GOOGLE_WRITE_LEASE_ENFORCEMENT"))
+
+config :assistant, :google_write_audit_history,
+  parse_bool.(System.get_env("GOOGLE_WRITE_AUDIT_HISTORY"))
 
 # ElevenLabs — Text-to-Speech
 if api_key = System.get_env("ELEVENLABS_API_KEY") do

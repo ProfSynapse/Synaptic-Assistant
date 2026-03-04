@@ -1,8 +1,50 @@
 # Plan: Google Drive/Docs Concurrency-Safe Write Integration
 
 > Created: 2026-03-04
-> Status: PROPOSED
+> Updated: 2026-03-04
+> Status: IN PROGRESS
 > Scope: Prevent assistant overwrites when Google files are edited concurrently by humans or other processes
+
+## Implemented So Far
+
+### ✅ Phase 1 complete: Drive integration hooks
+
+- `Assistant.Integrations.Google.Drive.update_file_content/5` now supports optional write preconditions
+- `Assistant.Integrations.Google.Drive.move_file/5` now supports optional write preconditions
+- Added conflict/transient/fatal error classification helper
+- Added normalized metadata fields needed for preconditions (`md5_checksum`, `version`)
+
+### ✅ Phase 2 complete: `files.update` protected path
+
+- `files.update` uses preconditioned writes when conflict protection flag is enabled
+- Default path remains unchanged when flag is disabled
+- Conflict-safe user message added for precondition mismatch
+
+### ✅ Phase 3 complete: `files.archive` protected path
+
+- `files.archive` uses preconditioned move when conflict protection flag is enabled
+- Default path remains unchanged when flag is disabled
+- Conflict-safe user message added for move conflicts
+
+### ✅ Coordinator + observability complete
+
+- Added `Assistant.Sync.WriteCoordinator` with:
+  - optional lease enforcement
+  - bounded retry for transient errors
+  - telemetry emission (`attempt/retry/success/failure`)
+  - optional event hook callback
+
+### ✅ Optional history audit hook complete
+
+- Added `StateStore.record_write_coordinator_event/4`
+- Added optional audit persistence from skill writes to `sync_history.details`
+- No-op behavior when no synced file mapping exists
+
+### ✅ Worker serialization primitives + idempotent replay complete
+
+- `UpstreamSyncWorker` now supports `write_intent` action with idempotent replay protection
+- Replayed `intent_id` jobs are safely skipped
+- Intent attempt/success/failure events are persisted via sync history helpers
 
 ## Why This Plan Exists
 
@@ -179,8 +221,75 @@ Use `sync_history.details` for initial intent and outcomes:
 
 - `:google_write_conflict_protection` (default `false`)
 - `:google_write_lease_enforcement` (default `false`)
+- `:google_write_audit_history` (default `false`)
 
 Flags allow progressive rollout and quick rollback.
+
+## Staging Enablement Checklist
+
+Enable flags incrementally in staging (never all at once):
+
+1. Baseline
+  - `google_write_conflict_protection: false`
+  - `google_write_lease_enforcement: false`
+  - `google_write_audit_history: false`
+  - Verify existing write behavior unchanged
+
+2. Conflict protection only
+  - `google_write_conflict_protection: true`
+  - `google_write_lease_enforcement: false`
+  - `google_write_audit_history: false`
+  - Validate conflict-safe user messages and zero silent overwrites
+
+3. Add lease enforcement
+  - `google_write_conflict_protection: true`
+  - `google_write_lease_enforcement: true`
+  - `google_write_audit_history: false`
+  - Validate concurrent assistant writes serialize cleanly
+
+4. Add audit history
+  - `google_write_conflict_protection: true`
+  - `google_write_lease_enforcement: true`
+  - `google_write_audit_history: true`
+  - Validate `sync_history` entries for attempt/retry/success/failure paths
+
+5. Rollback protocol (if needed)
+  - Disable in reverse order: audit → lease → conflict protection
+  - Confirm writes still function via legacy path
+
+## Runtime Config Snippet
+
+`config/runtime.exs` uses env vars for these rollout flags:
+
+```elixir
+config :assistant, :google_write_conflict_protection,
+  parse_bool.(System.get_env("GOOGLE_WRITE_CONFLICT_PROTECTION"))
+
+config :assistant, :google_write_lease_enforcement,
+  parse_bool.(System.get_env("GOOGLE_WRITE_LEASE_ENFORCEMENT"))
+
+config :assistant, :google_write_audit_history,
+  parse_bool.(System.get_env("GOOGLE_WRITE_AUDIT_HISTORY"))
+```
+
+Phase env settings:
+
+- Phase 0 baseline:
+  - `GOOGLE_WRITE_CONFLICT_PROTECTION=false`
+  - `GOOGLE_WRITE_LEASE_ENFORCEMENT=false`
+  - `GOOGLE_WRITE_AUDIT_HISTORY=false`
+- Phase 1 conflict protection:
+  - `GOOGLE_WRITE_CONFLICT_PROTECTION=true`
+  - `GOOGLE_WRITE_LEASE_ENFORCEMENT=false`
+  - `GOOGLE_WRITE_AUDIT_HISTORY=false`
+- Phase 2 + lease:
+  - `GOOGLE_WRITE_CONFLICT_PROTECTION=true`
+  - `GOOGLE_WRITE_LEASE_ENFORCEMENT=true`
+  - `GOOGLE_WRITE_AUDIT_HISTORY=false`
+- Phase 3 + audit history:
+  - `GOOGLE_WRITE_CONFLICT_PROTECTION=true`
+  - `GOOGLE_WRITE_LEASE_ENFORCEMENT=true`
+  - `GOOGLE_WRITE_AUDIT_HISTORY=true`
 
 ## Testing Plan
 
@@ -233,11 +342,14 @@ Log fields:
 
 ## Implementation Checklist
 
-1. Add optional precondition opts to Drive write functions
-2. Add metadata preflight helpers and conflict classification
-3. Implement `Assistant.Sync.WriteCoordinator`
-4. Integrate coordinator into `files.update` behind flag
-5. Add unit and integration tests
-6. Add telemetry and structured logs
-7. Enable flag in staging, observe conflict metrics
-8. Roll out to production in phases
+- [x] Add optional precondition opts to Drive write functions
+- [x] Add metadata preflight helpers and conflict classification
+- [x] Implement `Assistant.Sync.WriteCoordinator`
+- [x] Integrate coordinator into `files.update` behind flag
+- [x] Integrate coordinator into `files.archive` behind flag
+- [x] Add unit and integration tests for Drive/skills/coordinator paths
+- [x] Add telemetry events and structured coordinator logging
+- [x] Add runtime/env feature flag wiring and staged enablement docs
+- [ ] Enable flags in staging and validate conflict/retry/audit behavior with real traffic
+- [x] Implement optional worker serialization + idempotent replay via `UpstreamSyncWorker`
+- [ ] Roll out to production in phases

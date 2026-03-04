@@ -186,6 +186,100 @@ defmodule Assistant.Sync.StateStore do
   end
 
   @doc """
+  Check whether an upstream write intent has already been applied for a user/file pair.
+
+  Uses sync history details to detect prior successful processing of `intent_id`.
+  """
+  @spec write_intent_already_applied?(binary(), String.t(), String.t()) :: boolean()
+  def write_intent_already_applied?(user_id, drive_file_id, intent_id)
+      when is_binary(user_id) and is_binary(drive_file_id) and is_binary(intent_id) do
+    case get_synced_file(user_id, drive_file_id) do
+      nil ->
+        false
+
+      synced_file ->
+        synced_file.id
+        |> list_history(limit: 200)
+        |> Enum.any?(&history_entry_matches_success_intent?(&1, intent_id))
+    end
+  end
+
+  @doc """
+  Record an upstream write-intent processing event in sync history.
+
+  Returns `:ok` when the user/file mapping does not exist.
+  """
+  @spec record_upstream_intent_event(binary(), String.t(), String.t(), String.t(), map()) ::
+          :ok | {:error, Ecto.Changeset.t()}
+  def record_upstream_intent_event(user_id, drive_file_id, intent_id, event_type, details \\ %{})
+      when is_binary(user_id) and is_binary(drive_file_id) and is_binary(intent_id) and
+             is_binary(event_type) and is_map(details) do
+    case get_synced_file(user_id, drive_file_id) do
+      nil ->
+        :ok
+
+      synced_file ->
+        operation = if event_type == "failure", do: "error", else: "upload"
+
+        entry_details =
+          details
+          |> Map.put("source", "upstream_sync_worker")
+          |> Map.put("intent_id", intent_id)
+          |> Map.put("event_type", event_type)
+
+        case create_history_entry(%{
+               synced_file_id: synced_file.id,
+               operation: operation,
+               details: entry_details
+             }) do
+          {:ok, _entry} -> :ok
+          {:error, changeset} -> {:error, changeset}
+        end
+    end
+  end
+
+  @doc """
+  Record a write-coordinator event for a synced file identified by user and Drive file ID.
+
+  Uses existing `sync_history.operation` values to avoid schema changes:
+
+    * `upload` for attempt/retry/success write events
+    * `conflict_detect` for conflict failures
+    * `error` for non-conflict failures
+
+  Returns `:ok` when no synced file exists for the provided identifiers.
+  """
+  @spec record_write_coordinator_event(binary(), String.t(), String.t(), map()) ::
+          :ok | {:error, Ecto.Changeset.t()}
+  def record_write_coordinator_event(user_id, drive_file_id, action, event)
+      when is_binary(user_id) and is_binary(drive_file_id) and is_binary(action) and is_map(event) do
+    case get_synced_file(user_id, drive_file_id) do
+      nil ->
+        :ok
+
+      synced_file ->
+        operation = coordinator_event_operation(event)
+
+        details = %{
+          "source" => "write_coordinator",
+          "action" => action,
+          "event_type" => to_string(Map.get(event, :type)),
+          "measurements" => Map.get(event, :measurements, %{}),
+          "metadata" => Map.get(event, :metadata, %{})
+        }
+
+        case create_history_entry(%{
+               synced_file_id: synced_file.id,
+               operation: operation,
+               details: details
+             }) do
+          {:ok, _entry} -> :ok
+          {:error, changeset} -> {:error, changeset}
+        end
+    end
+  end
+
+  @doc """
   List sync history entries for a synced file, most recent first.
   """
   @spec list_history(binary(), keyword()) :: [SyncHistoryEntry.t()]
@@ -312,12 +406,26 @@ defmodule Assistant.Sync.StateStore do
   # Private Helpers
   # -------------------------------------------------------------------
 
+  defp coordinator_event_operation(%{type: :failure, metadata: %{result_type: :conflict}}),
+    do: "conflict_detect"
+
+  defp coordinator_event_operation(%{type: :failure}), do: "error"
+  defp coordinator_event_operation(_event), do: "upload"
+
   defp where_user_drive(query, user_id, nil) do
     where(query, [c], c.user_id == ^user_id and is_nil(c.drive_id))
   end
 
   defp where_user_drive(query, user_id, drive_id) do
     where(query, [c], c.user_id == ^user_id and c.drive_id == ^drive_id)
+  end
+
+  defp history_entry_matches_success_intent?(entry, intent_id) do
+    details = entry.details || %{}
+
+    details["intent_id"] == intent_id and
+      details["event_type"] == "success" and
+      details["source"] in ["upstream_sync_worker", "write_coordinator"]
   end
 
   defp where_drive_id(query, nil) do

@@ -14,6 +14,7 @@ defmodule Assistant.Sync.Workers.UpstreamSyncWorker do
 
   alias Assistant.Repo
   alias Assistant.Schemas.SyncedFile
+  alias Assistant.Sync.StateStore
 
   @impl Oban.Worker
   def perform(%Oban.Job{
@@ -23,6 +24,55 @@ defmodule Assistant.Sync.Workers.UpstreamSyncWorker do
     # TODO: Implement Drive API call to trash the remote file
     # Ex: Assistant.Integrations.Google.Drive.trash_file(token, file_id)
     :ok
+  end
+
+  def perform(%Oban.Job{
+        args:
+          %{
+            "action" => "write_intent",
+            "user_id" => user_id,
+            "drive_file_id" => file_id,
+            "intent_id" => intent_id
+          } = args
+      }) do
+    Logger.info("UpstreamSyncWorker: Processing write intent",
+      user_id: user_id,
+      drive_file_id: file_id,
+      intent_id: intent_id
+    )
+
+    if StateStore.write_intent_already_applied?(user_id, file_id, intent_id) do
+      Logger.info("UpstreamSyncWorker: Skipping replayed write intent",
+        user_id: user_id,
+        drive_file_id: file_id,
+        intent_id: intent_id
+      )
+
+      :ok
+    else
+      _ =
+        StateStore.record_upstream_intent_event(user_id, file_id, intent_id, "attempt", %{
+          "args" => Map.drop(args, ["action"])
+        })
+
+      case Repo.get_by(SyncedFile, user_id: user_id, drive_file_id: file_id) do
+        nil ->
+          _ =
+            StateStore.record_upstream_intent_event(user_id, file_id, intent_id, "failure", %{
+              "reason" => "synced_file_not_found"
+            })
+
+          :ok
+
+        synced_file ->
+          synced_file
+          |> Ecto.Changeset.change(%{sync_status: "synced", last_synced_at: DateTime.utc_now()})
+          |> Repo.update!()
+
+          _ = StateStore.record_upstream_intent_event(user_id, file_id, intent_id, "success", %{})
+          :ok
+      end
+    end
   end
 
   def perform(%Oban.Job{args: %{"synced_file_id" => id}}) do

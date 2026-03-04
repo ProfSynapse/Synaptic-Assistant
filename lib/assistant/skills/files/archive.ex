@@ -24,6 +24,7 @@ defmodule Assistant.Skills.Files.Archive do
 
   alias Assistant.Skills.Result
   alias Assistant.Integrations.Google.Drive.Scoping
+  alias Assistant.Sync.WriteCoordinator
 
   @archive_folder_name "Archive"
   @folder_mime_type "application/vnd.google-apps.folder"
@@ -59,14 +60,15 @@ defmodule Assistant.Skills.Files.Archive do
 
       true ->
         enabled_drives = context.metadata[:enabled_drives] || []
-        archive_file(drive, token, file_id, folder_id, enabled_drives)
+        archive_file(drive, token, file_id, folder_id, enabled_drives, context)
     end
   end
 
-  defp archive_file(drive, token, file_id, folder_id, enabled_drives) do
+  defp archive_file(drive, token, file_id, folder_id, enabled_drives, context) do
     with {:ok, archive_id} <- resolve_archive_folder(drive, token, folder_id, enabled_drives),
          {:ok, file_meta} <- drive.get_file(token, file_id),
-         {:ok, _moved} <- drive.move_file(token, file_id, archive_id) do
+         {:ok, _moved} <-
+           move_with_preconditions(drive, token, file_id, archive_id, file_meta, context) do
       {:ok,
        %Result{
          status: :ok,
@@ -78,8 +80,72 @@ defmodule Assistant.Skills.Files.Archive do
       {:error, :not_found} ->
         {:ok, %Result{status: :error, content: "File '#{file_id}' not found."}}
 
+      {:error, :conflict} ->
+        {:ok,
+         %Result{
+           status: :error,
+           content:
+             "This file changed while I was archiving it. I paused to avoid overriding newer changes. Please retry."
+         }}
+
       {:error, reason} ->
         {:ok, %Result{status: :error, content: "Failed to archive file: #{inspect(reason)}"}}
+    end
+  end
+
+  defp move_with_preconditions(drive, token, file_id, archive_id, file_meta, context) do
+    if conflict_protection_enabled?() and function_exported?(drive, :move_file, 5) do
+      user_id = context.metadata[:user_id] || "unknown"
+
+      WriteCoordinator.execute(
+        fn -> drive.move_file(token, file_id, archive_id, true, precondition_opts(file_meta)) end,
+        user_id: user_id,
+        file_id: file_id,
+        intent_id: "files.archive:#{file_id}",
+        classify_error: &classify_drive_error(drive, &1),
+        event_hook: maybe_event_hook(context, file_id, "files.archive")
+      )
+    else
+      drive.move_file(token, file_id, archive_id)
+    end
+  end
+
+  defp precondition_opts(file_meta) do
+    []
+    |> maybe_put_expected(:expected_modified_time, Map.get(file_meta, :modified_time))
+    |> maybe_put_expected(:expected_checksum, Map.get(file_meta, :md5_checksum))
+    |> maybe_put_expected(:expected_version, Map.get(file_meta, :version))
+  end
+
+  defp maybe_put_expected(opts, _key, nil), do: opts
+  defp maybe_put_expected(opts, _key, ""), do: opts
+  defp maybe_put_expected(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp conflict_protection_enabled? do
+    Application.get_env(:assistant, :google_write_conflict_protection, false)
+  end
+
+  defp audit_history_enabled? do
+    Application.get_env(:assistant, :google_write_audit_history, false)
+  end
+
+  defp maybe_event_hook(context, file_id, action) do
+    user_id = context.metadata[:user_id]
+
+    if audit_history_enabled?() and is_binary(user_id) do
+      fn event ->
+        Assistant.Sync.StateStore.record_write_coordinator_event(user_id, file_id, action, event)
+      end
+    else
+      nil
+    end
+  end
+
+  defp classify_drive_error(drive, reason) do
+    if function_exported?(drive, :classify_write_error, 1) do
+      drive.classify_write_error(reason)
+    else
+      if reason == :conflict, do: :conflict, else: :fatal
     end
   end
 

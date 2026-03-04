@@ -49,7 +49,7 @@ defmodule Assistant.Integrations.Google.Drive do
   alias GoogleApi.Drive.V3.Model
 
   @default_fields "files(id,name,mimeType,modifiedTime,size,parents)"
-  @single_file_fields "id,name,mimeType,modifiedTime,size,parents,webViewLink"
+  @single_file_fields "id,name,mimeType,modifiedTime,size,parents,webViewLink,md5Checksum,version"
 
   @google_workspace_prefix "application/vnd.google-apps."
 
@@ -266,35 +266,43 @@ defmodule Assistant.Integrations.Google.Drive do
     - `{:ok, %{id, name, web_view_link}}` on success
     - `{:error, term()}` on failure
   """
-  @spec update_file_content(String.t(), String.t(), binary(), String.t()) ::
+  @spec update_file_content(String.t(), String.t(), binary(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def update_file_content(access_token, file_id, content, mime_type \\ "text/plain") do
+  def update_file_content(access_token, file_id, content, mime_type \\ "text/plain", opts \\ []) do
     conn = Connection.new(access_token)
     metadata = %Model.File{mimeType: mime_type}
 
-    case Files.drive_files_update_iodata(
-           conn,
-           file_id,
-           "multipart",
-           metadata,
-           content,
-           fields: "id,name,webViewLink",
-           supportsAllDrives: true
-         ) do
-      {:ok, %Model.File{} = file} ->
-        {:ok,
-         %{
-           id: file.id,
-           name: file.name,
-           web_view_link: file.webViewLink
-         }}
+    with :ok <- maybe_validate_write_preconditions(access_token, file_id, opts) do
+      case Files.drive_files_update_iodata(
+             conn,
+             file_id,
+             "multipart",
+             metadata,
+             content,
+             fields: "id,name,webViewLink",
+             supportsAllDrives: true
+           ) do
+        {:ok, %Model.File{} = file} ->
+          {:ok,
+           %{
+             id: file.id,
+             name: file.name,
+             web_view_link: file.webViewLink
+           }}
 
-      {:error, %Tesla.Env{status: 404}} ->
-        {:error, :not_found}
+        {:error, %Tesla.Env{status: 404}} ->
+          {:error, :not_found}
 
-      {:error, reason} ->
-        Logger.warning("Drive update_file_content failed for #{file_id}: #{inspect(reason)}")
-        {:error, reason}
+        {:error, reason} ->
+          case classify_write_error(reason) do
+            :conflict ->
+              {:error, :conflict}
+
+            _ ->
+              Logger.warning("Drive update_file_content failed for #{file_id}: #{inspect(reason)}")
+              {:error, reason}
+          end
+      end
     end
   end
 
@@ -340,12 +348,13 @@ defmodule Assistant.Integrations.Google.Drive do
     - `{:ok, %{id, name, parents}}` on success
     - `{:error, term()}` on failure
   """
-  @spec move_file(String.t(), String.t(), String.t(), boolean()) ::
+  @spec move_file(String.t(), String.t(), String.t(), boolean(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def move_file(access_token, file_id, new_parent_id, remove_parents \\ true) do
+  def move_file(access_token, file_id, new_parent_id, remove_parents \\ true, opts \\ []) do
     conn = Connection.new(access_token)
 
-    with {:ok, file_meta} <- get_file(access_token, file_id) do
+    with {:ok, file_meta} <- get_file(access_token, file_id),
+         :ok <- validate_preconditions(file_meta, opts) do
       api_opts =
         [addParents: new_parent_id, fields: "id,name,parents", supportsAllDrives: true]
         |> maybe_remove_parents(file_meta, remove_parents)
@@ -355,11 +364,26 @@ defmodule Assistant.Integrations.Google.Drive do
           {:ok, %{id: updated.id, name: updated.name, parents: updated.parents}}
 
         {:error, reason} ->
-          Logger.warning("Drive move_file failed for #{file_id}: #{inspect(reason)}")
-          {:error, reason}
+          case classify_write_error(reason) do
+            :conflict ->
+              {:error, :conflict}
+
+            _ ->
+              Logger.warning("Drive move_file failed for #{file_id}: #{inspect(reason)}")
+              {:error, reason}
+          end
       end
     end
   end
+
+  @doc false
+  def classify_write_error(%Tesla.Env{status: status}) when status in [409, 412], do: :conflict
+  def classify_write_error(%Tesla.Env{status: 429}), do: :transient
+  def classify_write_error(%Tesla.Env{status: status}) when status >= 500 and status <= 599,
+    do: :transient
+
+  def classify_write_error(:timeout), do: :transient
+  def classify_write_error(_reason), do: :fatal
 
   @doc """
   List shared drives accessible to the authenticated user.
@@ -460,11 +484,73 @@ defmodule Assistant.Integrations.Google.Drive do
       modified_time: file.modifiedTime,
       size: file.size,
       parents: file.parents,
-      web_view_link: file.webViewLink
+      web_view_link: file.webViewLink,
+      md5_checksum: file.md5Checksum,
+      version: file.version
     }
   end
 
   defp normalize_file(nil), do: nil
+
+  defp maybe_validate_write_preconditions(access_token, file_id, opts) do
+    if has_write_preconditions?(opts) do
+      with {:ok, file_meta} <- get_file(access_token, file_id) do
+        validate_preconditions(file_meta, opts)
+      end
+    else
+      :ok
+    end
+  end
+
+  defp has_write_preconditions?(opts) do
+    Keyword.has_key?(opts, :expected_modified_time) or
+      Keyword.has_key?(opts, :expected_checksum) or
+      Keyword.has_key?(opts, :expected_version)
+  end
+
+  defp validate_preconditions(file_meta, opts) do
+    expected_modified_time = Keyword.get(opts, :expected_modified_time)
+    expected_checksum = Keyword.get(opts, :expected_checksum)
+    expected_version = Keyword.get(opts, :expected_version)
+
+    cond do
+      not is_nil(expected_modified_time) and
+          not timestamps_match?(file_meta.modified_time, expected_modified_time) ->
+        {:error, :conflict}
+
+      not is_nil(expected_checksum) and file_meta.md5_checksum != expected_checksum ->
+        {:error, :conflict}
+
+      not is_nil(expected_version) and
+          normalize_version(file_meta.version) != normalize_version(expected_version) ->
+        {:error, :conflict}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp timestamps_match?(left, right) do
+    normalize_timestamp(left) == normalize_timestamp(right)
+  end
+
+  defp normalize_timestamp(nil), do: nil
+
+  defp normalize_timestamp(%DateTime{} = dt), do: dt
+
+  defp normalize_timestamp(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _offset} -> dt
+      {:error, _reason} -> value
+    end
+  end
+
+  defp normalize_timestamp(value), do: value
+
+  defp normalize_version(nil), do: nil
+  defp normalize_version(value) when is_binary(value), do: value
+  defp normalize_version(value) when is_integer(value), do: Integer.to_string(value)
+  defp normalize_version(value), do: to_string(value)
 
   defp add_opt(opts, _key, nil), do: opts
   defp add_opt(opts, key, value), do: Keyword.put(opts, key, value)

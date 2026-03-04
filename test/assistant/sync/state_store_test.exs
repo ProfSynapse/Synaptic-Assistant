@@ -421,6 +421,60 @@ defmodule Assistant.Sync.StateStoreTest do
       entries = StateStore.list_history(file.id)
       assert length(entries) == 8
     end
+
+    test "record_write_coordinator_event stores upload operation", %{user: user, synced_file: file} do
+      event = %{
+        type: :success,
+        measurements: %{attempt: 0},
+        metadata: %{intent_id: "files.update:hist-file"}
+      }
+
+      assert :ok =
+               StateStore.record_write_coordinator_event(
+                 user.id,
+                 "hist-file",
+                 "files.update",
+                 event
+               )
+
+      [entry | _] = StateStore.list_history(file.id)
+      assert entry.operation == "upload"
+      assert entry.details["source"] == "write_coordinator"
+      assert entry.details["action"] == "files.update"
+      assert entry.details["event_type"] == "success"
+    end
+
+    test "record_write_coordinator_event stores conflict as conflict_detect", %{user: user, synced_file: file} do
+      event = %{
+        type: :failure,
+        measurements: %{attempt: 0},
+        metadata: %{result_type: :conflict}
+      }
+
+      assert :ok =
+               StateStore.record_write_coordinator_event(
+                 user.id,
+                 "hist-file",
+                 "files.archive",
+                 event
+               )
+
+      [entry | _] = StateStore.list_history(file.id)
+      assert entry.operation == "conflict_detect"
+      assert entry.details["event_type"] == "failure"
+    end
+
+    test "record_write_coordinator_event no-ops when synced file is missing", %{user: user} do
+      event = %{type: :attempt, measurements: %{count: 1}, metadata: %{}}
+
+      assert :ok =
+               StateStore.record_write_coordinator_event(
+                 user.id,
+                 "missing-file-id",
+                 "files.update",
+                 event
+               )
+    end
   end
 
   # ---------------------------------------------------------------
