@@ -2102,7 +2102,7 @@ a {
   line-height: 1.45;
   color: #1f374d;
   width: 100%;
-  padding: 14px 66px 14px 18px;
+  padding: 16px 66px 12px 18px;
   border-radius: 999px;
   resize: none;
   overflow-y: auto;
@@ -2243,7 +2243,7 @@ a {
   .sa-workspace-composer-input.pc-text-input {
     font-size: 0.9rem;
     min-height: 50px;
-    padding: 10px 60px 10px 14px;
+    padding: 12px 60px 8px 14px;
   }
 
   .sa-workspace-send-btn.pc-icon-button {
