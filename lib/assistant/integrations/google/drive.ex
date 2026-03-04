@@ -299,7 +299,10 @@ defmodule Assistant.Integrations.Google.Drive do
               {:error, :conflict}
 
             _ ->
-              Logger.warning("Drive update_file_content failed for #{file_id}: #{inspect(reason)}")
+              Logger.warning(
+                "Drive update_file_content failed for #{file_id}: #{inspect(reason)}"
+              )
+
               {:error, reason}
           end
       end
@@ -379,6 +382,7 @@ defmodule Assistant.Integrations.Google.Drive do
   @doc false
   def classify_write_error(%Tesla.Env{status: status}) when status in [409, 412], do: :conflict
   def classify_write_error(%Tesla.Env{status: 429}), do: :transient
+
   def classify_write_error(%Tesla.Env{status: status}) when status >= 500 and status <= 599,
     do: :transient
 

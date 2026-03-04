@@ -31,12 +31,14 @@ defmodule Assistant.Sync.Workers.UpstreamSyncWorkerTest do
     intent_id = "intent-1"
 
     assert :ok =
-             UpstreamSyncWorker.perform(%Oban.Job{args: %{
-               "action" => "write_intent",
-               "user_id" => user.id,
-               "drive_file_id" => "drive-file-1",
-               "intent_id" => intent_id
-             }})
+             UpstreamSyncWorker.perform(%Oban.Job{
+               args: %{
+                 "action" => "write_intent",
+                 "user_id" => user.id,
+                 "drive_file_id" => "drive-file-1",
+                 "intent_id" => intent_id
+               }
+             })
 
     synced = StateStore.get_synced_file(user.id, "drive-file-1")
     assert synced.sync_status == "synced"
@@ -54,20 +56,24 @@ defmodule Assistant.Sync.Workers.UpstreamSyncWorkerTest do
     intent_id = "intent-replay"
 
     assert :ok =
-             UpstreamSyncWorker.perform(%Oban.Job{args: %{
-               "action" => "write_intent",
-               "user_id" => user.id,
-               "drive_file_id" => "drive-file-1",
-               "intent_id" => intent_id
-             }})
+             UpstreamSyncWorker.perform(%Oban.Job{
+               args: %{
+                 "action" => "write_intent",
+                 "user_id" => user.id,
+                 "drive_file_id" => "drive-file-1",
+                 "intent_id" => intent_id
+               }
+             })
 
     assert :ok =
-             UpstreamSyncWorker.perform(%Oban.Job{args: %{
-               "action" => "write_intent",
-               "user_id" => user.id,
-               "drive_file_id" => "drive-file-1",
-               "intent_id" => intent_id
-             }})
+             UpstreamSyncWorker.perform(%Oban.Job{
+               args: %{
+                 "action" => "write_intent",
+                 "user_id" => user.id,
+                 "drive_file_id" => "drive-file-1",
+                 "intent_id" => intent_id
+               }
+             })
 
     synced = StateStore.get_synced_file(user.id, "drive-file-1")
 

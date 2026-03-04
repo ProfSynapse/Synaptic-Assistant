@@ -1,7 +1,7 @@
 # Spec: Central Chat Interface
 
 > Created: 2026-03-03
-> Updated: 2026-03-03
+> Updated: 2026-03-04
 > Status: PROPOSED
 > Direction: Chat-first single conversation, with inspect-only trace modals
 
@@ -315,13 +315,13 @@ The page should look like a polished chat app with structured receipts, not an a
 
 | Need | Petal component |
 | --- | --- |
-| chat message containers | `Card` or lightweight custom bubble wrapper |
+| chat message containers | lightweight custom bubble wrapper (no dedicated Petal chat primitive) |
 | source and status labels | `Badge` |
 | trace summary cards | `Card` |
 | inspect overlays | `Modal`, `SlideOver` |
-| live run state | `Progress`, `Badge` |
+| live run state | `Badge` (+ optional `Progress`) |
 | rounded composer shell | custom wrapper + `input` styling |
-| circular send control | `Button.icon_button` or a thin local wrapper around it |
+| circular send control | `Button.icon_button` |
 | loading states | `Skeleton` |
 
 ## LiveView Implementation Strategy
@@ -385,6 +385,33 @@ The chat page should read as one conversation, even if system traces come from m
 - Ordered message history for that conversation
 - Source metadata for each inbound message
 - Assistant replies stored durably
+
+### Persisted source metadata contract (v1)
+
+User messages should carry a persisted `messages.metadata` map with:
+
+```elixir
+%{
+  "source" => %{
+    "kind" => "in_app" | "channel" | "channel_replay",
+    "channel" => "in_app" | "google_chat" | "slack" | "telegram" | "discord" | "...",
+    # optional identifiers
+    "message_id" => "...",
+    "space_id" => "...",
+    "thread_id" => "...",
+    "external_user_id" => "...",
+    "user_display_name" => "...",
+    "user_email" => "..."
+  },
+  # optional raw adapter context
+  "channel_metadata" => %{...}
+}
+```
+
+UI rule:
+
+- Source chips in the chat feed must be rendered from persisted metadata only.
+- If metadata is missing, render no chip rather than guessing.
 
 ### Trace data needed for inspect cards
 

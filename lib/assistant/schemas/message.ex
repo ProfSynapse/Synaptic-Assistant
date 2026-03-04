@@ -17,6 +17,7 @@ defmodule Assistant.Schemas.Message do
     field :content, :string
     field :tool_calls, :map
     field :tool_results, :map
+    field :metadata, :map, default: %{}
     field :token_count, :integer
 
     # Sub-agent trace: links to the parent execution that spawned this message
@@ -28,7 +29,14 @@ defmodule Assistant.Schemas.Message do
   end
 
   @required_fields [:role, :conversation_id]
-  @optional_fields [:content, :tool_calls, :tool_results, :token_count, :parent_execution_id]
+  @optional_fields [
+    :content,
+    :tool_calls,
+    :tool_results,
+    :metadata,
+    :token_count,
+    :parent_execution_id
+  ]
 
   def changeset(message, attrs) do
     message

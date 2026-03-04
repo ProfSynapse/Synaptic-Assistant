@@ -72,7 +72,10 @@ defmodule Assistant.Sync.WriteCoordinator do
             emit_event(
               :failure,
               %{attempt: attempt},
-              Map.merge(base_metadata, %{result_type: classify_error.(reason), reason: inspect(reason)}),
+              Map.merge(base_metadata, %{
+                result_type: classify_error.(reason),
+                reason: inspect(reason)
+              }),
               opts
             )
 

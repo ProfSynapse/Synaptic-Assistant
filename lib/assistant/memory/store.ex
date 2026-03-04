@@ -201,7 +201,7 @@ defmodule Assistant.Memory.Store do
 
     * `conversation_id` - The conversation to append to.
     * `messages` - List of message attribute maps. Each must have `:role`.
-      Optional: `:content`, `:tool_calls`, `:tool_results`, `:token_count`.
+      Optional: `:content`, `:tool_calls`, `:tool_results`, `:metadata`, `:token_count`.
 
   ## Returns
 

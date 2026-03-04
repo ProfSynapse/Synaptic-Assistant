@@ -75,6 +75,10 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
     def handle_call({:send_message, _message}, _from, state) do
       {:reply, {:ok, state.response}, state}
     end
+
+    def handle_call({:send_message, _message, _metadata}, _from, state) do
+      {:reply, {:ok, state.response}, state}
+    end
   end
 
   # ---------------------------------------------------------------

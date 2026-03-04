@@ -69,7 +69,7 @@ defmodule Assistant.Skills.Files.Update do
   end
 
   defp do_update(drive, token, file_id, search, replace, replace_all?, context) do
-      with {:ok, {content, precondition_opts}} <- read_with_preconditions(drive, token, file_id),
+    with {:ok, {content, precondition_opts}} <- read_with_preconditions(drive, token, file_id),
          {:changed, updated} <- apply_replacement(content, search, replace, replace_all?),
          {:ok, file} <-
            update_with_preconditions(
@@ -162,7 +162,15 @@ defmodule Assistant.Skills.Files.Update do
         user_id = context.metadata[:user_id] || "unknown"
 
         WriteCoordinator.execute(
-          fn -> drive.update_file_content(token, file_id, updated_content, "text/plain", precondition_opts) end,
+          fn ->
+            drive.update_file_content(
+              token,
+              file_id,
+              updated_content,
+              "text/plain",
+              precondition_opts
+            )
+          end,
           user_id: user_id,
           file_id: file_id,
           intent_id: "files.update:#{file_id}",
