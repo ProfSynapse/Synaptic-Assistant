@@ -15,6 +15,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.IntegrationSettings.Registry
   alias Assistant.Integrations.OpenAI
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
+  alias Assistant.Integrations.Google.Drive.Changes
   alias Assistant.Integrations.Google.Drive, as: GoogleDrive
   alias Assistant.Integrations.OpenRouter
   alias Assistant.MemoryExplorer
@@ -23,6 +24,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.ModelDefaults
   alias Assistant.OrchestratorSystemPrompt
   alias Assistant.SkillPermissions
+  alias Assistant.Sync.StateStore
   alias Assistant.Transcripts
   alias Assistant.Workflows
   alias AssistantWeb.SettingsLive.Context
@@ -381,6 +383,97 @@ defmodule AssistantWeb.SettingsLive.Events do
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to disconnect drive.")}
+    end
+  end
+
+  def handle_event("open_sync_target_browser", _params, socket) do
+    drives = sync_target_drives(socket)
+
+    if drives == [] do
+      {:noreply, put_flash(socket, :error, "Connect and enable at least one drive first.")}
+    else
+      selected_drive =
+        socket.assigns[:sync_target_selected_drive] ||
+          drives |> List.first() |> Map.get(:value)
+
+      {:noreply,
+       socket
+       |> assign(:sync_target_browser_open, true)
+       |> assign(:sync_target_drives, drives)
+       |> assign(:sync_target_selected_drive, selected_drive)
+       |> assign(:sync_target_error, nil)
+       |> load_sync_target_folders(selected_drive)}
+    end
+  end
+
+  def handle_event("close_sync_target_browser", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:sync_target_browser_open, false)
+     |> assign(:sync_target_loading, false)
+     |> assign(:sync_target_error, nil)}
+  end
+
+  def handle_event("change_sync_target_drive", %{"sync_target_browser" => params}, socket) do
+    selected_drive = Map.get(params, "drive_id", "")
+
+    {:noreply,
+     socket
+     |> assign(:sync_target_selected_drive, selected_drive)
+     |> assign(:sync_target_error, nil)
+     |> load_sync_target_folders(selected_drive)}
+  end
+
+  def handle_event(
+        "add_sync_target",
+        %{"drive_id" => raw_drive_id, "folder_id" => folder_id, "folder_name" => folder_name},
+        socket
+      ) do
+    drive_id = normalize_sync_drive_id(raw_drive_id)
+    folder_name = String.trim(to_string(folder_name))
+
+    if folder_name == "" do
+      {:noreply, put_flash(socket, :error, "Folder name is required.")}
+    else
+      Context.with_linked_user(socket, fn _settings_user, user_id ->
+        with {:ok, access_token} <- GoogleAuth.user_token(user_id),
+             {:ok, _scope} <-
+               StateStore.upsert_scope(%{
+                 user_id: user_id,
+                 drive_id: drive_id,
+                 folder_id: folder_id,
+                 folder_name: folder_name,
+                 access_level: "read_write"
+               }),
+             {:ok, token} <-
+               drive_changes_module().get_start_page_token(access_token, drive_id: drive_id),
+             {:ok, _cursor} <-
+               StateStore.upsert_cursor(%{
+                 user_id: user_id,
+                 drive_id: drive_id,
+                 start_page_token: token
+               }) do
+          {:noreply,
+           socket
+           |> assign(:sync_target_browser_open, false)
+           |> assign(:sync_target_loading, false)
+           |> assign(:sync_target_error, nil)
+           |> Loaders.load_sync_scopes()
+           |> put_flash(:info, "Added sync target #{folder_name}.")}
+        else
+          {:error, :not_connected} ->
+            {:noreply,
+             socket
+             |> assign(:sync_target_loading, false)
+             |> put_flash(:error, "Connect your Google account first.")}
+
+          {:error, _reason} ->
+            {:noreply,
+             socket
+             |> assign(:sync_target_loading, false)
+             |> put_flash(:error, "Failed to add sync target.")}
+        end
+      end)
     end
   end
 
@@ -1079,6 +1172,101 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   def handle_event("close_memory", _params, socket) do
     {:noreply, assign(socket, :selected_memory, nil)}
+  end
+
+  defp sync_target_drives(socket) do
+    socket.assigns[:connected_drives]
+    |> List.wrap()
+    |> Enum.filter(& &1.enabled)
+    |> Enum.map(fn drive ->
+      value = if drive.drive_type == "personal", do: "__personal__", else: drive.drive_id
+
+      %{
+        value: value,
+        label: drive.drive_name
+      }
+    end)
+  end
+
+  defp load_sync_target_folders(socket, raw_drive_id) do
+    drive_id = normalize_sync_drive_id(raw_drive_id)
+
+    query = "mimeType='application/vnd.google-apps.folder' and trashed=false"
+    folder_opts = sync_folder_query_opts(drive_id)
+
+    socket =
+      socket
+      |> assign(:sync_target_loading, true)
+      |> assign(:sync_target_folders, [])
+
+    case Context.current_user_id(socket) do
+      nil ->
+        socket
+        |> assign(:sync_target_loading, false)
+        |> assign(:sync_target_error, "No linked user account.")
+
+      user_id ->
+        case GoogleAuth.user_token(user_id) do
+          {:ok, access_token} ->
+            case GoogleDrive.list_files(access_token, query, folder_opts) do
+              {:ok, folders} ->
+                normalized_folders =
+                  folders
+                  |> Enum.map(fn folder -> %{id: folder.id, name: folder.name} end)
+                  |> Enum.sort_by(&String.downcase(&1.name || ""))
+
+                socket
+                |> assign(:sync_target_loading, false)
+                |> assign(:sync_target_error, nil)
+                |> assign(:sync_target_folders, normalized_folders)
+
+              {:error, _reason} ->
+                socket
+                |> assign(:sync_target_loading, false)
+                |> assign(:sync_target_error, "Unable to load folders for this drive.")
+            end
+
+          {:error, :not_connected} ->
+            socket
+            |> assign(:sync_target_loading, false)
+            |> assign(:sync_target_error, "Connect your Google account first.")
+
+          {:error, _reason} ->
+            socket
+            |> assign(:sync_target_loading, false)
+            |> assign(:sync_target_error, "Google authorization is unavailable.")
+        end
+    end
+  end
+
+  defp normalize_sync_drive_id(""), do: nil
+  defp normalize_sync_drive_id("__personal__"), do: nil
+  defp normalize_sync_drive_id(nil), do: nil
+  defp normalize_sync_drive_id(drive_id), do: drive_id
+
+  defp drive_changes_module do
+    Application.get_env(:assistant, :google_drive_changes_module, Changes)
+  end
+
+  defp sync_folder_query_opts(nil) do
+    [
+      pageSize: 100,
+      orderBy: "name",
+      corpora: "user",
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true
+    ]
+  end
+
+  defp sync_folder_query_opts(drive_id) do
+    [
+      pageSize: 100,
+      orderBy: "name",
+      corpora: "drive",
+      driveId: drive_id,
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true
+    ]
   end
 
   defp login_url(token) do

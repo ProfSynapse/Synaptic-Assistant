@@ -9,6 +9,7 @@ defmodule AssistantWeb.Components.DriveSettings do
   attr :available_drives, :list, required: true
   attr :drives_loading, :boolean, default: false
   attr :has_google_token, :boolean, default: false
+  attr :sync_scopes, :list, default: []
 
   def drive_settings(assigns) do
     personal_connected = has_personal_drive?(assigns.connected_drives)
@@ -20,6 +21,10 @@ defmodule AssistantWeb.Components.DriveSettings do
       assigns
       |> assign(:personal_connected, personal_connected)
       |> assign(:available_not_connected, available_not_connected)
+      |> assign(
+        :scopes_with_drive,
+        scopes_with_drive(assigns.sync_scopes, assigns.connected_drives)
+      )
 
     ~H"""
     <div class="sa-drive-settings">
@@ -131,6 +136,41 @@ defmodule AssistantWeb.Components.DriveSettings do
             </div>
           </div>
         </div>
+
+        <div class="sa-drive-available" style="margin-top: 1rem;">
+          <div class="sa-row">
+            <div>
+              <h4>Sync Targets</h4>
+              <p class="sa-muted">Folders currently enabled for synchronization.</p>
+            </div>
+            <button
+              :if={@connected_drives != []}
+              type="button"
+              class="sa-btn secondary"
+              phx-click="open_sync_target_browser"
+            >
+              <.icon name="hero-plus" class="h-4 w-4" /> Add Sync Target
+            </button>
+          </div>
+
+          <div :if={@scopes_with_drive == []} class="sa-drive-notice sa-drive-notice--info">
+            <.icon name="hero-information-circle" class="h-5 w-5" />
+            <span>No sync targets yet. Add a folder to start syncing files from Drive.</span>
+          </div>
+
+          <div :if={@scopes_with_drive != []} class="sa-drive-list">
+            <div :for={scope <- @scopes_with_drive} class="sa-drive-row">
+              <div class="sa-drive-info">
+                <.icon name="hero-folder" class="h-5 w-5 sa-drive-icon" />
+                <div>
+                  <span class="sa-drive-name">{scope.folder_name}</span>
+                  <span class="sa-drive-type">{scope.drive_name}</span>
+                </div>
+              </div>
+              <span class="sa-drive-type">{scope.access_level}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
     """
@@ -152,4 +192,22 @@ defmodule AssistantWeb.Components.DriveSettings do
   defp drive_type_label("personal"), do: "Personal"
   defp drive_type_label("shared"), do: "Shared"
   defp drive_type_label(type), do: type
+
+  defp scopes_with_drive(scopes, connected_drives) do
+    drive_names = Map.new(connected_drives, &{&1.drive_id, &1.drive_name})
+
+    Enum.map(scopes, fn scope ->
+      drive_name =
+        case scope.drive_id do
+          nil -> "My Drive"
+          drive_id -> Map.get(drive_names, drive_id, "Shared Drive")
+        end
+
+      %{
+        folder_name: scope.folder_name,
+        access_level: scope.access_level,
+        drive_name: drive_name
+      }
+    end)
+  end
 end

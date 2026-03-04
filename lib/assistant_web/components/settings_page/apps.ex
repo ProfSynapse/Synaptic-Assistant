@@ -15,6 +15,7 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
   alias Assistant.IntegrationSettings.Registry
 
   import AssistantWeb.Components.DriveSettings, only: [drive_settings: 1]
+  import AssistantWeb.Components.SyncTargetBrowser, only: [sync_target_browser: 1]
 
   def apps_section(assigns) do
     is_admin =
@@ -63,7 +64,18 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         available_drives={@available_drives}
         drives_loading={@drives_loading}
         has_google_token={GoogleAuth.configured?()}
+        sync_scopes={@sync_scopes}
       />
+
+      <.sync_target_browser
+        open={@sync_target_browser_open}
+        drives={@sync_target_drives}
+        selected_drive={@sync_target_selected_drive}
+        folders={@sync_target_folders}
+        loading={@sync_target_loading}
+        error={@sync_target_error}
+      />
+
       <div :if={!@google_connected} class="sa-drive-settings">
         <h3>Google Drive Access</h3>
         <div class="sa-drive-notice sa-drive-notice--info">

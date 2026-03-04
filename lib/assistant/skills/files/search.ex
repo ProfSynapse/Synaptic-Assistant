@@ -1,178 +1,127 @@
 # lib/assistant/skills/files/search.ex — Handler for files.search skill.
 #
-# Searches Google Drive files using the Drive API wrapper. Supports text query,
-# MIME type filtering, folder scoping, and result limiting. Uses Drive.Scoping
-# to constrain searches to the user's enabled drives.
+# Searches the local SyncedFile database directly for matched files.
+# Supports text query (matching file name or local path),
+# MIME type filtering, folder scoping (via parent checking), and result limiting.
 #
 # Related files:
-#   - lib/assistant/integrations/google/drive.ex (Drive API client)
-#   - lib/assistant/integrations/google/drive/scoping.ex (query param builder)
 #   - lib/assistant/skills/handler.ex (behaviour)
 #   - priv/skills/files/search.md (skill definition)
 
 defmodule Assistant.Skills.Files.Search do
   @moduledoc """
-  Skill handler for searching Google Drive files.
+  Skill handler for searching synced Google Drive files locally.
 
-  Builds a Drive query from CLI flags (query text, type, folder) and returns
+  Builds a local database query from CLI flags (query text, type, folder) and returns
   a formatted list of matching files for LLM context.
   """
 
   @behaviour Assistant.Skills.Handler
 
+  import Ecto.Query
+  alias Assistant.Repo
+  alias Assistant.Schemas.SyncedFile
   alias Assistant.Skills.Helpers, as: SkillsHelpers
   alias Assistant.Skills.Result
   alias Assistant.Integrations.Google.Drive
-  alias Assistant.Integrations.Google.Drive.Scoping
 
   @default_limit 20
   @max_limit 100
-  @valid_drive_id ~r/^[A-Za-z0-9_-]+$/
-  @rejected_query_chars ~r/[()=<>]/
 
   @impl true
   def execute(flags, context) do
-    case Map.get(context.integrations, :drive) do
-      nil ->
-        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
+    # Google token is not strictly necessary for local search, but to keep semantics 
+    # similar, we make sure they connected at least a user_id
+    user_id = context.user_id
 
-      drive ->
-        case context.metadata[:google_token] do
-          nil ->
-            {:ok,
-             %Result{
-               status: :error,
-               content: "Google authentication required. Please connect your Google account."
-             }}
-
-          token ->
-            do_execute(flags, drive, token, context)
-        end
+    if is_nil(user_id) do
+      {:ok, %Result{status: :error, content: "User context is required to search files."}}
+    else
+      do_execute(flags, user_id)
     end
   end
 
-  defp do_execute(flags, drive, token, context) do
-    query = Map.get(flags, "query")
+  defp do_execute(flags, user_id) do
+    query_text = Map.get(flags, "query")
     type = Map.get(flags, "type")
+    # For a folder flag, we might not have a reliable way to query a parent locally
+    # unless we store `parent_id` on SyncedFile or match via local_path logic.
+    # Currently local_path contains parent structure (e.g. Folders/File)
     folder = Map.get(flags, "folder")
     limit = SkillsHelpers.parse_limit(Map.get(flags, "limit"), @default_limit, @max_limit)
 
-    case build_query(query, type, folder) do
-      {:ok, q} ->
-        enabled_drives = context.metadata[:enabled_drives] || []
-        search_files(drive, token, q, limit, enabled_drives)
+    files = search_files_local(user_id, query_text, type, folder, limit)
 
-      {:error, reason} ->
-        {:ok, %Result{status: :error, content: reason}}
+    if Enum.empty?(files) do
+      {:ok,
+       %Result{
+         status: :ok,
+         content: "No files found matching the given criteria.",
+         metadata: %{count: 0}
+       }}
+    else
+      content = format_file_list(files)
+
+      {:ok,
+       %Result{
+         status: :ok,
+         content: content,
+         metadata: %{count: length(files)}
+       }}
+    end
+  rescue
+    e in _ ->
+      {:ok,
+       %Result{
+         status: :error,
+         content: "Local search failed: #{Exception.message(e)}"
+       }}
+  end
+
+  defp search_files_local(user_id, query_text, type, folder, limit) do
+    base_query =
+      from s in SyncedFile,
+        where: s.user_id == ^user_id,
+        where: s.sync_status != "error",
+        limit: ^limit,
+        order_by: [desc: s.last_synced_at]
+
+    base_query
+    |> apply_query_text(query_text)
+    |> apply_type(type)
+    |> apply_folder(folder)
+    |> Repo.all()
+  end
+
+  defp apply_query_text(query, nil), do: query
+
+  defp apply_query_text(query, text) do
+    search_term = "%#{text}%"
+
+    from s in query,
+      where: ilike(s.drive_file_name, ^search_term) or ilike(s.local_path, ^search_term)
+  end
+
+  defp apply_type(query, nil), do: query
+
+  defp apply_type(query, type) do
+    case resolve_type(type) do
+      {:ok, mime} ->
+        from s in query, where: s.drive_mime_type == ^mime
+
+      _ ->
+        # Ignore invalid types or just skip
+        query
     end
   end
 
-  defp search_files(drive, token, query, limit, enabled_drives) do
-    scopes =
-      case enabled_drives do
-        [] ->
-          # No drives configured — search user's default scope
-          [[]]
+  defp apply_folder(query, nil), do: query
 
-        drives ->
-          case Scoping.build_query_params(drives) do
-            {:ok, param_sets} -> param_sets
-            {:error, :no_drives_enabled} -> [[]]
-          end
-      end
-
-    case query_all_scopes(drive, token, query, limit, scopes) do
-      {:ok, []} ->
-        {:ok,
-         %Result{
-           status: :ok,
-           content: "No files found matching the given criteria.",
-           metadata: %{count: 0}
-         }}
-
-      {:ok, files} ->
-        content = format_file_list(files)
-
-        {:ok,
-         %Result{
-           status: :ok,
-           content: content,
-           metadata: %{count: length(files)}
-         }}
-
-      {:error, reason} ->
-        {:ok,
-         %Result{
-           status: :error,
-           content: "Drive search failed: #{inspect(reason)}"
-         }}
-    end
-  end
-
-  # Issue one files.list call per scope, merge and deduplicate by file ID,
-  # then trim to the requested limit.
-  defp query_all_scopes(drive, token, query, limit, scopes) do
-    results =
-      Enum.reduce_while(scopes, {:ok, []}, fn scope_opts, {:ok, acc} ->
-        opts = Keyword.merge([pageSize: limit], scope_opts)
-
-        case drive.list_files(token, query, opts) do
-          {:ok, files} -> {:cont, {:ok, acc ++ files}}
-          {:error, _} = err -> {:halt, err}
-        end
-      end)
-
-    case results do
-      {:ok, all_files} ->
-        deduped =
-          all_files
-          |> Enum.uniq_by(& &1.id)
-          |> Enum.take(limit)
-
-        {:ok, deduped}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
-  defp build_query(nil, nil, nil) do
-    {:ok, "trashed = false"}
-  end
-
-  defp build_query(query, type, folder) do
-    parts = ["trashed = false"]
-
-    parts =
-      if query do
-        case validate_query_text(query) do
-          :ok -> [~s(name contains '#{escape_query(query)}') | parts]
-          {:error, _} = err -> throw(err)
-        end
-      else
-        parts
-      end
-
-    parts =
-      case resolve_type(type) do
-        {:ok, mime} -> [~s(mimeType = '#{mime}') | parts]
-        :skip -> parts
-        {:error, _} = err -> throw(err)
-      end
-
-    parts =
-      if folder do
-        case validate_drive_id(folder) do
-          :ok -> [~s('#{folder}' in parents) | parts]
-          {:error, _} = err -> throw(err)
-        end
-      else
-        parts
-      end
-
-    {:ok, Enum.join(Enum.reverse(parts), " and ")}
-  catch
-    {:error, reason} -> {:error, reason}
+  defp apply_folder(query, folder) do
+    # Assuming folder is either an ID or path segment
+    # For now, we search within local_path if a folder is specified
+    search_term = "%#{folder}%"
+    from s in query, where: ilike(s.local_path, ^search_term)
   end
 
   defp resolve_type(nil), do: :skip
@@ -200,14 +149,14 @@ defmodule Assistant.Skills.Files.Search do
   end
 
   defp format_file_row(file) do
-    type_label = friendly_type(file.mime_type)
+    type_label = friendly_type(file.drive_mime_type)
 
-    modified =
-      if file.modified_time, do: " | Modified: #{format_time(file.modified_time)}", else: ""
+    synced =
+      if file.last_synced_at, do: " | Last Synced: #{format_time(file.last_synced_at)}", else: ""
 
-    size_str = if file.size, do: " | Size: #{format_size(file.size)}", else: ""
+    path_str = if file.local_path, do: " | Local Path: #{file.local_path}", else: ""
 
-    "- [#{file.id}] #{file.name} (#{type_label})#{modified}#{size_str}"
+    "- [#{file.drive_file_id}] #{file.drive_file_name} (#{type_label})#{path_str}#{synced}"
   end
 
   defp friendly_type("application/vnd.google-apps.document"), do: "Google Doc"
@@ -221,41 +170,4 @@ defmodule Assistant.Skills.Files.Search do
   defp format_time(%DateTime{} = dt), do: Calendar.strftime(dt, "%Y-%m-%d %H:%M")
   defp format_time(time) when is_binary(time), do: time
   defp format_time(_), do: ""
-
-  defp format_size(size) when is_binary(size) do
-    case Integer.parse(size) do
-      {bytes, _} -> format_bytes(bytes)
-      :error -> size
-    end
-  end
-
-  defp format_size(size) when is_integer(size), do: format_bytes(size)
-  defp format_size(_), do: ""
-
-  defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
-  defp format_bytes(bytes) when bytes < 1_048_576, do: "#{Float.round(bytes / 1024, 1)} KB"
-  defp format_bytes(bytes), do: "#{Float.round(bytes / 1_048_576, 1)} MB"
-
-  defp validate_drive_id(id) do
-    if Regex.match?(@valid_drive_id, id) do
-      :ok
-    else
-      {:error,
-       "Invalid folder ID '#{String.slice(id, 0, 20)}'. Folder IDs contain only alphanumeric characters, hyphens, and underscores."}
-    end
-  end
-
-  defp validate_query_text(query) do
-    if Regex.match?(@rejected_query_chars, query) do
-      {:error, "Search query cannot contain special characters: ( ) = < >"}
-    else
-      :ok
-    end
-  end
-
-  defp escape_query(str) do
-    str
-    |> String.replace("\\", "\\\\")
-    |> String.replace("'", "\\'")
-  end
 end

@@ -1,254 +1,174 @@
-# test/assistant/sync/file_manager_test.exs
-#
-# Tests for Assistant.Sync.FileManager — encrypted local file I/O with
-# path traversal protection. Security-critical (P0). Uses temp directories
-# to avoid polluting the real workspace.
-#
-# Related files:
-#   - lib/assistant/sync/file_manager.ex (module under test)
-#   - lib/assistant/vault.ex (Cloak encryption vault)
-
 defmodule Assistant.Sync.FileManagerTest do
-  use ExUnit.Case, async: false
+  use Assistant.DataCase, async: true
 
+  alias Assistant.Repo
+  alias Assistant.Schemas.SyncedFile
+  alias Assistant.Schemas.User
   alias Assistant.Sync.FileManager
 
-  @user_a "user-aaa-1111"
-  @user_b "user-bbb-2222"
-
   setup do
-    # Create a unique temp directory for each test
-    tmp_base = Path.join(System.tmp_dir!(), "fm_test_#{System.unique_integer([:positive])}")
-    File.mkdir_p!(tmp_base)
-
-    # Override the workspace dir for this test
-    original = Application.get_env(:assistant, :sync_workspace_dir)
-    Application.put_env(:assistant, :sync_workspace_dir, tmp_base)
-
-    on_exit(fn ->
-      # Restore original config
-      if original do
-        Application.put_env(:assistant, :sync_workspace_dir, original)
-      else
-        Application.delete_env(:assistant, :sync_workspace_dir)
-      end
-
-      # Clean up temp directory
-      File.rm_rf!(tmp_base)
-    end)
-
-    %{tmp_base: tmp_base}
+    user_a = insert_user("file-manager-a")
+    user_b = insert_user("file-manager-b")
+    %{user_a: user_a, user_b: user_b}
   end
-
-  # ---------------------------------------------------------------
-  # write_file + read_file (encryption round-trip)
-  # ---------------------------------------------------------------
 
   describe "write_file/3 and read_file/2" do
-    test "round-trips content through encryption" do
+    test "writes to an existing synced file and reads it back", %{user_a: user_a} do
+      insert_synced_file(user_a.id, "test.md")
+
       content = "Hello, encrypted world!"
-      assert {:ok, full_path} = FileManager.write_file(@user_a, "test.md", content)
-      assert File.exists?(full_path)
+      assert {:ok, "test.md"} = FileManager.write_file(user_a.id, "test.md", content)
 
-      # Raw file on disk should NOT be the original plaintext
-      raw = File.read!(full_path)
-      refute raw == content
-
-      # Reading back should decrypt to original
-      assert {:ok, ^content} = FileManager.read_file(@user_a, "test.md")
+      assert {:ok, "Hello, encrypted world!"} = FileManager.read_file(user_a.id, "test.md")
     end
 
-    test "writes to nested subdirectories" do
+    test "writes to nested paths when row exists", %{user_a: user_a} do
+      insert_synced_file(user_a.id, "sub/dir/file.txt")
+
       content = "nested content"
-      assert {:ok, _path} = FileManager.write_file(@user_a, "sub/dir/file.txt", content)
-      assert {:ok, ^content} = FileManager.read_file(@user_a, "sub/dir/file.txt")
+
+      assert {:ok, "sub/dir/file.txt"} =
+               FileManager.write_file(user_a.id, "sub/dir/file.txt", content)
+
+      assert {:ok, "nested content"} = FileManager.read_file(user_a.id, "sub/dir/file.txt")
     end
 
-    test "read_file returns :enoent for nonexistent file" do
-      assert {:error, :enoent} = FileManager.read_file(@user_a, "nonexistent.md")
+    test "write_file returns :enoent when synced row does not exist", %{user_a: user_a} do
+      assert {:error, :enoent} = FileManager.write_file(user_a.id, "nonexistent.md", "content")
     end
 
-    test "overwrites existing file" do
-      assert {:ok, _} = FileManager.write_file(@user_a, "overwrite.md", "v1")
-      assert {:ok, _} = FileManager.write_file(@user_a, "overwrite.md", "v2")
-      assert {:ok, "v2"} = FileManager.read_file(@user_a, "overwrite.md")
+    test "read_file returns :enoent for nonexistent file", %{user_a: user_a} do
+      assert {:error, :enoent} = FileManager.read_file(user_a.id, "nonexistent.md")
+    end
+
+    test "overwrites existing content", %{user_a: user_a} do
+      insert_synced_file(user_a.id, "overwrite.md")
+
+      assert {:ok, "overwrite.md"} = FileManager.write_file(user_a.id, "overwrite.md", "v1")
+      assert {:ok, "overwrite.md"} = FileManager.write_file(user_a.id, "overwrite.md", "v2")
+      assert {:ok, "v2"} = FileManager.read_file(user_a.id, "overwrite.md")
     end
   end
-
-  # ---------------------------------------------------------------
-  # Path traversal prevention (SECURITY)
-  # ---------------------------------------------------------------
 
   describe "path traversal prevention" do
-    test "rejects absolute paths" do
+    test "rejects absolute paths", %{user_a: user_a} do
       assert {:error, :path_not_allowed} =
-               FileManager.write_file(@user_a, "/etc/passwd", "hack")
+               FileManager.write_file(user_a.id, "/etc/passwd", "hack")
     end
 
-    test "rejects ../ traversal" do
+    test "rejects ../ traversal", %{user_a: user_a} do
       assert {:error, :path_not_allowed} =
-               FileManager.write_file(@user_a, "../escape.txt", "hack")
+               FileManager.write_file(user_a.id, "../escape.txt", "hack")
     end
 
-    test "rejects nested ../ traversal" do
+    test "rejects nested ../ traversal", %{user_a: user_a} do
       assert {:error, :path_not_allowed} =
-               FileManager.write_file(@user_a, "sub/../../escape.txt", "hack")
+               FileManager.write_file(user_a.id, "sub/../../escape.txt", "hack")
     end
 
-    test "rejects ../ in read_file" do
+    test "rejects ../ in read_file", %{user_a: user_a} do
       assert {:error, :path_not_allowed} =
-               FileManager.read_file(@user_a, "../other_user/secret.md")
+               FileManager.read_file(user_a.id, "../other_user/secret.md")
     end
 
-    test "rejects ../ in delete_file" do
+    test "rejects ../ in delete_file", %{user_a: user_a} do
       assert {:error, :path_not_allowed} =
-               FileManager.delete_file(@user_a, "../escape.txt")
+               FileManager.delete_file(user_a.id, "../escape.txt")
     end
 
-    test "rejects absolute path in build_path" do
-      assert {:error, :path_not_allowed} = FileManager.build_path(@user_a, "/tmp/evil")
+    test "rejects absolute path in build_path", %{user_a: user_a} do
+      assert {:error, :path_not_allowed} = FileManager.build_path(user_a.id, "/tmp/evil")
     end
 
-    test "rejects ../ in build_path" do
-      assert {:error, :path_not_allowed} = FileManager.build_path(@user_a, "../escape")
-    end
-
-    test "rejects user_id containing forward slash" do
-      assert {:error, :path_not_allowed} =
-               FileManager.write_file("../evil-user", "test.md", "hack")
-    end
-
-    test "rejects user_id containing backslash" do
-      assert {:error, :path_not_allowed} =
-               FileManager.write_file("evil\\user", "test.md", "hack")
-    end
-
-    test "rejects user_id containing .." do
-      assert {:error, :path_not_allowed} =
-               FileManager.write_file("user..escape", "test.md", "hack")
+    test "rejects ../ in build_path", %{user_a: user_a} do
+      assert {:error, :path_not_allowed} = FileManager.build_path(user_a.id, "../escape")
     end
   end
-
-  # ---------------------------------------------------------------
-  # Symlink rejection (SECURITY)
-  # ---------------------------------------------------------------
-
-  describe "symlink rejection" do
-    test "rejects symlinks in path", %{tmp_base: tmp_base} do
-      # Create a real file outside user workspace
-      outside_dir = Path.join(tmp_base, "outside")
-      File.mkdir_p!(outside_dir)
-      outside_file = Path.join(outside_dir, "secret.txt")
-      File.write!(outside_file, "secret data")
-
-      # Create user dir and a symlink inside it
-      user_dir = Path.join(tmp_base, @user_a)
-      File.mkdir_p!(user_dir)
-      symlink_path = Path.join(user_dir, "link.txt")
-
-      case File.ln_s(outside_file, symlink_path) do
-        :ok ->
-          # Should reject reading through the symlink
-          assert {:error, :path_not_allowed} = FileManager.read_file(@user_a, "link.txt")
-
-        {:error, :enotsup} ->
-          # Symlinks not supported on this filesystem — skip
-          :ok
-      end
-    end
-  end
-
-  # ---------------------------------------------------------------
-  # Per-user isolation
-  # ---------------------------------------------------------------
 
   describe "per-user isolation" do
-    test "user A cannot access user B's files" do
-      # Write a file for user A
-      assert {:ok, _} = FileManager.write_file(@user_a, "private.md", "A's secret")
+    test "user A cannot access user B's files", %{user_a: user_a, user_b: user_b} do
+      insert_synced_file(user_a.id, "private.md")
+      assert {:ok, "private.md"} = FileManager.write_file(user_a.id, "private.md", "A's secret")
 
-      # User B should not see it (different directory)
-      assert {:error, :enoent} = FileManager.read_file(@user_b, "private.md")
+      assert {:error, :enoent} = FileManager.read_file(user_b.id, "private.md")
     end
 
-    test "users get separate directories" do
-      assert {:ok, _} = FileManager.write_file(@user_a, "shared_name.md", "A content")
-      assert {:ok, _} = FileManager.write_file(@user_b, "shared_name.md", "B content")
+    test "users can have same local_path independently", %{user_a: user_a, user_b: user_b} do
+      insert_synced_file(user_a.id, "shared_name.md")
+      insert_synced_file(user_b.id, "shared_name.md")
 
-      assert {:ok, "A content"} = FileManager.read_file(@user_a, "shared_name.md")
-      assert {:ok, "B content"} = FileManager.read_file(@user_b, "shared_name.md")
+      assert {:ok, "shared_name.md"} =
+               FileManager.write_file(user_a.id, "shared_name.md", "A content")
+
+      assert {:ok, "shared_name.md"} =
+               FileManager.write_file(user_b.id, "shared_name.md", "B content")
+
+      assert {:ok, "A content"} = FileManager.read_file(user_a.id, "shared_name.md")
+      assert {:ok, "B content"} = FileManager.read_file(user_b.id, "shared_name.md")
     end
   end
-
-  # ---------------------------------------------------------------
-  # delete_file/2
-  # ---------------------------------------------------------------
 
   describe "delete_file/2" do
-    test "removes existing file" do
-      assert {:ok, _} = FileManager.write_file(@user_a, "to_delete.md", "bye")
-      assert :ok = FileManager.delete_file(@user_a, "to_delete.md")
-      assert {:error, :enoent} = FileManager.read_file(@user_a, "to_delete.md")
+    test "clears content for existing file", %{user_a: user_a} do
+      record = insert_synced_file(user_a.id, "to_delete.md", "bye")
+      assert :ok = FileManager.delete_file(user_a.id, "to_delete.md")
+
+      refreshed = Repo.get!(SyncedFile, record.id)
+      assert is_nil(refreshed.content)
+      assert {:error, :enoent} = FileManager.read_file(user_a.id, "to_delete.md")
     end
 
-    test "returns :ok for nonexistent file" do
-      assert :ok = FileManager.delete_file(@user_a, "never_existed.md")
+    test "returns :ok for nonexistent file", %{user_a: user_a} do
+      assert :ok = FileManager.delete_file(user_a.id, "never_existed.md")
     end
   end
-
-  # ---------------------------------------------------------------
-  # rename_file/3
-  # ---------------------------------------------------------------
 
   describe "rename_file/3" do
-    test "moves file within workspace" do
-      assert {:ok, _} = FileManager.write_file(@user_a, "old_name.md", "content")
-      assert :ok = FileManager.rename_file(@user_a, "old_name.md", "new_name.md")
+    test "updates local_path for existing file", %{user_a: user_a} do
+      insert_synced_file(user_a.id, "old_name.md", "content")
 
-      assert {:error, :enoent} = FileManager.read_file(@user_a, "old_name.md")
-      assert {:ok, "content"} = FileManager.read_file(@user_a, "new_name.md")
+      assert :ok = FileManager.rename_file(user_a.id, "old_name.md", "new_name.md")
+
+      assert {:error, :enoent} = FileManager.read_file(user_a.id, "old_name.md")
+      assert {:ok, "content"} = FileManager.read_file(user_a.id, "new_name.md")
     end
 
-    test "moves file to subdirectory" do
-      assert {:ok, _} = FileManager.write_file(@user_a, "flat.md", "data")
-      assert :ok = FileManager.rename_file(@user_a, "flat.md", "sub/nested.md")
-      assert {:ok, "data"} = FileManager.read_file(@user_a, "sub/nested.md")
+    test "returns :enoent when source path does not exist", %{user_a: user_a} do
+      assert {:error, :enoent} = FileManager.rename_file(user_a.id, "missing.md", "renamed.md")
     end
 
-    test "rejects traversal in source path" do
+    test "rejects traversal in source path", %{user_a: user_a} do
       assert {:error, :path_not_allowed} =
-               FileManager.rename_file(@user_a, "../escape.md", "safe.md")
+               FileManager.rename_file(user_a.id, "../escape.md", "safe.md")
     end
 
-    test "rejects traversal in destination path" do
-      assert {:ok, _} = FileManager.write_file(@user_a, "source.md", "data")
+    test "rejects traversal in destination path", %{user_a: user_a} do
+      insert_synced_file(user_a.id, "source.md", "data")
 
       assert {:error, :path_not_allowed} =
-               FileManager.rename_file(@user_a, "source.md", "../escape.md")
+               FileManager.rename_file(user_a.id, "source.md", "../escape.md")
     end
   end
 
-  # ---------------------------------------------------------------
-  # list_files/1
-  # ---------------------------------------------------------------
+  describe "list_files/2" do
+    test "returns only paths with non-nil content", %{user_a: user_a} do
+      insert_synced_file(user_a.id, "a.md", "data")
+      insert_synced_file(user_a.id, "sub/b.csv", "data")
+      insert_synced_file(user_a.id, "empty.txt", nil)
 
-  describe "list_files/1" do
-    test "returns relative paths" do
-      assert {:ok, _} = FileManager.write_file(@user_a, "a.md", "data")
-      assert {:ok, _} = FileManager.write_file(@user_a, "sub/b.csv", "data")
-
-      assert {:ok, files} = FileManager.list_files(@user_a)
+      assert {:ok, files} = FileManager.list_files(user_a.id)
       assert Enum.sort(files) == ["a.md", "sub/b.csv"]
     end
 
-    test "returns empty list for nonexistent user" do
-      assert {:ok, []} = FileManager.list_files("nonexistent-user")
+    test "applies prefix filtering", %{user_a: user_a} do
+      insert_synced_file(user_a.id, "docs/a.md", "a")
+      insert_synced_file(user_a.id, "docs/b.md", "b")
+      insert_synced_file(user_a.id, "other/c.md", "c")
+
+      assert {:ok, files} = FileManager.list_files(user_a.id, "docs/")
+      assert Enum.sort(files) == ["docs/a.md", "docs/b.md"]
     end
   end
-
-  # ---------------------------------------------------------------
-  # checksum/1
-  # ---------------------------------------------------------------
 
   describe "checksum/1" do
     test "returns consistent 16-char hex string" do
@@ -272,37 +192,57 @@ defmodule Assistant.Sync.FileManagerTest do
     end
   end
 
-  # ---------------------------------------------------------------
-  # ensure_user_dir/1
-  # ---------------------------------------------------------------
-
   describe "ensure_user_dir/1" do
-    test "creates user directory", %{tmp_base: tmp_base} do
-      user_id = "ensure-dir-test-user"
-      assert :ok = FileManager.ensure_user_dir(user_id)
-      assert File.dir?(Path.join(tmp_base, user_id))
+    test "returns :ok" do
+      assert :ok = FileManager.ensure_user_dir(Ecto.UUID.generate())
     end
 
     test "is idempotent" do
-      assert :ok = FileManager.ensure_user_dir(@user_a)
-      assert :ok = FileManager.ensure_user_dir(@user_a)
+      user_id = Ecto.UUID.generate()
+      assert :ok = FileManager.ensure_user_dir(user_id)
+      assert :ok = FileManager.ensure_user_dir(user_id)
     end
   end
 
-  # ---------------------------------------------------------------
-  # build_path/2
-  # ---------------------------------------------------------------
-
   describe "build_path/2" do
-    test "returns full path for valid relative path", %{tmp_base: tmp_base} do
-      assert {:ok, full_path} = FileManager.build_path(@user_a, "test.md")
-      expected = Path.join([tmp_base, @user_a, "test.md"]) |> Path.expand()
-      assert full_path == expected
+    test "returns relative path for valid relative path" do
+      user_id = Ecto.UUID.generate()
+      assert {:ok, "test.md"} = FileManager.build_path(user_id, "test.md")
     end
 
     test "rejects unsafe paths" do
-      assert {:error, :path_not_allowed} = FileManager.build_path(@user_a, "/etc/passwd")
-      assert {:error, :path_not_allowed} = FileManager.build_path(@user_a, "../escape")
+      user_id = Ecto.UUID.generate()
+      assert {:error, :path_not_allowed} = FileManager.build_path(user_id, "/etc/passwd")
+      assert {:error, :path_not_allowed} = FileManager.build_path(user_id, "../escape")
     end
+  end
+
+  defp insert_user(prefix) do
+    %User{}
+    |> User.changeset(%{
+      external_id: "#{prefix}-#{System.unique_integer([:positive])}",
+      channel: "test"
+    })
+    |> Repo.insert!()
+  end
+
+  defp insert_synced_file(user_id, local_path, content \\ nil) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    %SyncedFile{}
+    |> SyncedFile.changeset(%{
+      user_id: user_id,
+      drive_file_id: "drive-#{System.unique_integer([:positive])}",
+      drive_file_name: Path.basename(local_path),
+      drive_mime_type: "text/plain",
+      local_path: local_path,
+      local_format: "txt",
+      local_modified_at: now,
+      remote_modified_at: now,
+      sync_status: "synced",
+      last_synced_at: now,
+      content: content
+    })
+    |> Repo.insert!()
   end
 end

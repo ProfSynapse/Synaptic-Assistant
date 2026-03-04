@@ -51,6 +51,7 @@ defmodule Assistant.Schemas.SyncedFile do
     field :sync_error, :string
     field :drive_id, :string
     field :file_size, :integer
+    field :content, Assistant.Encrypted.Binary
 
     belongs_to :user, Assistant.Schemas.User
     has_many :sync_history, Assistant.Schemas.SyncHistoryEntry
@@ -76,7 +77,8 @@ defmodule Assistant.Schemas.SyncedFile do
     :last_synced_at,
     :sync_error,
     :drive_id,
-    :file_size
+    :file_size,
+    :content
   ]
 
   def changeset(synced_file, attrs) do

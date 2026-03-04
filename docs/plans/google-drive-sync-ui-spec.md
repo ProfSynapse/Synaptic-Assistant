@@ -43,10 +43,10 @@ The Google Drive integration card will be divided into three core sections:
 
 ## 2. Architecture & Data Model Changes
 
-### Paradigm Shift: Local-First Agent Interaction
-The primary purpose of syncing Google Drive files as Markdown/CSV formats is to create a fast, local sandbox for the agent. **The agent should never query the live Google Drive API for search.** It performs all file operations (reads, searches, modifications) locally within its synced context, and any local edits are pushed back to the upstream Drive as new revisions. 
-*   **Deprecating Live Search:** Existing agent skills (`search.ex`) that query the live Drive API will be refactored to read local representations instead.
-*   **Sandboxed Environment:** The `.synced_files` (or working directory) will act as the canonical source of truth for the agent while a task is running. Local changes will mark `sync_status` as `local_ahead` and queue an upstream sync.
+### Paradigm Shift: Database-Backed Agent Sandbox
+The primary purpose of syncing Google Drive files as Markdown/CSV formats is to create a fast sandbox for the agent. **The agent should never query the live Google Drive API for search.** It performs all file operations (reads, searches, modifications) directly against a centralized data store (e.g. PostgreSQL), and any mutations are queued to be pushed back to the upstream Drive.
+*   **Deprecating Live Search:** Existing agent skills (`search.ex`) that query the live Drive API will be refactored to read these synced representations instead.
+*   **Agnostic Storage (Server-Ready):** To ensure this works on a distributed server environment (Heroku, Fly.io, k8s clusters), we will not rely on `priv/sync_workspace` or ephemeral local disks. The `FileManager` will be refactored to either store text/markdown contents directly as a new `content` field in a database table or to connect to S3. Local changes will mark `sync_status` as `local_ahead` and queue an upstream sync.
 
 ### A. Granular Target Storage
 Currently, we have `connected_drives`. To support folders and files, we should migrate this concept to a generic `sync_targets` (or `google_sync_targets`) table.
@@ -70,7 +70,7 @@ The architecture strictly follows Elixir and BEAM best practices to guarantee re
    - The `:google_drive_sync` Oban queue will have a strict concurrency limit (e.g., `5`) to prevent starving UI DB connections or hitting Google API rate limits (`429 Too Many Requests`).
 
 2. **Event Sourcing & Decoupling**
-   - The agent operates strictly on the local file system. When the agent finishes modifying a file, it updates the `StateStore` to `local_ahead` and broadcasts a `Phoenix.PubSub` event (`"file_sync:local_updated"`).
+   - The agent operates strictly on the synced file database. When the agent finishes modifying a file, it updates the `StateStore` to `local_ahead` and broadcasts a `Phoenix.PubSub` event (`"file_sync:local_updated"`).
    - An isolated `UpstreamSyncWorker` listens for these events to asynchronously handle the slow networked API push, fully decoupling the fast chat response from network I/O.
 
 3. **"Let it Crash" Conversion Pipeline**
@@ -85,7 +85,7 @@ The architecture strictly follows Elixir and BEAM best practices to guarantee re
 ## 3. Implementation Plan
 
 ### Phase 1: Agent Sandbox Migration (Backend)
-- [ ] Refactor existing agent skills (like `search.ex` and `archive.ex`) to operate against the local `synced_files` payload and local file system instead of calling `GoogleApi.Drive`.
+- [ ] Refactor existing agent skills (like `search.ex` and `archive.ex`) to operate against the database `synced_files` payload instead of calling `GoogleApi.Drive`.
 - [ ] Establish the worker to handle `local_ahead` files, converting Markdown/CSV changes back to Google format and pushing them to the Drive API.
 
 ### Phase 2: Robust Worker Pipeline (Backend)

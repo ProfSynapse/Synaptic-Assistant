@@ -21,6 +21,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.ModelDefaults
   alias Assistant.OrchestratorSystemPrompt
   alias Assistant.SkillPermissions
+  alias Assistant.Sync.StateStore
   alias Assistant.Transcripts
   alias Assistant.Workflows
   alias AssistantWeb.SettingsLive.Context
@@ -40,6 +41,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       |> load_google_status()
       |> load_openrouter_status()
       |> load_connected_drives()
+      |> load_sync_scopes()
       |> load_apps_integration_settings()
       |> load_connection_status()
 
@@ -410,6 +412,18 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     end
   rescue
     _ -> socket
+  end
+
+  def load_sync_scopes(socket) do
+    case Context.current_user_id(socket) do
+      nil ->
+        assign(socket, :sync_scopes, [])
+
+      user_id ->
+        assign(socket, :sync_scopes, StateStore.list_scopes(user_id))
+    end
+  rescue
+    _ -> assign(socket, :sync_scopes, [])
   end
 
   def load_profile(socket) do
