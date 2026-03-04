@@ -39,12 +39,14 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "skills" -> "hero-wrench-screwdriver"
       "admin" -> "hero-cog-6-tooth"
       "help" -> "hero-question-mark-circle"
+      _ -> "hero-question-mark-circle"
     end
   end
 
   def page_title(section) do
     case section do
       "profile" -> "Profile"
+      "workspace" -> "Chat"
       "models" -> "Models"
       "analytics" -> "Analytics"
       "memory" -> "Memory"
@@ -53,6 +55,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "skills" -> "Skill Permissions"
       "admin" -> "Admin"
       "help" -> "Help & Setup"
+      _ -> "Settings"
     end
   end
 
