@@ -126,8 +126,15 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
   describe "extract_issuer/1" do
     test "extracts issuer from a valid JWT payload" do
       # Build a minimal JWT with just the payload containing iss
-      header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "kid" => "key1"}), padding: false)
-      payload = Base.url_encode64(Jason.encode!(%{"iss" => "chat@system.gserviceaccount.com", "aud" => "123"}), padding: false)
+      header =
+        Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "kid" => "key1"}), padding: false)
+
+      payload =
+        Base.url_encode64(
+          Jason.encode!(%{"iss" => "chat@system.gserviceaccount.com", "aud" => "123"}),
+          padding: false
+        )
+
       # Signature doesn't matter for peek_payload
       token = "#{header}.#{payload}.fake_signature"
 
@@ -136,8 +143,13 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
 
     test "extracts G Suite Add-ons issuer" do
       issuer = "service-530288889088@gcp-sa-gsuiteaddons.iam.gserviceaccount.com"
-      header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "kid" => "key1"}), padding: false)
-      payload = Base.url_encode64(Jason.encode!(%{"iss" => issuer, "aud" => "123"}), padding: false)
+
+      header =
+        Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "kid" => "key1"}), padding: false)
+
+      payload =
+        Base.url_encode64(Jason.encode!(%{"iss" => issuer, "aud" => "123"}), padding: false)
+
       token = "#{header}.#{payload}.fake_signature"
 
       assert {:ok, ^issuer} = GoogleChatAuth.extract_issuer(token)
@@ -145,8 +157,13 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
 
     test "extracts Google ID token issuer (accounts.google.com)" do
       issuer = "https://accounts.google.com"
-      header = Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "kid" => "key1"}), padding: false)
-      payload = Base.url_encode64(Jason.encode!(%{"iss" => issuer, "aud" => "123456"}), padding: false)
+
+      header =
+        Base.url_encode64(Jason.encode!(%{"alg" => "RS256", "kid" => "key1"}), padding: false)
+
+      payload =
+        Base.url_encode64(Jason.encode!(%{"iss" => issuer, "aud" => "123456"}), padding: false)
+
       token = "#{header}.#{payload}.fake_signature"
 
       assert {:ok, ^issuer} = GoogleChatAuth.extract_issuer(token)

@@ -250,7 +250,9 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
       not allowed_issuer?(claims["iss"]) ->
         {:error, :invalid_issuer}
 
-      claims["aud"] != project_number ->
+      not valid_audience?(claims["aud"], project_number) ->
+        Logger.warning("Google Chat JWT audience mismatch: expected=#{inspect(project_number)} actual=#{inspect(claims["aud"])}")
+
         {:error, :invalid_audience}
 
       not is_integer(claims["exp"]) or claims["exp"] + @clock_skew_seconds <= now ->
@@ -259,6 +261,14 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
       true ->
         :ok
     end
+  end
+
+  # For Google ID tokens (iss=accounts.google.com), the aud claim is the webhook URL.
+  # For service account JWTs (iss=chat@system.gserviceaccount.com), aud is the project number.
+  # Accept either the configured project number or the app's webhook URL.
+  defp valid_audience?(aud, project_number) do
+    aud == project_number or
+      (is_binary(aud) and String.contains?(aud, "/webhooks/google-chat"))
   end
 
   # --- Key Caching (per-issuer) ---
