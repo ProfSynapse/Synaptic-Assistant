@@ -48,7 +48,7 @@ defmodule Assistant.Channels.Dispatcher do
       end
   """
 
-  alias Assistant.Channels.{ReplyRouter, UserResolver}
+  alias Assistant.Channels.{MessageFormatter, ReplyRouter, UserResolver}
   alias Assistant.Orchestrator.Engine
 
   require Logger
@@ -207,7 +207,7 @@ defmodule Assistant.Channels.Dispatcher do
           Map.put(metadata, :user_id, user_id)
         )
 
-        {:ok, response_text}
+        {:ok, MessageFormatter.format(response_text, message.channel)}
 
       {:error, reason} ->
         Logger.error("Orchestrator processing failed: #{inspect(reason)}",
@@ -327,7 +327,9 @@ defmodule Assistant.Channels.Dispatcher do
           Map.put(metadata, :user_id, user_id)
         )
 
-        case ReplyRouter.reply(origin, response_text) do
+        formatted_text = MessageFormatter.format(response_text, message.channel)
+
+        case ReplyRouter.reply(origin, formatted_text) do
           :ok ->
             reply_time = System.monotonic_time()
 
