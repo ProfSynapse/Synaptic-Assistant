@@ -250,7 +250,7 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
       not allowed_issuer?(claims["iss"]) ->
         {:error, :invalid_issuer}
 
-      not valid_audience?(claims["aud"], project_number) ->
+      not valid_audience?(claims["aud"], project_number, claims["iss"]) ->
         Logger.warning(
           "Google Chat JWT audience mismatch: expected=#{inspect(project_number)} actual=#{inspect(claims["aud"])}"
         )
@@ -265,12 +265,32 @@ defmodule AssistantWeb.Plugs.GoogleChatAuth do
     end
   end
 
-  # For Google ID tokens (iss=accounts.google.com), the aud claim is the webhook URL.
-  # For service account JWTs (iss=chat@system.gserviceaccount.com), aud is the project number.
-  # Accept either the configured project number or the app's webhook URL.
-  defp valid_audience?(aud, project_number) do
-    aud == project_number or
-      (is_binary(aud) and String.contains?(aud, "/webhooks/google-chat"))
+  # For Google ID tokens (iss=accounts.google.com), the aud claim must match
+  # this app's webhook URL exactly.
+  # For service account JWTs, the aud claim must match the configured
+  # Google Cloud project number exactly.
+  @doc false
+  def valid_audience?(aud, project_number, issuer)
+
+  def valid_audience?(aud, _project_number, @google_id_token_issuer) do
+    audience_matches?(aud, google_chat_webhook_audience())
+  end
+
+  def valid_audience?(aud, project_number, _issuer) do
+    audience_matches?(aud, project_number)
+  end
+
+  defp audience_matches?(aud, expected) when is_binary(aud) and is_binary(expected),
+    do: aud == expected
+
+  defp audience_matches?(audiences, expected) when is_list(audiences) and is_binary(expected) do
+    Enum.any?(audiences, &(&1 == expected))
+  end
+
+  defp audience_matches?(_aud, _expected), do: false
+
+  defp google_chat_webhook_audience do
+    AssistantWeb.Endpoint.url() <> "/webhooks/google-chat"
   end
 
   # --- Key Caching (per-issuer) ---

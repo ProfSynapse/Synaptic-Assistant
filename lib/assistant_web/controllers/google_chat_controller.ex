@@ -43,9 +43,9 @@ defmodule AssistantWeb.GoogleChatController do
 
   require Logger
 
-  # Google Chat webhooks must respond within ~30s. We use 25s to leave
-  # margin for JSON serialization and network transit.
-  @sync_timeout_ms 25_000
+  # Google Chat webhooks must respond within ~30s. We use 25s by default to
+  # leave margin for JSON serialization and network transit.
+  @default_sync_timeout_ms 25_000
 
   @welcome_message """
   Hello! I'm your AI assistant. I can help you with tasks, answer questions, \
@@ -103,26 +103,55 @@ defmodule AssistantWeb.GoogleChatController do
   # If the engine doesn't respond within @sync_timeout_ms, return a
   # timeout message rather than letting Google Chat's deadline expire.
   defp sync_dispatch_with_timeout(message) do
+    timeout_ms = sync_timeout_ms()
+    dispatcher = dispatcher_module()
+
     task =
       Task.Supervisor.async_nolink(
         Assistant.Skills.TaskSupervisor,
-        fn -> Dispatcher.dispatch_sync(message) end
+        fn -> dispatcher.dispatch_sync(message) end
       )
 
-    case Task.yield(task, @sync_timeout_ms) || Task.shutdown(task) do
+    case Task.yield(task, timeout_ms) || Task.shutdown(task) do
       {:ok, {:ok, response_text}} ->
         response_text
 
       {:ok, {:error, error_text}} ->
         error_text
 
+      {:exit, reason} ->
+        Logger.error("Google Chat sync dispatch task exited",
+          message_id: message.id,
+          user_id: message.user_id,
+          reason: inspect(reason)
+        )
+
+        @timeout_message
+
       nil ->
-        Logger.warning("Google Chat sync dispatch timed out after #{@sync_timeout_ms}ms",
+        Logger.warning("Google Chat sync dispatch timed out after #{timeout_ms}ms",
           message_id: message.id,
           user_id: message.user_id
         )
 
         @timeout_message
+
+      unexpected ->
+        Logger.error("Google Chat sync dispatch returned unexpected result",
+          message_id: message.id,
+          user_id: message.user_id,
+          result: inspect(unexpected)
+        )
+
+        @timeout_message
     end
+  end
+
+  defp dispatcher_module do
+    Application.get_env(:assistant, :google_chat_dispatcher_module, Dispatcher)
+  end
+
+  defp sync_timeout_ms do
+    Application.get_env(:assistant, :google_chat_sync_timeout_ms, @default_sync_timeout_ms)
   end
 end

@@ -187,6 +187,56 @@ defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
   end
 
   # ---------------------------------------------------------------
+  # Audience Validation
+  # ---------------------------------------------------------------
+
+  describe "valid_audience?/3" do
+    test "accepts exact project number for service account issuer" do
+      assert GoogleChatAuth.valid_audience?(
+               "1234567890",
+               "1234567890",
+               "chat@system.gserviceaccount.com"
+             )
+    end
+
+    test "rejects webhook-like audience for service account issuer" do
+      refute GoogleChatAuth.valid_audience?(
+               "https://evil.example/webhooks/google-chat",
+               "1234567890",
+               "chat@system.gserviceaccount.com"
+             )
+    end
+
+    test "accepts exact webhook URL for Google ID token issuer" do
+      aud = AssistantWeb.Endpoint.url() <> "/webhooks/google-chat"
+
+      assert GoogleChatAuth.valid_audience?(
+               aud,
+               "1234567890",
+               "https://accounts.google.com"
+             )
+    end
+
+    test "rejects substring-only match for Google ID token issuer" do
+      refute GoogleChatAuth.valid_audience?(
+               "https://evil.example/prefix/webhooks/google-chat/suffix",
+               "1234567890",
+               "https://accounts.google.com"
+             )
+    end
+
+    test "accepts list audience when expected audience is present" do
+      aud = AssistantWeb.Endpoint.url() <> "/webhooks/google-chat"
+
+      assert GoogleChatAuth.valid_audience?(
+               ["https://other.example", aud],
+               "1234567890",
+               "https://accounts.google.com"
+             )
+    end
+  end
+
+  # ---------------------------------------------------------------
   # Plug Integration (bearer token extraction and 401 responses)
   # ---------------------------------------------------------------
 
