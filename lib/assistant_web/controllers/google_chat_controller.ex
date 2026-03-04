@@ -5,6 +5,10 @@
 # normalizes events, handles Google Chat-specific lifecycle events (welcome,
 # removal), and delegates message processing to the shared Dispatcher.
 #
+# Supports both v1 (legacy) and v2 (Workspace Add-on) event formats.
+# Response envelope differs: v1 returns flat {"text": "..."}, v2 returns
+# the hostAppDataAction wrapper. Format detection is delegated to the adapter.
+#
 # Related files:
 #   - lib/assistant_web/plugs/google_chat_auth.ex (JWT verification)
 #   - lib/assistant/channels/google_chat.ex (event normalization + reply sending)
@@ -19,10 +23,12 @@ defmodule AssistantWeb.GoogleChatController do
 
     1. GoogleChatAuth plug verifies the JWT (returns 401 on failure)
     2. Controller normalizes the raw event via `Channels.GoogleChat`
+       (auto-detects v1 vs v2 format)
     3. For `ADDED_TO_SPACE`: returns a synchronous welcome message
     4. For `MESSAGE`/`APP_COMMAND`: delegates to `Channels.Dispatcher` for
-       async processing and returns `{"text": "Processing..."}` immediately
+       async processing and returns a "Processing..." acknowledgment
     5. For ignored events: returns 200 with empty body
+    6. Response envelope matches the incoming format (v1 flat vs v2 wrapped)
   """
 
   use AssistantWeb, :controller
@@ -41,11 +47,11 @@ defmodule AssistantWeb.GoogleChatController do
   Handle a Google Chat webhook event.
 
   The GoogleChatAuth plug has already verified the JWT by this point.
+  Supports both v1 (top-level "type") and v2 (nested "chat") event formats.
   """
   def event(conn, params) do
-    Logger.info("Google Chat webhook received",
-      event_type: params["type"],
-      keys: Map.keys(params) |> Enum.join(", ")
+    Logger.info(
+      "Google Chat webhook received: type=#{inspect(params["type"])} keys=#{inspect(Map.keys(params))} v2=#{ChatAdapter.v2_format?(params)}"
     )
 
     case ChatAdapter.normalize(params) do
@@ -61,17 +67,18 @@ defmodule AssistantWeb.GoogleChatController do
   # --- Event Handlers ---
 
   # ADDED_TO_SPACE: return a synchronous welcome message.
-  defp handle_normalized(conn, message, %{"type" => "ADDED_TO_SPACE"}) do
+  # Detect via normalized metadata since v2 events don't have top-level "type".
+  defp handle_normalized(conn, %{metadata: %{"event_type" => "ADDED_TO_SPACE"}} = message, params) do
     Logger.info("Bot added to space",
       space_id: message.space_id,
       user: message.user_display_name
     )
 
-    json(conn, %{"text" => @welcome_message})
+    json(conn, ChatAdapter.wrap_response(@welcome_message, params))
   end
 
   # MESSAGE / APP_COMMAND: delegate to the shared Dispatcher for async processing.
-  defp handle_normalized(conn, message, _params) do
+  defp handle_normalized(conn, message, params) do
     Logger.info("Google Chat message received",
       space_id: message.space_id,
       user_id: message.user_id,
@@ -81,6 +88,6 @@ defmodule AssistantWeb.GoogleChatController do
 
     Dispatcher.dispatch(ChatAdapter, message)
 
-    json(conn, %{"text" => "Processing..."})
+    json(conn, ChatAdapter.wrap_response("Processing...", params))
   end
 end
