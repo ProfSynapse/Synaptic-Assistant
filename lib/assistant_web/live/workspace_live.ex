@@ -2,6 +2,7 @@ defmodule AssistantWeb.WorkspaceLive do
   use AssistantWeb, :live_view
 
   alias Assistant.Workspace
+  alias AssistantWeb.Components.SettingsPage.Helpers
 
   @refresh_interval_ms 2_500
   @message_limit 200
@@ -13,6 +14,9 @@ defmodule AssistantWeb.WorkspaceLive do
 
     socket =
       socket
+      |> assign(:sidebar_collapsed, false)
+      |> assign(:section, "workspace")
+      |> assign(:is_admin, current_scope_is_admin(socket.assigns[:current_scope]))
       |> assign(:workspace_user_id, user_id)
       |> assign(:conversation, nil)
       |> assign(:feed_items, [])
@@ -100,6 +104,10 @@ defmodule AssistantWeb.WorkspaceLive do
     {:noreply, assign(socket, :mission_expanded, !socket.assigns.mission_expanded)}
   end
 
+  def handle_event("toggle_sidebar", _params, socket) do
+    {:noreply, assign(socket, :sidebar_collapsed, !socket.assigns.sidebar_collapsed)}
+  end
+
   def handle_event("close_modal", _params, socket) do
     {:noreply, clear_selected_inspect(socket)}
   end
@@ -148,129 +156,168 @@ defmodule AssistantWeb.WorkspaceLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <section class="sa-workspace-shell">
-        <header class="sa-workspace-header">
-          <div>
-            <h1>Synaptic Assistant</h1>
-            <p>One ongoing chat across in-app and connected channels.</p>
-          </div>
-          <.badge size="sm" color="info" variant="soft">Unified Timeline</.badge>
-        </header>
-
-        <section class="sa-workspace-feed-wrap">
-          <div :if={@history_truncated?} class="sa-workspace-history-actions">
-            <button type="button" class="sa-workspace-load-older-btn" phx-click="load_older">
-              Load older messages
+      <div class="sa-settings-shell">
+        <aside class={["sa-sidebar", @sidebar_collapsed && "is-collapsed"]}>
+          <div class="sa-sidebar-header">
+            <div class="sa-sidebar-brand">
+              <img src="/images/aperture.png" alt="Synaptic Assistant" class="sa-brand-mark" />
+              <span :if={!@sidebar_collapsed}>Synaptic Assistant</span>
+            </div>
+            <button
+              type="button"
+              class="sa-icon-btn sa-sidebar-toggle"
+              phx-click="toggle_sidebar"
+              aria-label="Toggle sidebar"
+            >
+              <.icon name="hero-bars-3" class="h-4 w-4" />
             </button>
           </div>
 
-          <p :if={@history_truncated?} class="sa-workspace-history-hint">
-            Showing the newest conversation events. Older history is still available.
-          </p>
+          <nav class="sa-sidebar-nav">
+            <.link
+              :for={{section, label} <- Helpers.nav_items_for(@is_admin)}
+              navigate={nav_path(section)}
+              class={["sa-sidebar-link", section == @section && "is-active"]}
+              title={label}
+            >
+              <.icon name={Helpers.icon_for(section)} class="h-4 w-4" />
+              <span :if={!@sidebar_collapsed}>{label}</span>
+            </.link>
+          </nav>
 
-          <div id="workspace-feed" class="sa-workspace-feed">
-            <div :if={@feed_items == []} class="sa-workspace-empty-state">
-              <p>Start chatting. Messages from connected channels will appear here too.</p>
-            </div>
+          <div class="sa-sidebar-footer">
+            <.link href={~p"/settings_users/log-out"} method="delete" class="sa-sidebar-link" title="Log Out">
+              <.icon name="hero-arrow-right-on-rectangle" class="h-4 w-4" />
+              <span :if={!@sidebar_collapsed}>Log Out</span>
+            </.link>
+          </div>
+        </aside>
 
-            <%= for item <- @feed_items do %>
-              <%= if item.type == :message do %>
-                <article class={["sa-workspace-message", item.role == :user && "is-user", item.role == :assistant && "is-assistant"]}>
-                  <div class="sa-workspace-message-meta">
-                    <div class="sa-workspace-message-meta-left">
-                      <span class="sa-workspace-actor">{actor_label(item.role)}</span>
-                      <.badge :if={item.source_label} size="xs" color="gray" variant="soft">
-                        {item.source_label}
-                      </.badge>
-                    </div>
-                    <span>{format_time(item.inserted_at)}</span>
-                  </div>
-                  <p class="sa-workspace-message-content">{item.content}</p>
-                </article>
-              <% else %>
-                <section class="sa-workspace-activity-stack">
-                  <.card :if={item.tools != []} class="sa-workspace-activity-card">
-                    <div class="sa-workspace-activity-title-row">
-                      <div>
-                        <p class="sa-workspace-activity-kicker">Tools</p>
-                        <h3>{tool_count_label(item.tools)}</h3>
-                      </div>
-                      <span class="sa-workspace-time">{format_time(item.inserted_at)}</span>
-                    </div>
+        <section class="sa-content">
+          <section class="sa-workspace-shell">
+            <header class="sa-workspace-header">
+              <div>
+                <h1>Synaptic Assistant</h1>
+                <p>One ongoing chat across in-app and connected channels.</p>
+              </div>
+            </header>
 
-                    <div class="sa-workspace-inline-list">
-                      <article :for={tool <- item.tools} class="sa-workspace-inline-card">
-                        <div class="sa-workspace-inline-copy">
-                          <p class="sa-workspace-inline-title">{tool.name}</p>
-                          <.badge size="sm" color={status_color(tool.status)} variant="soft">
-                            {status_label(tool.status)}
+            <section class="sa-workspace-feed-wrap">
+              <div :if={@history_truncated?} class="sa-workspace-history-actions">
+                <button type="button" class="sa-workspace-load-older-btn" phx-click="load_older">
+                  Load older messages
+                </button>
+              </div>
+
+              <p :if={@history_truncated?} class="sa-workspace-history-hint">
+                Showing the newest conversation events. Older history is still available.
+              </p>
+
+              <div id="workspace-feed" class="sa-workspace-feed">
+                <div :if={@feed_items == []} class="sa-workspace-empty-state">
+                  <p>Start chatting. Messages from connected channels will appear here too.</p>
+                </div>
+
+                <%= for item <- @feed_items do %>
+                  <%= if item.type == :message do %>
+                    <article class={["sa-workspace-message", item.role == :user && "is-user", item.role == :assistant && "is-assistant"]}>
+                      <div class="sa-workspace-message-meta">
+                        <div class="sa-workspace-message-meta-left">
+                          <span class="sa-workspace-actor">{actor_label(item.role)}</span>
+                          <.badge :if={item.source_label} size="xs" color="gray" variant="soft">
+                            {item.source_label}
                           </.badge>
                         </div>
-                        <button
-                          type="button"
-                          class="sa-workspace-inspect-btn"
-                          phx-click="inspect_tool"
-                          phx-value-id={tool.inspect_id}
-                        >
-                          Inspect
-                        </button>
-                      </article>
-                    </div>
-                  </.card>
-
-                  <.card :for={sub_agent <- item.sub_agents} class="sa-workspace-activity-card">
-                    <div class="sa-workspace-activity-title-row">
-                      <div>
-                        <p class="sa-workspace-activity-kicker">Sub-agent</p>
-                        <h3>{sub_agent.agent_id}</h3>
-                        <p class="sa-workspace-inline-subtitle">{mission_excerpt(sub_agent.mission)}</p>
+                        <span>{format_time(item.inserted_at)}</span>
                       </div>
-                      <.badge size="sm" color={status_color(sub_agent.status)} variant="soft">
-                        {status_label(sub_agent.status)}
-                      </.badge>
-                    </div>
+                      <p class="sa-workspace-message-content">{item.content}</p>
+                    </article>
+                  <% else %>
+                    <section class="sa-workspace-activity-stack">
+                      <.card :if={item.tools != []} class="sa-workspace-activity-card">
+                        <div class="sa-workspace-activity-title-row">
+                          <div>
+                            <p class="sa-workspace-activity-kicker">Tools</p>
+                            <h3>{tool_count_label(item.tools)}</h3>
+                          </div>
+                          <span class="sa-workspace-time">{format_time(item.inserted_at)}</span>
+                        </div>
 
-                    <div class="sa-workspace-inline-actions">
-                      <button
-                        type="button"
-                        class="sa-workspace-inspect-btn"
-                        phx-click="inspect_sub_agent"
-                        phx-value-id={sub_agent.inspect_id}
-                      >
-                        Inspect
-                      </button>
-                    </div>
-                  </.card>
-                </section>
-              <% end %>
-            <% end %>
-          </div>
+                        <div class="sa-workspace-inline-list">
+                          <article :for={tool <- item.tools} class="sa-workspace-inline-card">
+                            <div class="sa-workspace-inline-copy">
+                              <p class="sa-workspace-inline-title">{tool.name}</p>
+                              <.badge size="sm" color={status_color(tool.status)} variant="soft">
+                                {status_label(tool.status)}
+                              </.badge>
+                            </div>
+                            <button
+                              type="button"
+                              class="sa-workspace-inspect-btn"
+                              phx-click="inspect_tool"
+                              phx-value-id={tool.inspect_id}
+                            >
+                              Inspect
+                            </button>
+                          </article>
+                        </div>
+                      </.card>
+
+                      <.card :for={sub_agent <- item.sub_agents} class="sa-workspace-activity-card">
+                        <div class="sa-workspace-activity-title-row">
+                          <div>
+                            <p class="sa-workspace-activity-kicker">Sub-agent</p>
+                            <h3>{sub_agent.agent_id}</h3>
+                            <p class="sa-workspace-inline-subtitle">{mission_excerpt(sub_agent.mission)}</p>
+                          </div>
+                          <.badge size="sm" color={status_color(sub_agent.status)} variant="soft">
+                            {status_label(sub_agent.status)}
+                          </.badge>
+                        </div>
+
+                        <div class="sa-workspace-inline-actions">
+                          <button
+                            type="button"
+                            class="sa-workspace-inspect-btn"
+                            phx-click="inspect_sub_agent"
+                            phx-value-id={sub_agent.inspect_id}
+                          >
+                            Inspect
+                          </button>
+                        </div>
+                      </.card>
+                    </section>
+                  <% end %>
+                <% end %>
+              </div>
+            </section>
+
+            <footer class="sa-workspace-composer-wrap">
+              <.form for={@composer_form} id="workspace-composer-form" class="sa-workspace-composer-form" phx-submit="send_message">
+                <.input
+                  field={@composer_form[:message]}
+                  type="text"
+                  class="sa-workspace-composer-input"
+                  placeholder="Message Synaptic across your connected channels..."
+                  autocomplete="off"
+                  disabled={@sending}
+                />
+                <.icon_button
+                  type="submit"
+                  size="md"
+                  radius="full"
+                  color="primary"
+                  loading={@sending}
+                  disabled={@sending}
+                  class="sa-workspace-send-btn"
+                >
+                  <.icon name="hero-arrow-up" class="h-4 w-4" />
+                </.icon_button>
+              </.form>
+            </footer>
+          </section>
         </section>
-
-        <footer class="sa-workspace-composer-wrap">
-          <.form for={@composer_form} id="workspace-composer-form" class="sa-workspace-composer-form" phx-submit="send_message">
-            <.input
-              field={@composer_form[:message]}
-              type="text"
-              class="sa-workspace-composer-input"
-              placeholder="Message Synaptic across your connected channels..."
-              autocomplete="off"
-              disabled={@sending}
-            />
-            <.icon_button
-              type="submit"
-              size="md"
-              radius="full"
-              color="primary"
-              loading={@sending}
-              disabled={@sending}
-              class="sa-workspace-send-btn"
-            >
-              <.icon name="hero-arrow-up" class="h-4 w-4" />
-            </.icon_button>
-          </.form>
-        </footer>
-      </section>
+      </div>
 
       <div :if={@selected_inspect_data} class="sa-workspace-desktop-modal">
         <.modal id="workspace-inspect-modal" title={inspect_title(@selected_inspect_type, @selected_inspect_data)}>
@@ -446,6 +493,13 @@ defmodule AssistantWeb.WorkspaceLive do
     |> assign(:selected_inspect_data, nil)
     |> assign(:mission_expanded, false)
   end
+
+  defp current_scope_is_admin(%{settings_user: %{is_admin: true}}), do: true
+  defp current_scope_is_admin(_), do: false
+
+  defp nav_path("profile"), do: ~p"/settings"
+  defp nav_path("workspace"), do: ~p"/workspace"
+  defp nav_path(section), do: ~p"/settings/#{section}"
 
   defp current_user_id(socket) do
     case socket.assigns[:current_scope] do
