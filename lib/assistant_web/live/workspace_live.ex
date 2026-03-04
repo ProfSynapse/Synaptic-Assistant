@@ -293,13 +293,20 @@ defmodule AssistantWeb.WorkspaceLive do
             </section>
 
             <footer class="sa-workspace-composer-wrap">
-              <.form for={@composer_form} id="workspace-composer-form" class="sa-workspace-composer-form" phx-submit="send_message">
+              <.form
+                for={@composer_form}
+                id="workspace-composer-form"
+                class="sa-workspace-composer-form"
+                phx-submit="send_message"
+                phx-hook="WorkspaceComposer"
+              >
                 <.input
                   field={@composer_form[:message]}
                   type="textarea"
                   rows="1"
                   class="sa-workspace-composer-input"
                   placeholder="Message Synaptic across your connected channels..."
+                  enterkeyhint="send"
                   autocomplete="off"
                   disabled={@sending}
                 />

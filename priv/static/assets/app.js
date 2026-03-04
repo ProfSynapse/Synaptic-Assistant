@@ -476,6 +476,31 @@
     },
   }
 
+  Hooks.WorkspaceComposer = {
+    mounted() {
+      this.handleKeydown = (event) => {
+        if (event.key !== "Enter") return
+        if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return
+        if (event.isComposing || event.keyCode === 229) return
+        if (!(event.target instanceof HTMLTextAreaElement)) return
+
+        event.preventDefault()
+
+        if (typeof this.el.requestSubmit === "function") {
+          this.el.requestSubmit()
+        } else {
+          this.el.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))
+        }
+      }
+
+      this.el.addEventListener("keydown", this.handleKeydown)
+    },
+
+    destroyed() {
+      this.el.removeEventListener("keydown", this.handleKeydown)
+    },
+  }
+
   // OAuth popup handler: opens the OAuth flow in a popup window,
   // polls for popup close, and reloads the page to refresh connection status.
   window.addEventListener("phx:open_oauth_popup", (event) => {
