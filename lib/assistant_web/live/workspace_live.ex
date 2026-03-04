@@ -296,7 +296,8 @@ defmodule AssistantWeb.WorkspaceLive do
               <.form for={@composer_form} id="workspace-composer-form" class="sa-workspace-composer-form" phx-submit="send_message">
                 <.input
                   field={@composer_form[:message]}
-                  type="text"
+                  type="textarea"
+                  rows="1"
                   class="sa-workspace-composer-input"
                   placeholder="Message Synaptic across your connected channels..."
                   autocomplete="off"

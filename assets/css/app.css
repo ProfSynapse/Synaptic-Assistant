@@ -2083,13 +2083,11 @@ a {
 }
 
 .sa-workspace-composer-form {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  position: relative;
   border: 1px solid rgba(148, 172, 183, 0.46);
   background: rgba(255, 255, 255, 0.95);
   border-radius: 999px;
-  padding: 8px 10px 8px 14px;
+  padding: 0;
   box-shadow: 0 11px 25px rgba(22, 46, 64, 0.13);
 }
 
@@ -2097,12 +2095,16 @@ a {
   border: 0;
   background: transparent;
   box-shadow: none;
-  min-height: 40px;
+  min-height: 44px;
+  max-height: 170px;
   font-size: 0.96rem;
+  line-height: 1.45;
   color: #1f374d;
   width: 100%;
-  padding-left: 0;
-  padding-right: 0;
+  padding: 10px 62px 10px 16px;
+  border-radius: 999px;
+  resize: none;
+  overflow-y: auto;
 }
 
 .sa-workspace-composer-input.pc-text-input:focus,
@@ -2117,6 +2119,9 @@ a {
 }
 
 .sa-workspace-send-btn.pc-icon-button {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
   width: 42px;
   height: 42px;
   min-width: 42px;
@@ -2230,18 +2235,21 @@ a {
   }
 
   .sa-workspace-composer-form {
-    padding: 7px 8px 7px 12px;
+    min-height: 42px;
   }
 
   .sa-workspace-composer-input.pc-text-input {
     font-size: 0.9rem;
-    min-height: 36px;
+    min-height: 42px;
+    padding: 8px 56px 8px 13px;
   }
 
   .sa-workspace-send-btn.pc-icon-button {
     width: 38px;
     height: 38px;
     min-width: 38px;
+    right: 6px;
+    bottom: 6px;
   }
 
   .sa-workspace-desktop-modal {
