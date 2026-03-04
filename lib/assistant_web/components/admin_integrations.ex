@@ -54,12 +54,14 @@ defmodule AssistantWeb.Components.AdminIntegrations do
     key_str = Atom.to_string(assigns.setting.key)
     input_id = "integration-#{key_str}"
     input_type = if assigns.setting.is_secret, do: "password", else: "text"
+    use_textarea = String.ends_with?(key_str, "_json")
 
     assigns =
       assigns
       |> assign(:key_str, key_str)
       |> assign(:input_id, input_id)
       |> assign(:input_type, input_type)
+      |> assign(:use_textarea, use_textarea)
 
     ~H"""
     <div class="rounded-md border border-zinc-100 bg-zinc-50/50 p-3 space-y-2">
@@ -76,10 +78,20 @@ defmodule AssistantWeb.Components.AdminIntegrations do
       <form
         phx-submit="save_integration"
         id={"form-#{@key_str}"}
-        class="flex items-center gap-2"
+        class={if @use_textarea, do: "space-y-2", else: "flex items-center gap-2"}
       >
         <input type="hidden" name="key" value={@key_str} />
+        <textarea
+          :if={@use_textarea}
+          id={@input_id}
+          name="value"
+          rows="6"
+          placeholder={placeholder_for(@setting)}
+          autocomplete="off"
+          class="w-full rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-mono resize-y"
+        />
         <input
+          :if={!@use_textarea}
           type={@input_type}
           id={@input_id}
           name="value"
@@ -87,22 +99,24 @@ defmodule AssistantWeb.Components.AdminIntegrations do
           autocomplete="off"
           class="flex-1 rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-mono min-w-0"
         />
-        <button
-          type="submit"
-          class="shrink-0 rounded-md bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
-        >
-          Save
-        </button>
-        <button
-          :if={@setting.source == :db}
-          type="button"
-          phx-click="delete_integration"
-          phx-value-key={@key_str}
-          class="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
-          title="Revert to environment variable"
-        >
-          <.icon name="hero-arrow-uturn-left" class="h-4 w-4" />
-        </button>
+        <div class={if @use_textarea, do: "flex items-center gap-2", else: "contents"}>
+          <button
+            type="submit"
+            class="shrink-0 rounded-md bg-zinc-800 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-700"
+          >
+            Save
+          </button>
+          <button
+            :if={@setting.source == :db}
+            type="button"
+            phx-click="delete_integration"
+            phx-value-key={@key_str}
+            class="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100"
+            title="Revert to environment variable"
+          >
+            <.icon name="hero-arrow-uturn-left" class="h-4 w-4" />
+          </button>
+        </div>
       </form>
 
       <p :if={@setting.source != :none} class="text-xs text-zinc-400 font-mono truncate">

@@ -35,6 +35,39 @@ defmodule Assistant.IntegrationSettings.Registry do
         }
       ]
     },
+    "models" => %{
+      label: "Models",
+      keys: [
+        %{
+          key: :model_default_orchestrator,
+          secret: false,
+          env: "",
+          label: "Default Orchestrator Model",
+          help: "App-wide fallback model for the orchestrator role"
+        },
+        %{
+          key: :model_default_sub_agent,
+          secret: false,
+          env: "",
+          label: "Default Sub-Agent Model",
+          help: "App-wide fallback model for sub-agent runs"
+        },
+        %{
+          key: :model_default_sentinel,
+          secret: false,
+          env: "",
+          label: "Default Sentinel Model",
+          help: "App-wide fallback model for policy and classification checks"
+        },
+        %{
+          key: :model_default_compaction,
+          secret: false,
+          env: "",
+          label: "Default Memory Model",
+          help: "App-wide fallback model for compaction and memory summarization"
+        }
+      ]
+    },
     "google_workspace" => %{
       label: "Google Workspace",
       keys: [
@@ -171,6 +204,14 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "GOOGLE_CLOUD_PROJECT_NUMBER",
           label: "Project Number",
           help: "From Google Cloud Console → Dashboard → Project Info (numeric ID)"
+        },
+        %{
+          key: :google_service_account_json,
+          secret: true,
+          env: "GOOGLE_SERVICE_ACCOUNT_JSON",
+          label: "Service Account JSON",
+          help:
+            "Paste the full JSON key from GCP Console → IAM → Service Accounts → Keys, or set GOOGLE_SERVICE_ACCOUNT_JSON env var"
         },
         %{
           key: :google_chat_enabled,
