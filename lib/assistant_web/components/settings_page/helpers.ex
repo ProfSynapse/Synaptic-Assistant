@@ -3,16 +3,16 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
 
   def nav_items do
     [
-      {"admin", "Admin"},
-      {"profile", "Profile"},
       {"workspace", "Chat"},
+      {"profile", "Profile"},
       {"models", "Models"},
       {"analytics", "Analytics"},
       {"memory", "Memory"},
       {"apps", "Apps & Connections"},
       {"workflows", "Workflows"},
       {"skills", "Skill Permissions"},
-      {"help", "Help"}
+      {"help", "Help"},
+      {"admin", "Admin"}
     ]
   end
 
