@@ -50,13 +50,17 @@ defmodule Assistant.Channels.UserResolverPropertyTest do
     end
   end
 
-  # Google Chat: "users/" followed by 1-20 digits
+  # Google Chat: "users/" followed by 1-128 alphanumeric chars (including _, -)
   defp valid_google_chat_id do
     gen all(
           len <- integer(1..20),
-          digits <- list_of(integer(?0..?9), length: len)
+          chars <-
+            list_of(
+              one_of([integer(?a..?z), integer(?A..?Z), integer(?0..?9), constant(?_), constant(?-)]),
+              length: len
+            )
         ) do
-      "users/" <> to_string(digits)
+      "users/" <> to_string(chars)
     end
   end
 
@@ -141,7 +145,8 @@ defmodule Assistant.Channels.UserResolverPropertyTest do
     ])
   end
 
-  # Invalid Google Chat ID: missing "users/" prefix or non-numeric suffix
+  # Invalid Google Chat ID: missing "users/" prefix, empty suffix, special chars,
+  # or exceeding 128-char suffix limit.
   defp invalid_google_chat_id do
     one_of([
       # Just digits, no prefix
@@ -153,10 +158,14 @@ defmodule Assistant.Channels.UserResolverPropertyTest do
       end,
       # Wrong prefix
       constant("spaces/12345"),
-      # No digits after prefix
+      # No suffix after prefix
       constant("users/"),
-      # Letters after prefix
-      constant("users/abcdef"),
+      # Special characters in suffix
+      constant("users/abc!@#"),
+      # Path traversal attempt
+      constant("users/../admin"),
+      # Suffix too long (129+ chars)
+      constant("users/" <> String.duplicate("a", 129)),
       # Empty string
       constant("")
     ])

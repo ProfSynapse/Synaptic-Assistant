@@ -41,7 +41,7 @@ defmodule Assistant.Channels.UserResolver do
     telegram: ~r/^\d{1,20}$/,
     slack: ~r/^[A-Z0-9]{2,20}$/,
     discord: ~r/^\d{1,20}$/,
-    google_chat: ~r/^users\/\d{1,20}$/
+    google_chat: ~r/^users\/[a-zA-Z0-9_\-]{1,128}$/
   }
 
   @doc """
