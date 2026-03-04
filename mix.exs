@@ -108,7 +108,7 @@ defmodule Assistant.MixProject do
       {:stream_data, "~> 1.1", only: :test},
       {:bypass, "~> 2.1", only: :test},
       {:excoveralls, "~> 0.18", only: :test},
-      {:floki, ">= 0.30.0", only: :test},
+      {:floki, ">= 0.30.0"},
       {:lazy_html, ">= 0.1.0", only: :test}
     ]
   end

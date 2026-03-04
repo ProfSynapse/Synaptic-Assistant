@@ -7,6 +7,7 @@
 defmodule Assistant.Integrations.Telegram.ClientTest do
   use ExUnit.Case, async: false
 
+  alias Assistant.IntegrationSettings.Cache
   alias Assistant.Integrations.Telegram.Client
 
   @bot_token "test-bot-token-12345"
@@ -18,10 +19,13 @@ defmodule Assistant.Integrations.Telegram.ClientTest do
     prev_token = Application.get_env(:assistant, :telegram_bot_token)
     prev_url = Application.get_env(:assistant, :telegram_api_base_url)
 
+    Cache.invalidate(:telegram_bot_token)
     Application.put_env(:assistant, :telegram_bot_token, @bot_token)
     Application.put_env(:assistant, :telegram_api_base_url, base_url)
 
     on_exit(fn ->
+      Cache.invalidate(:telegram_bot_token)
+
       if prev_token,
         do: Application.put_env(:assistant, :telegram_bot_token, prev_token),
         else: Application.delete_env(:assistant, :telegram_bot_token)
@@ -207,6 +211,7 @@ defmodule Assistant.Integrations.Telegram.ClientTest do
 
   describe "error handling" do
     test "returns error when token is not configured" do
+      Cache.invalidate(:telegram_bot_token)
       Application.delete_env(:assistant, :telegram_bot_token)
 
       assert {:error, :token_not_configured} = Client.send_message("12345", "Hello!")

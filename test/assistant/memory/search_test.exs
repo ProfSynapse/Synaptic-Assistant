@@ -12,6 +12,7 @@ defmodule Assistant.Memory.SearchTest do
 
   describe "module compilation" do
     test "Search module is loaded and exports expected functions" do
+      assert Code.ensure_loaded?(Search)
       assert function_exported?(Search, :search_memories, 2)
       assert function_exported?(Search, :search_by_tags, 2)
       assert function_exported?(Search, :get_recent_entries, 2)
