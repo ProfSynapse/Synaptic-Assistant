@@ -885,6 +885,37 @@ defmodule Assistant.AccountsTest do
       assert reloaded.user_id == chat_user.id
     end
 
+    test "repairs pseudo-user link to sole real chat user" do
+      {:ok, chat_user} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "tg-repair-#{System.unique_integer([:positive])}",
+          channel: "telegram"
+        })
+        |> Repo.insert()
+
+      {:ok, pseudo_user} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "settings:repair-#{System.unique_integer([:positive])}",
+          channel: "settings"
+        })
+        |> Repo.insert()
+
+      settings_user =
+        settings_user_fixture()
+        |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
+        |> Repo.update!()
+
+      assert {:ok, linked_user_id} =
+               AssistantWeb.SettingsLive.Context.ensure_linked_user(settings_user)
+
+      assert linked_user_id == chat_user.id
+
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert reloaded.user_id == chat_user.id
+    end
+
     test "creates pseudo-user when multiple chat users exist" do
       {:ok, _chat_user1} =
         %Assistant.Schemas.User{}
@@ -910,6 +941,45 @@ defmodule Assistant.AccountsTest do
       # Should have created a pseudo-user, not linked to either real user
       pseudo = Repo.get!(Assistant.Schemas.User, linked_user_id)
       assert pseudo.channel == "settings"
+    end
+
+    test "keeps existing pseudo-user link when multiple real chat users exist" do
+      {:ok, _chat_user1} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "tg-keep-pseudo-#{System.unique_integer([:positive])}",
+          channel: "telegram"
+        })
+        |> Repo.insert()
+
+      {:ok, _chat_user2} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "gc-keep-pseudo-#{System.unique_integer([:positive])}",
+          channel: "google_chat"
+        })
+        |> Repo.insert()
+
+      {:ok, pseudo_user} =
+        %Assistant.Schemas.User{}
+        |> Assistant.Schemas.User.changeset(%{
+          external_id: "settings:keep-#{System.unique_integer([:positive])}",
+          channel: "settings"
+        })
+        |> Repo.insert()
+
+      settings_user =
+        settings_user_fixture()
+        |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
+        |> Repo.update!()
+
+      assert {:ok, linked_user_id} =
+               AssistantWeb.SettingsLive.Context.ensure_linked_user(settings_user)
+
+      assert linked_user_id == pseudo_user.id
+
+      reloaded = Repo.get!(SettingsUser, settings_user.id)
+      assert reloaded.user_id == pseudo_user.id
     end
   end
 

@@ -128,7 +128,8 @@ defmodule Assistant.Channels.Dispatcher do
 
     case UserResolver.resolve(message.channel, message.user_id, %{
            display_name: message.user_display_name,
-           space_id: message.space_id
+           space_id: message.space_id,
+           user_email: message.user_email
          }) do
       {:ok, %{user_id: user_id, conversation_id: conversation_id}} ->
         :telemetry.execute(
@@ -240,7 +241,8 @@ defmodule Assistant.Channels.Dispatcher do
     # Step 1: Resolve platform identity to DB user + perpetual conversation
     case UserResolver.resolve(message.channel, message.user_id, %{
            display_name: message.user_display_name,
-           space_id: message.space_id
+           space_id: message.space_id,
+           user_email: message.user_email
          }) do
       {:ok, %{user_id: user_id, conversation_id: conversation_id}} ->
         resolve_time = System.monotonic_time()

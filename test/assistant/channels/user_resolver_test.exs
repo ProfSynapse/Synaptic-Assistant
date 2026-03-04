@@ -119,6 +119,121 @@ defmodule Assistant.Channels.UserResolverTest do
       assert result1.user_id == result2.user_id
       assert result1.conversation_id == result2.conversation_id
     end
+
+    test "links Google Chat identity to settings-linked user by email when available" do
+      existing_user =
+        chat_user_fixture(%{
+          channel: "settings",
+          external_id: "settings:gc-link-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, settings_user} =
+        %Assistant.Accounts.SettingsUser{}
+        |> Assistant.Accounts.SettingsUser.email_changeset(
+          %{
+            email: "gc-link-#{System.unique_integer([:positive])}@example.com"
+          },
+          validate_changed: false
+        )
+        |> Repo.insert()
+
+      settings_user =
+        settings_user
+        |> Ecto.Changeset.change(%{user_id: existing_user.id})
+        |> Repo.update!()
+
+      external_id = "users/#{System.unique_integer([:positive])}"
+
+      assert {:ok, %{user_id: resolved_user_id}} =
+               UserResolver.resolve(:google_chat, external_id, %{
+                 user_email: settings_user.email,
+                 display_name: "GC User",
+                 space_id: "spaces/AAAA"
+               })
+
+      assert resolved_user_id == existing_user.id
+
+      identity =
+        Repo.one!(
+          from(ui in UserIdentity,
+            where:
+              ui.user_id == ^existing_user.id and
+                ui.channel == "google_chat" and
+                ui.external_id == ^external_id and
+                ui.space_id == "spaces/AAAA"
+          )
+        )
+
+      assert identity.display_name == "GC User"
+    end
+
+    test "re-links sole settings user from pseudo-user on first Google Chat resolve" do
+      pseudo_user =
+        chat_user_fixture(%{
+          channel: "settings",
+          external_id: "settings:gc-pseudo-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, settings_user} =
+        %Assistant.Accounts.SettingsUser{}
+        |> Assistant.Accounts.SettingsUser.email_changeset(
+          %{email: "gc-pseudo-#{System.unique_integer([:positive])}@example.com"},
+          validate_changed: false
+        )
+        |> Repo.insert()
+
+      settings_user =
+        settings_user
+        |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
+        |> Repo.update!()
+
+      external_id = "users/#{System.unique_integer([:positive])}"
+
+      assert {:ok, %{user_id: resolved_user_id}} =
+               UserResolver.resolve(:google_chat, external_id, %{display_name: "GC User"})
+
+      refute resolved_user_id == pseudo_user.id
+
+      reloaded_settings_user = Repo.get!(Assistant.Accounts.SettingsUser, settings_user.id)
+      assert reloaded_settings_user.user_id == resolved_user_id
+    end
+
+    test "re-links sole settings user from pseudo-user when Google Chat identity already exists" do
+      google_chat_user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/#{System.unique_integer([:positive])}"
+        })
+
+      _identity = user_identity_fixture(google_chat_user)
+
+      pseudo_user =
+        chat_user_fixture(%{
+          channel: "settings",
+          external_id: "settings:gc-existing-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, settings_user} =
+        %Assistant.Accounts.SettingsUser{}
+        |> Assistant.Accounts.SettingsUser.email_changeset(
+          %{email: "gc-existing-#{System.unique_integer([:positive])}@example.com"},
+          validate_changed: false
+        )
+        |> Repo.insert()
+
+      settings_user =
+        settings_user
+        |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
+        |> Repo.update!()
+
+      assert {:ok, %{user_id: resolved_user_id}} =
+               UserResolver.resolve(:google_chat, google_chat_user.external_id)
+
+      assert resolved_user_id == google_chat_user.id
+
+      reloaded_settings_user = Repo.get!(Assistant.Accounts.SettingsUser, settings_user.id)
+      assert reloaded_settings_user.user_id == google_chat_user.id
+    end
   end
 
   # ---------------------------------------------------------------

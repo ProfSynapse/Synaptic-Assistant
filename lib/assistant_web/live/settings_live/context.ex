@@ -7,6 +7,8 @@ defmodule AssistantWeb.SettingsLive.Context do
   require Logger
 
   alias Assistant.Accounts.Scope
+  alias Assistant.Repo
+  alias Assistant.Schemas.User
 
   def current_settings_user(socket) do
     case socket.assigns[:current_scope] do
@@ -29,20 +31,29 @@ defmodule AssistantWeb.SettingsLive.Context do
     end
   end
 
-  # If the settings_user already has a linked chat user, return it.
-  # Otherwise try to link to an existing chat user before falling back
-  # to creating a "settings" pseudo-user. In single-user setups (only
-  # one non-settings chat user exists), auto-link to that user so OAuth
-  # keys resolve correctly across channels.
-  def ensure_linked_user(%{user_id: user_id}) when not is_nil(user_id), do: {:ok, user_id}
+  # If the settings_user has a real (non-settings) linked chat user, return it.
+  # If linked to a "settings" pseudo-user (legacy/broken state), attempt repair:
+  # when exactly one real chat user exists, re-link to that user.
+  # Otherwise preserve the pseudo link to avoid unsafe guessing.
+  def ensure_linked_user(%{user_id: user_id} = settings_user) when not is_nil(user_id) do
+    case Repo.get(User, user_id) do
+      %User{channel: channel} when channel != "settings" ->
+        {:ok, user_id}
 
-  def ensure_linked_user(settings_user) do
+      _ ->
+        repair_or_create_link(settings_user)
+    end
+  end
+
+  def ensure_linked_user(settings_user), do: repair_or_create_link(settings_user)
+
+  defp repair_or_create_link(settings_user) do
     chat_users =
-      from(u in Assistant.Schemas.User,
+      from(u in User,
         where: u.channel != "settings" or is_nil(u.channel),
         select: u
       )
-      |> Assistant.Repo.all()
+      |> Repo.all()
 
     case chat_users do
       [single_user] ->
@@ -50,25 +61,35 @@ defmodule AssistantWeb.SettingsLive.Context do
         link_settings_user(settings_user, single_user.id)
 
       [_ | _] ->
-        # Multiple chat users: create pseudo-user (safe default)
-        Logger.info(
-          "ensure_linked_user: #{length(chat_users)} chat users exist; " <>
-            "creating settings pseudo-user. Consider manually linking " <>
-            "settings_user #{settings_user.id} to the correct chat user."
-        )
+        # Multiple chat users: do not guess. Keep existing pseudo link if present,
+        # otherwise create a pseudo user as a safe default.
+        if linked_to_pseudo_user?(settings_user.user_id) do
+          {:ok, settings_user.user_id}
+        else
+          Logger.info(
+            "ensure_linked_user: #{length(chat_users)} chat users exist; " <>
+              "creating settings pseudo-user. Consider manually linking " <>
+              "settings_user #{settings_user.id} to the correct chat user."
+          )
 
-        create_pseudo_user(settings_user)
+          create_pseudo_user(settings_user)
+        end
 
       [] ->
-        # No chat users yet (first-time setup): create pseudo-user
-        create_pseudo_user(settings_user)
+        # No chat users yet (first-time setup): keep existing pseudo link if present,
+        # otherwise create one.
+        if linked_to_pseudo_user?(settings_user.user_id) do
+          {:ok, settings_user.user_id}
+        else
+          create_pseudo_user(settings_user)
+        end
     end
   end
 
   defp link_settings_user(settings_user, user_id) do
     settings_user
     |> Ecto.Changeset.change(user_id: user_id)
-    |> Assistant.Repo.update()
+    |> Repo.update()
     |> case do
       {:ok, _} -> {:ok, user_id}
       {:error, changeset} -> {:error, changeset}
@@ -82,9 +103,9 @@ defmodule AssistantWeb.SettingsLive.Context do
       display_name: settings_user.display_name
     }
 
-    case %Assistant.Schemas.User{}
-         |> Assistant.Schemas.User.changeset(user_attrs)
-         |> Assistant.Repo.insert() do
+    case %User{}
+         |> User.changeset(user_attrs)
+         |> Repo.insert() do
       {:ok, user} ->
         link_settings_user(settings_user, user.id)
 
@@ -92,6 +113,12 @@ defmodule AssistantWeb.SettingsLive.Context do
         {:error, changeset}
     end
   end
+
+  defp linked_to_pseudo_user?(user_id) when is_binary(user_id) do
+    match?(%User{channel: "settings"}, Repo.get(User, user_id))
+  end
+
+  defp linked_to_pseudo_user?(_), do: false
 
   def with_linked_user(socket, callback) when is_function(callback, 2) do
     case current_settings_user(socket) do

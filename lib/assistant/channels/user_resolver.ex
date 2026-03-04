@@ -30,6 +30,7 @@ defmodule Assistant.Channels.UserResolver do
   import Ecto.Query
 
   alias Assistant.Repo
+  alias Assistant.Accounts.SettingsUser
   alias Assistant.Memory.Store
   alias Assistant.Schemas.{User, UserIdentity}
 
@@ -71,10 +72,18 @@ defmodule Assistant.Channels.UserResolver do
     with :ok <- validate_platform_id(channel, external_id) do
       case find_identity(channel, external_id, space_id) do
         {:ok, identity} ->
+          maybe_link_sole_settings_user_to_channel_user(channel, identity.user_id)
           ensure_perpetual_conversation(identity.user_id)
 
         {:error, :not_found} ->
-          create_user_and_resolve(channel, external_id, metadata)
+          case create_user_and_resolve(channel, external_id, metadata) do
+            {:ok, %{user_id: user_id} = result} ->
+              maybe_link_sole_settings_user_to_channel_user(channel, user_id)
+              {:ok, result}
+
+            {:error, _reason} = error ->
+              error
+          end
       end
     end
   end
@@ -196,7 +205,38 @@ defmodule Assistant.Channels.UserResolver do
     display_name = Map.get(metadata, :display_name) || Map.get(metadata, "display_name")
     space_id = Map.get(metadata, :space_id) || Map.get(metadata, "space_id")
     channel_str = to_string(channel)
+    user_email = extract_user_email(metadata)
 
+    case find_linked_user_id_by_email(user_email) do
+      linked_user_id when is_binary(linked_user_id) ->
+        Logger.info("Linking inbound channel identity to existing settings-linked user",
+          channel: channel,
+          external_id: external_id,
+          user_id: linked_user_id
+        )
+
+        identity_attrs = %{
+          user_id: linked_user_id,
+          channel: channel_str,
+          external_id: external_id,
+          space_id: space_id,
+          display_name: display_name
+        }
+
+        case %UserIdentity{} |> UserIdentity.changeset(identity_attrs) |> Repo.insert() do
+          {:ok, _identity} ->
+            ensure_perpetual_conversation(linked_user_id)
+
+          {:error, reason} ->
+            resolve_after_insert_error(channel, external_id, space_id, reason)
+        end
+
+      _ ->
+        create_new_user_and_resolve(channel, channel_str, external_id, space_id, display_name)
+    end
+  end
+
+  defp create_new_user_and_resolve(channel, channel_str, external_id, space_id, display_name) do
     Repo.transaction(fn ->
       # Create user with primary identity fields
       user_attrs = %{
@@ -239,17 +279,118 @@ defmodule Assistant.Channels.UserResolver do
         ensure_perpetual_conversation(user_id)
 
       {:error, reason} ->
-        # Race condition: another process may have created this user.
-        # Try to find the identity that was just created.
-        case find_identity(channel, external_id, space_id) do
-          {:ok, identity} ->
-            ensure_perpetual_conversation(identity.user_id)
-
-          {:error, :not_found} ->
-            {:error, reason}
-        end
+        resolve_after_insert_error(channel, external_id, space_id, reason)
     end
   end
+
+  defp resolve_after_insert_error(channel, external_id, space_id, reason) do
+    # Race condition: another process may have created this identity.
+    # Try to find the identity that was just created.
+    case find_identity(channel, external_id, space_id) do
+      {:ok, identity} ->
+        ensure_perpetual_conversation(identity.user_id)
+
+      {:error, :not_found} ->
+        {:error, reason}
+    end
+  end
+
+  defp find_linked_user_id_by_email(email) when is_binary(email) do
+    normalized_email = normalize_email(email)
+
+    if is_binary(normalized_email) do
+      query =
+        from su in SettingsUser,
+          where: not is_nil(su.user_id),
+          where: fragment("lower(?)", su.email) == ^normalized_email,
+          select: su.user_id,
+          limit: 1
+
+      Repo.one(query)
+    else
+      nil
+    end
+  end
+
+  defp find_linked_user_id_by_email(_), do: nil
+
+  defp extract_user_email(metadata) when is_map(metadata) do
+    Map.get(metadata, :user_email) ||
+      Map.get(metadata, "user_email") ||
+      Map.get(metadata, :email) ||
+      Map.get(metadata, "email")
+  end
+
+  defp extract_user_email(_), do: nil
+
+  defp normalize_email(value) when is_binary(value) do
+    case value |> String.trim() |> String.downcase() do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_email(_), do: nil
+
+  defp maybe_link_sole_settings_user_to_channel_user(:google_chat, channel_user_id)
+       when is_binary(channel_user_id) do
+    case sole_linked_settings_user() do
+      %SettingsUser{} = settings_user ->
+        cond do
+          settings_user.user_id == channel_user_id ->
+            :ok
+
+          linked_to_pseudo_user?(settings_user.user_id) ->
+            case settings_user
+                 |> Ecto.Changeset.change(%{user_id: channel_user_id})
+                 |> Repo.update() do
+              {:ok, _updated} ->
+                Logger.info("Re-linked sole settings user from pseudo-user to channel user",
+                  settings_user_id: settings_user.id,
+                  channel_user_id: channel_user_id,
+                  channel: :google_chat
+                )
+
+                :ok
+
+              {:error, changeset} ->
+                Logger.warning("Failed to re-link sole settings user from pseudo-user",
+                  settings_user_id: settings_user.id,
+                  channel_user_id: channel_user_id,
+                  errors: inspect(changeset.errors)
+                )
+
+                :ok
+            end
+
+          true ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp maybe_link_sole_settings_user_to_channel_user(_channel, _channel_user_id), do: :ok
+
+  defp sole_linked_settings_user do
+    query =
+      from su in SettingsUser,
+        where: not is_nil(su.user_id),
+        select: su
+
+    case Repo.all(query) do
+      [settings_user] -> settings_user
+      _ -> nil
+    end
+  end
+
+  defp linked_to_pseudo_user?(user_id) when is_binary(user_id) do
+    match?(%User{channel: "settings"}, Repo.get(User, user_id))
+  end
+
+  defp linked_to_pseudo_user?(_), do: false
 
   defp ensure_perpetual_conversation(user_id) do
     case Store.get_or_create_perpetual_conversation(user_id) do

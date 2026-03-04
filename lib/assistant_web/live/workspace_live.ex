@@ -3,6 +3,7 @@ defmodule AssistantWeb.WorkspaceLive do
 
   alias Assistant.Workspace
   alias AssistantWeb.Components.SettingsPage.Helpers
+  alias AssistantWeb.SettingsLive.Context
 
   @refresh_interval_ms 2_500
   @message_limit 200
@@ -10,7 +11,7 @@ defmodule AssistantWeb.WorkspaceLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    user_id = current_user_id(socket)
+    user_id = resolve_workspace_user_id(socket)
 
     socket =
       socket
@@ -435,7 +436,10 @@ defmodule AssistantWeb.WorkspaceLive do
   end
 
   defp maybe_load_workspace(socket) do
-    case socket.assigns.workspace_user_id do
+    workspace_user_id = resolve_workspace_user_id(socket)
+    socket = assign(socket, :workspace_user_id, workspace_user_id)
+
+    case workspace_user_id do
       nil ->
         put_flash(socket, :error, "No linked user account found for chat.")
 
@@ -509,10 +513,16 @@ defmodule AssistantWeb.WorkspaceLive do
   defp nav_path("workspace"), do: ~p"/workspace"
   defp nav_path(section), do: ~p"/settings/#{section}"
 
-  defp current_user_id(socket) do
-    case socket.assigns[:current_scope] do
-      %{settings_user: %{user_id: user_id}} when is_binary(user_id) -> user_id
-      _ -> nil
+  defp resolve_workspace_user_id(socket) do
+    case Context.current_settings_user(socket) do
+      %{user_id: fallback_user_id} = settings_user ->
+        case Context.ensure_linked_user(settings_user) do
+          {:ok, user_id} when is_binary(user_id) -> user_id
+          _ -> fallback_user_id
+        end
+
+      _ ->
+        nil
     end
   end
 
