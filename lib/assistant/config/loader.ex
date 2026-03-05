@@ -133,6 +133,38 @@ defmodule Assistant.Config.Loader do
   end
 
   @doc """
+  Resolves a model ID for a primary role with a fallback cascade:
+  primary_role → compaction → fallback → first :fast tier model.
+
+  Used by Sentinel and TurnClassifier for cheap/fast model resolution.
+  Returns the model ID string or nil if no model is found.
+  """
+  @spec resolve_fast_model(atom(), keyword()) :: String.t() | nil
+  def resolve_fast_model(primary_role, opts \\ []) do
+    case model_for(primary_role, opts) do
+      %{id: id} -> id
+      nil -> resolve_fallback_cascade(opts)
+    end
+  end
+
+  defp resolve_fallback_cascade(opts) do
+    with nil <- model_id_for(:compaction, opts),
+         nil <- model_id_for(:fallback, opts) do
+      case models_by_tier(:fast) do
+        [%{id: id} | _] -> id
+        _ -> nil
+      end
+    end
+  end
+
+  defp model_id_for(role, opts) do
+    case model_for(role, opts) do
+      %{id: id} -> id
+      nil -> nil
+    end
+  end
+
+  @doc """
   Returns all models matching the given tier.
   """
   @spec models_by_tier(atom()) :: [map()]

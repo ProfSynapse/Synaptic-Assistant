@@ -293,32 +293,13 @@ defmodule Assistant.Orchestrator.Sentinel do
   # --- Model Resolution ---
 
   defp resolve_sentinel_model(opts) do
-    case ConfigLoader.model_for(:sentinel, opts) do
-      %{id: id} ->
-        id
-
+    case ConfigLoader.resolve_fast_model(:sentinel, opts) do
       nil ->
-        case ConfigLoader.model_for(:compaction, opts) do
-          %{id: id} ->
-            id
+        Logger.error("No sentinel, compaction, fallback, or fast-tier model in config")
+        nil
 
-          nil ->
-            case ConfigLoader.model_for(:fallback, opts) do
-              %{id: id} ->
-                id
-
-              nil ->
-                # Last resort: pick the first :fast tier model from config
-                case ConfigLoader.models_by_tier(:fast) do
-                  [%{id: id} | _] ->
-                    id
-
-                  _ ->
-                    Logger.error("No sentinel, compaction, fallback, or fast-tier model in config")
-                    nil
-                end
-            end
-        end
+      id ->
+        id
     end
   rescue
     error ->

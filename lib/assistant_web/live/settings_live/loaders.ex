@@ -574,7 +574,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       %{
         key: :fallback,
         label: "Fallback",
-        tooltip: "App-wide fallback when no role-specific default is set."
+        tooltip: "Only activates when explicitly set by an admin. Used when no role-specific default is configured."
       }
     ]
   end

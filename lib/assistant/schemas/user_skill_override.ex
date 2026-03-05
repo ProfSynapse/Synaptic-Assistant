@@ -9,6 +9,8 @@ defmodule Assistant.Schemas.UserSkillOverride do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Assistant.Skills.Registry
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -31,9 +33,20 @@ defmodule Assistant.Schemas.UserSkillOverride do
     |> cast(attrs, @required_fields)
     |> validate_required(@required_fields)
     |> validate_length(:skill_name, min: 1, max: 255)
+    |> validate_change(:skill_name, &validate_known_skill/2)
     |> foreign_key_constraint(:user_id)
     |> unique_constraint([:user_id, :skill_name],
       name: :user_skill_overrides_user_skill_unique
     )
+  end
+
+  defp validate_known_skill(:skill_name, skill_name) do
+    known_names = Registry.list_all() |> Enum.map(& &1.name) |> MapSet.new()
+
+    if MapSet.member?(known_names, skill_name) do
+      []
+    else
+      [skill_name: "is not a recognized skill"]
+    end
   end
 end

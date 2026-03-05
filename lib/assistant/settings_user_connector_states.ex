@@ -60,7 +60,7 @@ defmodule Assistant.SettingsUserConnectorStates do
           | {:error, :invalid}
   def set_enabled_for_user(user_id, integration_group, enabled, metadata \\ %{})
       when is_binary(user_id) and is_binary(integration_group) and is_boolean(enabled) and is_map(metadata) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     attrs = %{
       user_id: user_id,
