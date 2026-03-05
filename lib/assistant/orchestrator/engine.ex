@@ -397,13 +397,23 @@ defmodule Assistant.Orchestrator.Engine do
                 status = agent_result[:status] || :completed
                 result_text = agent_result[:result] || "Agent completed."
 
+                # Surface the approval reason directly so the orchestrator can
+                # present it to the user without an extra get_agent_results call.
+                approval_section =
+                  if status == :awaiting_orchestrator and is_binary(agent_result[:reason]) do
+                    "\n\n#{agent_result[:reason]}"
+                  else
+                    ""
+                  end
+
                 %{
                   role: "tool",
                   tool_call_id: tc.id,
                   content:
                     "Agent \"#{params.agent_id}\" dispatched and #{status}. " <>
                       "Use get_agent_results to inspect full results.\n\n" <>
-                      "Summary: #{result_text}"
+                      "Summary: #{result_text}" <>
+                      approval_section
                 }
               end)
 
