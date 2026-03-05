@@ -66,7 +66,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   alias Assistant.Config.{Loader, PromptLoader}
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.LLMRouter
-  alias Assistant.Orchestrator.{GoogleContext, LLMHelpers, Limits, Sentinel}
+  alias Assistant.Orchestrator.{ApprovalGate, GoogleContext, LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Executor, Registry, Result}
 
@@ -629,11 +629,23 @@ defmodule Assistant.Orchestrator.SubAgent do
             extract_function_name(tc) == "request_help"
           end)
 
-        # Execute skill calls
-        {results, final_agent_state} =
-          Enum.map_reduce(skill_calls, new_agent_state, fn tc, acc_state ->
-            result = execute_single_tool(tc, dispatch_params, engine_state, genserver_pid)
-            {result, acc_state}
+        # Pre-compute how many approval-gated skills are in this batch so the
+        # approval reason can indicate "1 of N" to the user.
+        approval_gated_count = count_approval_gated_skills(skill_calls)
+
+        # Execute skill calls (approval_seq tracks position within gated skills)
+        {results, {final_agent_state, _final_seq}} =
+          Enum.map_reduce(skill_calls, {new_agent_state, 1}, fn tc, {acc_state, approval_seq} ->
+            batch_info = %{count: approval_gated_count, seq: approval_seq}
+
+            result =
+              execute_single_tool(tc, dispatch_params, engine_state, genserver_pid, batch_info)
+
+            # Increment sequence when we pass an approval-gated skill
+            next_seq =
+              if is_approval_gated_tool_call?(tc), do: approval_seq + 1, else: approval_seq
+
+            {result, {acc_state, next_seq}}
           end)
 
         # Report tool call count back to GenServer
@@ -738,13 +750,13 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_single_tool(tc, dispatch_params, engine_state, genserver_pid) do
+  defp execute_single_tool(tc, dispatch_params, engine_state, genserver_pid, batch_info) do
     name = extract_function_name(tc)
     args = extract_function_args(tc)
 
     case name do
       "use_skill" ->
-        execute_use_skill(tc, args, dispatch_params, engine_state, genserver_pid)
+        execute_use_skill(tc, args, dispatch_params, engine_state, genserver_pid, batch_info)
 
       "request_help" ->
         # Handled upstream in execute_tool_calls; this is a fallback
@@ -755,7 +767,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_use_skill(tc, args, dispatch_params, engine_state, genserver_pid) do
+  defp execute_use_skill(tc, args, dispatch_params, engine_state, genserver_pid, batch_info) do
     skill_name = args["skill"]
 
     # Strip empty strings the LLM sends for optional typed parameters.
@@ -804,10 +816,24 @@ defmodule Assistant.Orchestrator.SubAgent do
             # Look up skill definition early so the approval gate can inspect it
             case Registry.lookup(skill_name) do
               {:ok, %{requires_approval: true} = skill_def} ->
-                handle_approval_gate(
-                  tc, skill_name, skill_args, skill_def,
-                  dispatch_params, engine_state, genserver_pid
-                )
+                approval_index =
+                  if batch_info.count > 1, do: {batch_info.seq, batch_info.count}, else: nil
+
+                case ApprovalGate.check(skill_name, skill_args,
+                       skill_def: skill_def,
+                       dispatch_params: dispatch_params,
+                       genserver_pid: genserver_pid,
+                       approval_index: approval_index
+                     ) do
+                  :approved ->
+                    execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
+
+                  {:denied, message} ->
+                    {tc, message}
+
+                  {:timeout, message} ->
+                    {tc, message}
+                end
 
               {:ok, skill_def} ->
                 execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
@@ -826,69 +852,6 @@ defmodule Assistant.Orchestrator.SubAgent do
             {tc, "Action rejected by security gate: #{reason}"}
         end
     end
-  end
-
-  defp handle_approval_gate(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state, genserver_pid) do
-    reason = build_approval_reason(skill_name, skill_args, skill_def)
-    synthetic_tc = %{id: "approval_#{System.unique_integer([:positive])}"}
-
-    Logger.info("Approval gate triggered — pausing sub-agent",
-      agent_id: dispatch_params.agent_id,
-      skill: skill_name
-    )
-
-    # Pause using existing mechanism
-    send(genserver_pid, {:loop_paused, reason, nil, synthetic_tc})
-
-    # Block until orchestrator resumes via send_agent_update(approved: bool)
-    receive do
-      {:resume, %{approved: true}} ->
-        execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
-
-      {:resume, %{approved: false, message: feedback}} when is_binary(feedback) ->
-        {tc,
-         "APPROVAL_DENIED: User requested changes: #{feedback}\n\n" <>
-           "Adjust your approach based on the feedback and try again."}
-
-      {:resume, %{approved: false}} ->
-        {tc, "APPROVAL_DENIED: User cancelled this action."}
-
-      {:resume, _update} ->
-        # Fallback for resume without approved field (e.g., plain message update)
-        {tc, "APPROVAL_DENIED: Approval response was unclear. Action not executed."}
-    after
-      300_000 ->
-        Logger.warning("Approval gate timed out after 5 minutes",
-          agent_id: dispatch_params.agent_id,
-          skill: skill_name
-        )
-
-        {tc, "Approval request timed out (5 minutes). The action was not executed."}
-    end
-  end
-
-  defp build_approval_reason(skill_name, skill_args, skill_def) do
-    args_text =
-      skill_def.parameters
-      |> Enum.map(fn param ->
-        param_name = param[:name] || param["name"]
-        value = Map.get(skill_args, param_name, "(not provided)")
-        "  #{param_name}: #{value}"
-      end)
-      |> Enum.join("\n")
-
-    # Fall back to raw args if no parameters are defined in the skill
-    args_text =
-      if args_text == "" and map_size(skill_args) > 0 do
-        skill_args
-        |> Enum.map(fn {k, v} -> "  #{k}: #{v}" end)
-        |> Enum.join("\n")
-      else
-        args_text
-      end
-
-    "[APPROVAL_REQUIRED] Skill \"#{skill_name}\" requires user approval.\n\n" <>
-      "Proposed action:\n#{args_text}"
   end
 
   defp execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state) do
@@ -1711,6 +1674,29 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp via_tuple(agent_id) do
     {:via, Elixir.Registry, {Assistant.SubAgent.Registry, agent_id}}
+  end
+
+  # --- Approval Gate Helpers ---
+
+  # Counts how many tool calls in a batch target approval-gated skills.
+  # Used to populate the "Action X of N" indicator in the approval reason.
+  defp count_approval_gated_skills(skill_calls) do
+    Enum.count(skill_calls, &is_approval_gated_tool_call?/1)
+  end
+
+  defp is_approval_gated_tool_call?(tc) do
+    case extract_function_name(tc) do
+      "use_skill" ->
+        skill_name = extract_function_args(tc)["skill"]
+
+        case skill_name && Registry.lookup(skill_name) do
+          {:ok, %{requires_approval: true}} -> true
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
   end
 
   # --- Response Parsing Helpers (delegated to LLMHelpers) ---
