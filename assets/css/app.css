@@ -2078,7 +2078,8 @@ a {
 
 .sa-workspace-activity-card .pc-card__inner {
   display: grid;
-  gap: 10px;
+  gap: 14px;
+  padding: 18px 22px;
 }
 
 .sa-workspace-activity-title-row {
@@ -2097,7 +2098,7 @@ a {
 }
 
 .sa-workspace-activity-title-row h3 {
-  margin: 3px 0 0;
+  margin: 5px 0 0;
   font-size: 1.05rem;
   color: #21384d;
 }
@@ -2121,7 +2122,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 10px 11px;
+  padding: 12px 16px;
 }
 
 .sa-workspace-inline-copy {
@@ -2138,7 +2139,7 @@ a {
 }
 
 .sa-workspace-inline-subtitle {
-  margin: 4px 0 0;
+  margin: 6px 0 0;
   color: #5f7584;
   font-size: 0.82rem;
   line-height: 1.4;
@@ -2147,6 +2148,7 @@ a {
 .sa-workspace-inline-actions {
   display: flex;
   justify-content: flex-end;
+  padding-top: 4px;
 }
 
 .sa-workspace-inspect-btn {

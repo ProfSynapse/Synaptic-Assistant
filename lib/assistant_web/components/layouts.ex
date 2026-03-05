@@ -29,7 +29,7 @@ defmodule AssistantWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={get_csrf_token()} />
         <title>Synaptic Assistant</title>
-        <link rel="stylesheet" href={~p"/assets/app.css?v=channel-icons"} />
+        <link rel="stylesheet" href={~p"/assets/app.css?v=card-spacing"} />
       </head>
       <body>
         {@inner_content}
