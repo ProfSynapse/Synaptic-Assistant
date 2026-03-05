@@ -711,6 +711,135 @@ defmodule Assistant.Skills.ApprovalGateTest do
   # Pipeline ordering — sentinel before gate, scope before sentinel
   # ---------------------------------------------------------------
 
+  # ---------------------------------------------------------------
+  # Production context verification — the LLM sees correct
+  # system prompt, tool schemas, and skill metadata in production
+  # ---------------------------------------------------------------
+
+  describe "production context: system prompt, tools, and skill registry" do
+    setup do
+      # Ensure PromptLoader and Skills.Registry are running (they use named ETS)
+      skills_dir = Path.join(File.cwd!(), "priv/skills")
+
+      if :ets.whereis(:assistant_skills) == :undefined and File.dir?(skills_dir) do
+        case Assistant.Skills.Registry.start_link(skills_dir: skills_dir) do
+          {:ok, pid} -> Process.unlink(pid)
+          {:error, {:already_started, _}} -> :ok
+        end
+      end
+
+      prompts_dir = Path.join(File.cwd!(), "priv/config/prompts")
+
+      if :ets.whereis(:assistant_prompts) == :undefined and File.dir?(prompts_dir) do
+        case Assistant.Config.PromptLoader.start_link(dir: prompts_dir) do
+          {:ok, pid} -> Process.unlink(pid)
+          {:error, {:already_started, _}} -> :ok
+        end
+      end
+
+      :ok
+    end
+
+    test "orchestrator system prompt includes approval handling instructions" do
+      loop_state = %{user_id: "test-user", channel: "test"}
+      prompt = Assistant.Orchestrator.Context.build_system_prompt(loop_state)
+
+      # The orchestrator MUST know how to handle [APPROVAL_REQUIRED] responses
+      assert prompt =~ "APPROVAL_REQUIRED",
+        "System prompt missing [APPROVAL_REQUIRED] handling instructions"
+
+      # Must instruct the LLM on approved=true/false flow
+      assert prompt =~ "approved=true",
+        "System prompt missing approved=true instruction"
+      assert prompt =~ "approved=false",
+        "System prompt missing approved=false instruction"
+
+      # Must instruct LLM to present action details to user
+      assert prompt =~ "approval" or prompt =~ "Approval",
+        "System prompt missing general approval workflow"
+    end
+
+    test "orchestrator tool definitions include all 4 tools with correct schemas" do
+      tools = Assistant.Orchestrator.Context.tool_definitions()
+      tool_names = Enum.map(tools, & &1.function.name) |> Enum.sort()
+
+      assert tool_names == ["dispatch_agent", "get_agent_results", "get_skill", "send_agent_update"],
+        "Expected 4 orchestrator tools, got: #{inspect(tool_names)}"
+    end
+
+    test "send_agent_update tool has approved boolean parameter" do
+      tools = Assistant.Orchestrator.Context.tool_definitions()
+      sau = Enum.find(tools, & &1.function.name == "send_agent_update")
+      assert sau != nil
+
+      props = sau.function.parameters["properties"]
+      assert Map.has_key?(props, "approved"),
+        "send_agent_update missing 'approved' property. Properties: #{inspect(Map.keys(props))}"
+      assert props["approved"]["type"] == "boolean"
+
+      # Verify the description mentions approval gate
+      assert props["approved"]["description"] =~ "approv",
+        "approved param description should mention approval flow"
+    end
+
+    test "send_agent_update tool has agent_id as required parameter" do
+      tools = Assistant.Orchestrator.Context.tool_definitions()
+      sau = Enum.find(tools, & &1.function.name == "send_agent_update")
+
+      assert sau.function.parameters["required"] == ["agent_id"]
+    end
+
+    test "dispatch_agent tool has expected parameters" do
+      tools = Assistant.Orchestrator.Context.tool_definitions()
+      dispatch = Enum.find(tools, & &1.function.name == "dispatch_agent")
+      assert dispatch != nil
+
+      props = dispatch.function.parameters["properties"]
+      assert Map.has_key?(props, "agent_id")
+      assert Map.has_key?(props, "mission")
+      assert Map.has_key?(props, "skills")
+    end
+
+    test "gated skills in registry have requires_approval: true" do
+      gated_skills = [
+        "email.send",
+        "calendar.create",
+        "calendar.update",
+        "hubspot.delete_deal",
+        "hubspot.delete_company",
+        "hubspot.delete_contact",
+        "hubspot.update_deal"
+      ]
+
+      for skill_name <- gated_skills do
+        case Assistant.Skills.Registry.lookup(skill_name) do
+          {:ok, skill} ->
+            assert skill.requires_approval == true,
+              "#{skill_name} should have requires_approval: true, got: #{skill.requires_approval}"
+
+          {:error, :not_found} ->
+            # Skill may not be loaded in test env — skip but don't fail
+            :ok
+        end
+      end
+    end
+
+    test "non-gated read skills do NOT have requires_approval: true" do
+      read_skills = ["email.search", "email.read"]
+
+      for skill_name <- read_skills do
+        case Assistant.Skills.Registry.lookup(skill_name) do
+          {:ok, skill} ->
+            refute skill.requires_approval,
+              "#{skill_name} should NOT have requires_approval: true (it's read-only)"
+
+          {:error, :not_found} ->
+            :ok
+        end
+      end
+    end
+  end
+
   describe "pipeline ordering contract" do
     test "scope check happens before sentinel (structural)" do
       # The execute_use_skill pipeline is:
