@@ -15,14 +15,6 @@ defmodule Assistant.Skills.HubSpot.Contacts.Get do
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
 
-  @contact_fields [
-    {"Email", "email"},
-    {"First Name", "firstname"},
-    {"Last Name", "lastname"},
-    {"Phone", "phone"},
-    {"Company", "company"}
-  ]
-
   @impl true
   def execute(flags, context) do
     case Map.get(context.integrations, :hubspot) do
@@ -50,7 +42,7 @@ defmodule Assistant.Skills.HubSpot.Contacts.Get do
       true ->
         case hubspot.get_contact(api_key, id) do
           {:ok, contact} ->
-            formatted = Helpers.format_object(contact, @contact_fields)
+            formatted = Helpers.format_object(contact, Helpers.contact_fields())
             {:ok, %Result{status: :ok, content: formatted}}
 
           {:error, {:api_error, 404, _}} = error ->

@@ -2,6 +2,7 @@
 #
 # Searches HubSpot contacts by email (EQ) or name (CONTAINS_TOKEN). Returns
 # a formatted list of matching contacts capped by the --limit flag.
+# Supports advanced multi-filter search via the --filters flag.
 #
 # Related files:
 #   - lib/assistant/integrations/hubspot/client.ex (API client)
@@ -12,16 +13,9 @@ defmodule Assistant.Skills.HubSpot.Contacts.Search do
   @moduledoc false
   @behaviour Assistant.Skills.Handler
 
+  alias Assistant.Integrations.HubSpot.Client
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
-
-  @contact_fields [
-    {"Email", "email"},
-    {"First Name", "firstname"},
-    {"Last Name", "lastname"},
-    {"Phone", "phone"},
-    {"Company", "company"}
-  ]
 
   @impl true
   def execute(flags, context) do
@@ -38,6 +32,16 @@ defmodule Assistant.Skills.HubSpot.Contacts.Search do
   end
 
   defp do_execute(hubspot, api_key, flags) do
+    filters_json = Map.get(flags, "filters")
+
+    if filters_json do
+      execute_multi_filter(api_key, flags, filters_json)
+    else
+      execute_simple(hubspot, api_key, flags)
+    end
+  end
+
+  defp execute_simple(hubspot, api_key, flags) do
     query = Map.get(flags, "query")
 
     if is_nil(query) || query == "" do
@@ -50,14 +54,8 @@ defmodule Assistant.Skills.HubSpot.Contacts.Search do
         {:ok, property, operator} ->
           case hubspot.search_contacts(api_key, property, operator, query, limit) do
             {:ok, contacts} ->
-              formatted = Helpers.format_object_list(contacts, @contact_fields, "contacts")
+              formatted = Helpers.format_object_list(contacts, Helpers.contact_fields(), "contacts")
               {:ok, %Result{status: :ok, content: formatted}}
-
-            {:error, {:api_error, 401, _}} = error ->
-              Helpers.handle_error(error)
-
-            {:error, {:api_error, 429, _}} = error ->
-              Helpers.handle_error(error)
 
             error ->
               Helpers.handle_error(error)
@@ -66,6 +64,25 @@ defmodule Assistant.Skills.HubSpot.Contacts.Search do
         {:error, message} ->
           {:ok, %Result{status: :error, content: message}}
       end
+    end
+  end
+
+  defp execute_multi_filter(api_key, flags, filters_json) do
+    limit = Helpers.parse_limit(Map.get(flags, "limit"))
+
+    case Helpers.parse_filters_json(filters_json) do
+      {:ok, filters} ->
+        case Client.crm_search_multi(api_key, "contacts", filters, limit, ~w(email firstname lastname phone company)) do
+          {:ok, contacts} ->
+            formatted = Helpers.format_object_list(contacts, Helpers.contact_fields(), "contacts")
+            {:ok, %Result{status: :ok, content: formatted}}
+
+          error ->
+            Helpers.handle_error(error)
+        end
+
+      {:error, message} ->
+        {:ok, %Result{status: :error, content: message}}
     end
   end
 

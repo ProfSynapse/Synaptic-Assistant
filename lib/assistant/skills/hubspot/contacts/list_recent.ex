@@ -2,6 +2,7 @@
 #
 # Lists recently created or updated contacts from HubSpot CRM. Returns up to
 # --limit contacts (default 10, max 50) with standard contact display fields.
+# Supports cursor-based pagination via --after parameter.
 #
 # Related files:
 #   - lib/assistant/integrations/hubspot/client.ex (API client)
@@ -14,14 +15,6 @@ defmodule Assistant.Skills.HubSpot.Contacts.ListRecent do
 
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
-
-  @contact_fields [
-    {"Email", "email"},
-    {"First Name", "firstname"},
-    {"Last Name", "lastname"},
-    {"Phone", "phone"},
-    {"Company", "company"}
-  ]
 
   @impl true
   def execute(flags, context) do
@@ -39,17 +32,13 @@ defmodule Assistant.Skills.HubSpot.Contacts.ListRecent do
 
   defp do_execute(hubspot, api_key, flags) do
     limit = Helpers.parse_limit(Map.get(flags, "limit"))
+    after_cursor = Map.get(flags, "after")
 
-    case hubspot.list_recent_contacts(api_key, limit) do
-      {:ok, contacts} ->
-        formatted = Helpers.format_object_list(contacts, @contact_fields, "contacts")
-        {:ok, %Result{status: :ok, content: formatted}}
-
-      {:error, {:api_error, 401, _}} = error ->
-        Helpers.handle_error(error)
-
-      {:error, {:api_error, 429, _}} = error ->
-        Helpers.handle_error(error)
+    case hubspot.list_recent_contacts(api_key, limit, after_cursor) do
+      {:ok, %{results: contacts, next: next}} ->
+        formatted = Helpers.format_object_list(contacts, Helpers.contact_fields(), "contacts")
+        content = Helpers.maybe_append_pagination(formatted, next)
+        {:ok, %Result{status: :ok, content: content}}
 
       error ->
         Helpers.handle_error(error)

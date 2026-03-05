@@ -2,6 +2,8 @@
 #
 # Provides functions for interacting with the HubSpot CRM v3 API via Req.
 # Supports CRUD + search + list for Contacts, Companies, and Deals.
+# Includes retry with backoff for transient errors (429/5xx) and
+# cursor-based pagination for list operations.
 #
 # Related files:
 #   - lib/assistant/integration_settings/connection_validator.ex (health check consumer)
@@ -28,21 +30,28 @@ defmodule Assistant.Integrations.HubSpot.Client do
 
   All methods return tagged tuples:
   - `{:ok, map()}` — single object (create, get, update)
-  - `{:ok, [map()]}` — list of objects (search, list_recent)
+  - `{:ok, %{results: [map()], next: cursor | nil}}` — paginated list (search, list_recent)
   - `:ok` — delete (archive) succeeded
   - `{:error, {:api_error, status, message}}` — HubSpot API error
   - `{:error, {:request_failed, reason}}` — network/connection failure
+
+  ## Retry
+
+  All CRM operations (except `health_check`) retry on transient errors
+  (408, 429, 5xx) up to 3 times with linear backoff (500ms * attempt).
 
   ## Usage
 
       HubSpot.Client.health_check("pat-xxx")
       HubSpot.Client.create_contact("pat-xxx", %{"email" => "j@example.com"})
       HubSpot.Client.search_contacts("pat-xxx", "email", "EQ", "j@example.com", 10)
+      HubSpot.Client.list_recent_contacts("pat-xxx", 10, "cursor123")
   """
 
   require Logger
 
   @default_base_url "https://api.hubapi.com"
+  @max_retries 3
 
   # Default properties requested from the API for each object type.
   @contact_properties ~w(email firstname lastname phone company)
@@ -108,11 +117,14 @@ defmodule Assistant.Integrations.HubSpot.Client do
   @spec search_contacts(String.t(), String.t(), String.t(), String.t(), pos_integer()) ::
           {:ok, [map()]} | {:error, term()}
   def search_contacts(api_key, property, operator, value, limit) do
-    crm_search(api_key, "contacts", property, operator, value, limit, @contact_properties)
+    crm_search(api_key, "contacts", [{property, operator, value}], limit, @contact_properties)
   end
 
-  @spec list_recent_contacts(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, term()}
-  def list_recent_contacts(api_key, limit), do: crm_list(api_key, "contacts", limit, @contact_properties)
+  @spec list_recent_contacts(String.t(), pos_integer(), String.t() | nil) ::
+          {:ok, %{results: [map()], next: String.t() | nil}} | {:error, term()}
+  def list_recent_contacts(api_key, limit, after_cursor \\ nil) do
+    crm_list(api_key, "contacts", limit, @contact_properties, after_cursor)
+  end
 
   # ---------------------------------------------------------------------------
   # Companies
@@ -133,11 +145,14 @@ defmodule Assistant.Integrations.HubSpot.Client do
   @spec search_companies(String.t(), String.t(), String.t(), String.t(), pos_integer()) ::
           {:ok, [map()]} | {:error, term()}
   def search_companies(api_key, property, operator, value, limit) do
-    crm_search(api_key, "companies", property, operator, value, limit, @company_properties)
+    crm_search(api_key, "companies", [{property, operator, value}], limit, @company_properties)
   end
 
-  @spec list_recent_companies(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, term()}
-  def list_recent_companies(api_key, limit), do: crm_list(api_key, "companies", limit, @company_properties)
+  @spec list_recent_companies(String.t(), pos_integer(), String.t() | nil) ::
+          {:ok, %{results: [map()], next: String.t() | nil}} | {:error, term()}
+  def list_recent_companies(api_key, limit, after_cursor \\ nil) do
+    crm_list(api_key, "companies", limit, @company_properties, after_cursor)
+  end
 
   # ---------------------------------------------------------------------------
   # Deals
@@ -158,11 +173,42 @@ defmodule Assistant.Integrations.HubSpot.Client do
   @spec search_deals(String.t(), String.t(), String.t(), String.t(), pos_integer()) ::
           {:ok, [map()]} | {:error, term()}
   def search_deals(api_key, property, operator, value, limit) do
-    crm_search(api_key, "deals", property, operator, value, limit, @deal_properties)
+    crm_search(api_key, "deals", [{property, operator, value}], limit, @deal_properties)
   end
 
-  @spec list_recent_deals(String.t(), pos_integer()) :: {:ok, [map()]} | {:error, term()}
-  def list_recent_deals(api_key, limit), do: crm_list(api_key, "deals", limit, @deal_properties)
+  @spec list_recent_deals(String.t(), pos_integer(), String.t() | nil) ::
+          {:ok, %{results: [map()], next: String.t() | nil}} | {:error, term()}
+  def list_recent_deals(api_key, limit, after_cursor \\ nil) do
+    crm_list(api_key, "deals", limit, @deal_properties, after_cursor)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Multi-filter search (advanced)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Search CRM objects with multiple filters (AND logic within a single filter group).
+
+  Accepts a list of `{property, operator, value}` filter tuples.
+
+  ## Parameters
+
+    * `api_key` - HubSpot private app token
+    * `object_type` - "contacts", "companies", or "deals"
+    * `filters` - list of `{property, operator, value}` tuples
+    * `limit` - max results
+    * `properties_list` - properties to return
+
+  ## Returns
+
+    * `{:ok, [map()]}` — list of matching objects
+    * `{:error, reason}` — API or network error
+  """
+  @spec crm_search_multi(String.t(), String.t(), [{String.t(), String.t(), String.t()}], pos_integer(), [String.t()]) ::
+          {:ok, [map()]} | {:error, term()}
+  def crm_search_multi(api_key, object_type, filters, limit, properties_list) do
+    crm_search(api_key, object_type, filters, limit, properties_list)
+  end
 
   # ---------------------------------------------------------------------------
   # Generic CRM Operations (private)
@@ -175,7 +221,9 @@ defmodule Assistant.Integrations.HubSpot.Client do
            json: %{properties: properties},
            headers: auth_headers(api_key),
            receive_timeout: 10_000,
-           retry: false
+           retry: :transient,
+           retry_delay: &retry_delay/1,
+           max_retries: @max_retries
          ) do
       {:ok, %Req.Response{status: 201, body: body}} ->
         {:ok, normalize_object(body)}
@@ -195,7 +243,9 @@ defmodule Assistant.Integrations.HubSpot.Client do
            params: [properties: Enum.join(properties_list, ",")],
            headers: auth_headers(api_key),
            receive_timeout: 10_000,
-           retry: false
+           retry: :transient,
+           retry_delay: &retry_delay/1,
+           max_retries: @max_retries
          ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         {:ok, normalize_object(body)}
@@ -215,7 +265,9 @@ defmodule Assistant.Integrations.HubSpot.Client do
            json: %{properties: properties},
            headers: auth_headers(api_key),
            receive_timeout: 10_000,
-           retry: false
+           retry: :transient,
+           retry_delay: &retry_delay/1,
+           max_retries: @max_retries
          ) do
       {:ok, %Req.Response{status: 200, body: body}} ->
         {:ok, normalize_object(body)}
@@ -234,7 +286,9 @@ defmodule Assistant.Integrations.HubSpot.Client do
     case Req.delete(url,
            headers: auth_headers(api_key),
            receive_timeout: 10_000,
-           retry: false
+           retry: :transient,
+           retry_delay: &retry_delay/1,
+           max_retries: @max_retries
          ) do
       {:ok, %Req.Response{status: 204}} ->
         :ok
@@ -247,14 +301,16 @@ defmodule Assistant.Integrations.HubSpot.Client do
     end
   end
 
-  defp crm_search(api_key, object_type, property, operator, value, limit, properties_list) do
+  defp crm_search(api_key, object_type, filters, limit, properties_list) when is_list(filters) do
     url = "#{base_url()}/crm/v3/objects/#{object_type}/search"
 
     case Req.post(url,
-           json: build_search_body(property, operator, value, limit, properties_list),
+           json: build_search_body(filters, limit, properties_list),
            headers: auth_headers(api_key),
            receive_timeout: 10_000,
-           retry: false
+           retry: :transient,
+           retry_delay: &retry_delay/1,
+           max_retries: @max_retries
          ) do
       {:ok, %Req.Response{status: 200, body: %{"results" => results}}} ->
         {:ok, Enum.map(results, &normalize_object/1)}
@@ -267,17 +323,26 @@ defmodule Assistant.Integrations.HubSpot.Client do
     end
   end
 
-  defp crm_list(api_key, object_type, limit, properties_list) do
+  defp crm_list(api_key, object_type, limit, properties_list, after_cursor) do
     url = "#{base_url()}/crm/v3/objects/#{object_type}"
 
+    params =
+      [limit: limit, properties: Enum.join(properties_list, ",")]
+      |> maybe_add_after(after_cursor)
+
     case Req.get(url,
-           params: [limit: limit, properties: Enum.join(properties_list, ",")],
+           params: params,
            headers: auth_headers(api_key),
            receive_timeout: 10_000,
-           retry: false
+           retry: :transient,
+           retry_delay: &retry_delay/1,
+           max_retries: @max_retries
          ) do
-      {:ok, %Req.Response{status: 200, body: %{"results" => results}}} ->
-        {:ok, Enum.map(results, &normalize_object/1)}
+      {:ok, %Req.Response{status: 200, body: body}} ->
+        results = Map.get(body, "results", [])
+        next_cursor = get_in(body, ["paging", "next", "after"])
+
+        {:ok, %{results: Enum.map(results, &normalize_object/1), next: next_cursor}}
 
       {:ok, %Req.Response{status: status, body: body}} ->
         {:error, {:api_error, status, extract_error_message(body)}}
@@ -297,6 +362,12 @@ defmodule Assistant.Integrations.HubSpot.Client do
     Application.get_env(:assistant, :hubspot_api_base_url, @default_base_url)
   end
 
+  defp retry_delay(n), do: 500 * n
+
+  defp maybe_add_after(params, nil), do: params
+  defp maybe_add_after(params, ""), do: params
+  defp maybe_add_after(params, cursor), do: Keyword.put(params, :after, cursor)
+
   defp normalize_object(body) when is_map(body) do
     %{
       id: body["id"],
@@ -306,19 +377,18 @@ defmodule Assistant.Integrations.HubSpot.Client do
     }
   end
 
-  defp build_search_body(property, operator, value, limit, properties_list) do
-    %{
-      filterGroups: [
+  defp build_search_body(filters, limit, properties_list) when is_list(filters) do
+    filter_maps =
+      Enum.map(filters, fn {property, operator, value} ->
         %{
-          filters: [
-            %{
-              propertyName: property,
-              operator: operator,
-              value: value
-            }
-          ]
+          propertyName: property,
+          operator: operator,
+          value: value
         }
-      ],
+      end)
+
+    %{
+      filterGroups: [%{filters: filter_maps}],
       limit: limit,
       properties: properties_list
     }

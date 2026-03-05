@@ -2,6 +2,7 @@
 #
 # Searches for deals in HubSpot CRM. Supports searching by deal name
 # (CONTAINS_TOKEN) or deal stage (EQ). Returns formatted list of matches.
+# Supports advanced multi-filter search via the --filters flag.
 #
 # Related files:
 #   - lib/assistant/integrations/hubspot/client.ex (HubSpot API client)
@@ -12,17 +13,9 @@ defmodule Assistant.Skills.HubSpot.Deals.Search do
   @moduledoc false
   @behaviour Assistant.Skills.Handler
 
+  alias Assistant.Integrations.HubSpot.Client
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
-
-  @deal_fields [
-    {"Deal Name", "dealname"},
-    {"Amount", "amount"},
-    {"Close Date", "closedate"},
-    {"Stage", "dealstage"},
-    {"Pipeline", "pipeline"},
-    {"Description", "description"}
-  ]
 
   @impl true
   def execute(flags, context) do
@@ -39,6 +32,16 @@ defmodule Assistant.Skills.HubSpot.Deals.Search do
   end
 
   defp do_execute(hubspot, api_key, flags) do
+    filters_json = Map.get(flags, "filters")
+
+    if filters_json do
+      execute_multi_filter(api_key, flags, filters_json)
+    else
+      execute_simple(hubspot, api_key, flags)
+    end
+  end
+
+  defp execute_simple(hubspot, api_key, flags) do
     query = Map.get(flags, "query")
 
     if is_nil(query) || query == "" do
@@ -51,14 +54,8 @@ defmodule Assistant.Skills.HubSpot.Deals.Search do
         {:ok, property, operator} ->
           case hubspot.search_deals(api_key, property, operator, query, limit) do
             {:ok, deals} ->
-              formatted = Helpers.format_object_list(deals, @deal_fields, "deals")
+              formatted = Helpers.format_object_list(deals, Helpers.deal_fields(), "deals")
               {:ok, %Result{status: :ok, content: formatted}}
-
-            {:error, {:api_error, 401, _}} = error ->
-              Helpers.handle_error(error)
-
-            {:error, {:api_error, 429, _}} = error ->
-              Helpers.handle_error(error)
 
             error ->
               Helpers.handle_error(error)
@@ -67,6 +64,25 @@ defmodule Assistant.Skills.HubSpot.Deals.Search do
         {:error, message} ->
           {:ok, %Result{status: :error, content: message}}
       end
+    end
+  end
+
+  defp execute_multi_filter(api_key, flags, filters_json) do
+    limit = Helpers.parse_limit(Map.get(flags, "limit"))
+
+    case Helpers.parse_filters_json(filters_json) do
+      {:ok, filters} ->
+        case Client.crm_search_multi(api_key, "deals", filters, limit, ~w(dealname amount closedate dealstage pipeline description)) do
+          {:ok, deals} ->
+            formatted = Helpers.format_object_list(deals, Helpers.deal_fields(), "deals")
+            {:ok, %Result{status: :ok, content: formatted}}
+
+          error ->
+            Helpers.handle_error(error)
+        end
+
+      {:error, message} ->
+        {:ok, %Result{status: :error, content: message}}
     end
   end
 

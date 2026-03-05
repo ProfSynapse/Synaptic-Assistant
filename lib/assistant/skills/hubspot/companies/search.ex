@@ -2,6 +2,7 @@
 #
 # Searches HubSpot CRM companies by name (CONTAINS_TOKEN) or domain (EQ).
 # Returns a formatted list of matching companies, capped by a configurable limit.
+# Supports advanced multi-filter search via the --filters flag.
 #
 # Related files:
 #   - lib/assistant/integrations/hubspot/client.ex (HubSpot API client)
@@ -12,16 +13,9 @@ defmodule Assistant.Skills.HubSpot.Companies.Search do
   @moduledoc false
   @behaviour Assistant.Skills.Handler
 
+  alias Assistant.Integrations.HubSpot.Client
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
-
-  @company_fields [
-    {"Name", "name"},
-    {"Domain", "domain"},
-    {"Website", "website"},
-    {"Industry", "industry"},
-    {"Description", "description"}
-  ]
 
   @impl true
   def execute(flags, context) do
@@ -38,6 +32,16 @@ defmodule Assistant.Skills.HubSpot.Companies.Search do
   end
 
   defp do_execute(hubspot, api_key, flags) do
+    filters_json = Map.get(flags, "filters")
+
+    if filters_json do
+      execute_multi_filter(api_key, flags, filters_json)
+    else
+      execute_simple(hubspot, api_key, flags)
+    end
+  end
+
+  defp execute_simple(hubspot, api_key, flags) do
     query = Map.get(flags, "query")
 
     if is_nil(query) || query == "" do
@@ -50,14 +54,8 @@ defmodule Assistant.Skills.HubSpot.Companies.Search do
         {:ok, property, operator} ->
           case hubspot.search_companies(api_key, property, operator, query, limit) do
             {:ok, companies} ->
-              formatted = Helpers.format_object_list(companies, @company_fields, "companies")
+              formatted = Helpers.format_object_list(companies, Helpers.company_fields(), "companies")
               {:ok, %Result{status: :ok, content: formatted}}
-
-            {:error, {:api_error, 401, _}} = error ->
-              Helpers.handle_error(error)
-
-            {:error, {:api_error, 429, _}} = error ->
-              Helpers.handle_error(error)
 
             error ->
               Helpers.handle_error(error)
@@ -66,6 +64,25 @@ defmodule Assistant.Skills.HubSpot.Companies.Search do
         {:error, message} ->
           {:ok, %Result{status: :error, content: message}}
       end
+    end
+  end
+
+  defp execute_multi_filter(api_key, flags, filters_json) do
+    limit = Helpers.parse_limit(Map.get(flags, "limit"))
+
+    case Helpers.parse_filters_json(filters_json) do
+      {:ok, filters} ->
+        case Client.crm_search_multi(api_key, "companies", filters, limit, ~w(name domain website industry description)) do
+          {:ok, companies} ->
+            formatted = Helpers.format_object_list(companies, Helpers.company_fields(), "companies")
+            {:ok, %Result{status: :ok, content: formatted}}
+
+          error ->
+            Helpers.handle_error(error)
+        end
+
+      {:error, message} ->
+        {:ok, %Result{status: :error, content: message}}
     end
   end
 

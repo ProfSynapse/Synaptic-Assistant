@@ -19,6 +19,46 @@ defmodule Assistant.Skills.HubSpot.Helpers do
   @max_limit 50
 
   @doc """
+  Returns the display field tuples for contacts: `[{label, property_name}]`.
+  """
+  def contact_fields do
+    [
+      {"Email", "email"},
+      {"First Name", "firstname"},
+      {"Last Name", "lastname"},
+      {"Phone", "phone"},
+      {"Company", "company"}
+    ]
+  end
+
+  @doc """
+  Returns the display field tuples for companies: `[{label, property_name}]`.
+  """
+  def company_fields do
+    [
+      {"Name", "name"},
+      {"Domain", "domain"},
+      {"Website", "website"},
+      {"Industry", "industry"},
+      {"Description", "description"}
+    ]
+  end
+
+  @doc """
+  Returns the display field tuples for deals: `[{label, property_name}]`.
+  """
+  def deal_fields do
+    [
+      {"Deal Name", "dealname"},
+      {"Amount", "amount"},
+      {"Close Date", "closedate"},
+      {"Stage", "dealstage"},
+      {"Pipeline", "pipeline"},
+      {"Description", "description"}
+    ]
+  end
+
+  @doc """
   Parses a limit value, clamped between 1 and 50, defaulting to 10.
   """
   def parse_limit(value), do: SkillsHelpers.parse_limit(value, @default_limit, @max_limit)
@@ -75,6 +115,55 @@ defmodule Assistant.Skills.HubSpot.Helpers do
       list ->
         formatted = Enum.map_join(list, "\n\n---\n\n", &format_object(&1, fields))
         "Found #{length(list)} #{object_type_label}:\n\n#{formatted}"
+    end
+  end
+
+  @doc """
+  Appends a pagination hint when a next cursor is present.
+  """
+  def maybe_append_pagination(formatted, nil), do: formatted
+  def maybe_append_pagination(formatted, ""), do: formatted
+
+  def maybe_append_pagination(formatted, cursor) do
+    formatted <> "\n\nMore results available. Use --after #{cursor} to see the next page."
+  end
+
+  @doc """
+  Parses a JSON string of filters into a list of `{property, operator, value}` tuples.
+
+  Expects a JSON array of objects, each with "property", "operator", and "value" keys.
+
+  ## Examples
+
+      parse_filters_json(~s([{"property":"email","operator":"EQ","value":"j@example.com"}]))
+      # => {:ok, [{"email", "EQ", "j@example.com"}]}
+  """
+  def parse_filters_json(nil), do: {:error, "Missing --filters value."}
+  def parse_filters_json(""), do: {:error, "Missing --filters value."}
+
+  def parse_filters_json(json_string) when is_binary(json_string) do
+    case Jason.decode(json_string) do
+      {:ok, list} when is_list(list) ->
+        filters =
+          Enum.map(list, fn item ->
+            {item["property"], item["operator"], item["value"]}
+          end)
+
+        if Enum.any?(filters, fn {p, o, v} -> is_nil(p) or is_nil(o) or is_nil(v) end) do
+          {:error,
+           "Each filter must have \"property\", \"operator\", and \"value\" keys. " <>
+             "Example: [{\"property\":\"email\",\"operator\":\"EQ\",\"value\":\"j@example.com\"}]"}
+        else
+          {:ok, filters}
+        end
+
+      {:ok, _} ->
+        {:error,
+         "The --filters flag must be a JSON array. " <>
+           "Example: [{\"property\":\"email\",\"operator\":\"EQ\",\"value\":\"j@example.com\"}]"}
+
+      {:error, _} ->
+        {:error, "Invalid JSON in --filters flag."}
     end
   end
 

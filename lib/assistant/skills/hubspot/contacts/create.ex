@@ -17,14 +17,6 @@ defmodule Assistant.Skills.HubSpot.Contacts.Create do
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
 
-  @contact_fields [
-    {"Email", "email"},
-    {"First Name", "firstname"},
-    {"Last Name", "lastname"},
-    {"Phone", "phone"},
-    {"Company", "company"}
-  ]
-
   @impl true
   def execute(flags, context) do
     case Map.get(context.integrations, :hubspot) do
@@ -60,7 +52,7 @@ defmodule Assistant.Skills.HubSpot.Contacts.Create do
 
           case hubspot.create_contact(api_key, properties) do
             {:ok, contact} ->
-              formatted = Helpers.format_object(contact, @contact_fields)
+              formatted = Helpers.format_object(contact, Helpers.contact_fields())
 
               Logger.info("HubSpot contact created", contact_id: contact[:id])
 

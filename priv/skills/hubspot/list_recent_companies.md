@@ -13,6 +13,10 @@ parameters:
     type: "string"
     required: false
     description: "Maximum number of results (default 10, max 50)"
+  - name: "after"
+    type: "string"
+    required: false
+    description: "Pagination cursor from a previous response to fetch the next page"
 ---
 
 # hubspot.list_recent_companies
@@ -24,6 +28,7 @@ List the most recently created or updated companies in HubSpot CRM.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | limit | string | no | Maximum results (default 10, max 50) |
+| after | string | no | Pagination cursor from a previous response |
 
 ## Response
 
@@ -50,6 +55,8 @@ ID: 12347
 Name: Initech
 Domain: initech.com
 Industry: Software
+
+More results available. Use --after abc123 to see the next page.
 ```
 
 ## Example
@@ -57,4 +64,5 @@ Industry: Software
 ```
 /hubspot.list_recent_companies
 /hubspot.list_recent_companies --limit "5"
+/hubspot.list_recent_companies --after "abc123"
 ```

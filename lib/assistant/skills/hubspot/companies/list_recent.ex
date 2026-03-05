@@ -2,6 +2,7 @@
 #
 # Lists recently created/updated companies from HubSpot CRM. Returns a formatted
 # list capped by an optional limit parameter (default 10, max 50).
+# Supports cursor-based pagination via --after parameter.
 #
 # Related files:
 #   - lib/assistant/integrations/hubspot/client.ex (HubSpot API client)
@@ -14,14 +15,6 @@ defmodule Assistant.Skills.HubSpot.Companies.ListRecent do
 
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
-
-  @company_fields [
-    {"Name", "name"},
-    {"Domain", "domain"},
-    {"Website", "website"},
-    {"Industry", "industry"},
-    {"Description", "description"}
-  ]
 
   @impl true
   def execute(flags, context) do
@@ -39,17 +32,13 @@ defmodule Assistant.Skills.HubSpot.Companies.ListRecent do
 
   defp do_execute(hubspot, api_key, flags) do
     limit = Helpers.parse_limit(Map.get(flags, "limit"))
+    after_cursor = Map.get(flags, "after")
 
-    case hubspot.list_recent_companies(api_key, limit) do
-      {:ok, companies} ->
-        formatted = Helpers.format_object_list(companies, @company_fields, "companies")
-        {:ok, %Result{status: :ok, content: formatted}}
-
-      {:error, {:api_error, 401, _}} = error ->
-        Helpers.handle_error(error)
-
-      {:error, {:api_error, 429, _}} = error ->
-        Helpers.handle_error(error)
+    case hubspot.list_recent_companies(api_key, limit, after_cursor) do
+      {:ok, %{results: companies, next: next}} ->
+        formatted = Helpers.format_object_list(companies, Helpers.company_fields(), "companies")
+        content = Helpers.maybe_append_pagination(formatted, next)
+        {:ok, %Result{status: :ok, content: content}}
 
       error ->
         Helpers.handle_error(error)

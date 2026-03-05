@@ -11,8 +11,8 @@ tags:
 parameters:
   - name: "query"
     type: "string"
-    required: true
-    description: "Search term (email address or name)"
+    required: false
+    description: "Search term (email address or name). Required unless using --filters."
   - name: "search_by"
     type: "string"
     required: false
@@ -21,6 +21,10 @@ parameters:
     type: "string"
     required: false
     description: "Maximum results to return (default 10, max 50)"
+  - name: "filters"
+    type: "string"
+    required: false
+    description: "JSON array of filter objects for advanced multi-filter search (AND logic). Each object needs 'property', 'operator', and 'value' keys."
 ---
 
 # hubspot.search_contacts
@@ -28,13 +32,16 @@ parameters:
 Search for contacts in HubSpot CRM. By default searches by exact email match.
 Use `--search_by name` for partial name matching.
 
+For advanced searches with multiple criteria, use the `--filters` parameter.
+
 ## Parameters
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| query | string | yes | Search term |
+| query | string | no* | Search term. *Required unless using --filters. |
 | search_by | string | no | Field to search: "email" (default) or "name" |
 | limit | string | no | Maximum results (default 10, max 50) |
+| filters | string | no | JSON array of filter objects for multi-filter search |
 
 ## Response
 
@@ -61,6 +68,7 @@ Last Name: Smith
 ```
 /hubspot.search_contacts --query "jane@example.com"
 /hubspot.search_contacts --query "Jane" --search_by name --limit 5
+/hubspot.search_contacts --filters '[{"property":"company","operator":"EQ","value":"Acme"},{"property":"firstname","operator":"CONTAINS_TOKEN","value":"Jane"}]'
 ```
 
 ## Usage Notes
@@ -68,3 +76,5 @@ Last Name: Smith
 - Email search uses exact match (`EQ` operator).
 - Name search uses partial match (`CONTAINS_TOKEN` operator) on first name.
 - Results are capped at 50 regardless of the limit value.
+- The `--filters` parameter supports AND logic — all filters must match.
+- When using `--filters`, the `--query` and `--search_by` parameters are ignored.

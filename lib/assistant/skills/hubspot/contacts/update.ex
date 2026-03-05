@@ -18,14 +18,6 @@ defmodule Assistant.Skills.HubSpot.Contacts.Update do
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
 
-  @contact_fields [
-    {"Email", "email"},
-    {"First Name", "firstname"},
-    {"Last Name", "lastname"},
-    {"Phone", "phone"},
-    {"Company", "company"}
-  ]
-
   @impl true
   def execute(flags, context) do
     case Map.get(context.integrations, :hubspot) do
@@ -74,7 +66,7 @@ defmodule Assistant.Skills.HubSpot.Contacts.Update do
             else
               case hubspot.update_contact(api_key, id, properties) do
                 {:ok, contact} ->
-                  formatted = Helpers.format_object(contact, @contact_fields)
+                  formatted = Helpers.format_object(contact, Helpers.contact_fields())
 
                   Logger.info("HubSpot contact updated", contact_id: id)
 

@@ -17,14 +17,6 @@ defmodule Assistant.Skills.HubSpot.Companies.Create do
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
 
-  @company_fields [
-    {"Name", "name"},
-    {"Domain", "domain"},
-    {"Website", "website"},
-    {"Industry", "industry"},
-    {"Description", "description"}
-  ]
-
   @impl true
   def execute(flags, context) do
     case Map.get(context.integrations, :hubspot) do
@@ -60,7 +52,7 @@ defmodule Assistant.Skills.HubSpot.Companies.Create do
 
           case hubspot.create_company(api_key, properties) do
             {:ok, company} ->
-              formatted = Helpers.format_object(company, @company_fields)
+              formatted = Helpers.format_object(company, Helpers.company_fields())
 
               Logger.info("HubSpot company created", company_id: company[:id], name: name)
 

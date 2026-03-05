@@ -240,7 +240,7 @@ defmodule Assistant.Integrations.HubSpot.ClientTest do
   end
 
   describe "list_recent_contacts/2" do
-    test "returns list of normalized objects", %{bypass: bypass} do
+    test "returns paginated result with results and next cursor", %{bypass: bypass} do
       Bypass.expect_once(bypass, "GET", "/crm/v3/objects/contacts", fn conn ->
         conn = Plug.Conn.fetch_query_params(conn)
         assert conn.query_params["limit"] == "10"
@@ -263,13 +263,37 @@ defmodule Assistant.Integrations.HubSpot.ClientTest do
                 "createdAt" => "2026-01-02T00:00:00Z",
                 "updatedAt" => "2026-01-02T00:00:00Z"
               }
-            ]
+            ],
+            "paging" => %{"next" => %{"after" => "cursor123"}}
           })
         )
       end)
 
-      assert {:ok, contacts} = Client.list_recent_contacts(@api_key, 10)
+      assert {:ok, %{results: contacts, next: "cursor123"}} = Client.list_recent_contacts(@api_key, 10)
       assert length(contacts) == 2
+    end
+
+    test "returns nil next cursor when no more pages", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/crm/v3/objects/contacts", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{"results" => []}))
+      end)
+
+      assert {:ok, %{results: [], next: nil}} = Client.list_recent_contacts(@api_key, 10)
+    end
+
+    test "passes after cursor as query param", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/crm/v3/objects/contacts", fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+        assert conn.query_params["after"] == "cursor456"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{"results" => []}))
+      end)
+
+      assert {:ok, %{results: [], next: nil}} = Client.list_recent_contacts(@api_key, 10, "cursor456")
     end
   end
 
@@ -377,8 +401,9 @@ defmodule Assistant.Integrations.HubSpot.ClientTest do
                Client.get_contact(@api_key, "101")
     end
 
-    test "returns api_error on 429 rate limit", %{bypass: bypass} do
-      Bypass.expect_once(bypass, "GET", "/crm/v3/objects/companies/201", fn conn ->
+    test "returns api_error on 429 rate limit after retries", %{bypass: bypass} do
+      # Stub (not expect_once) because retry sends multiple requests
+      Bypass.stub(bypass, "GET", "/crm/v3/objects/companies/201", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(429, Jason.encode!(%{"message" => "Rate limit exceeded"}))
@@ -388,14 +413,15 @@ defmodule Assistant.Integrations.HubSpot.ClientTest do
                Client.get_company(@api_key, "201")
     end
 
-    test "returns request_failed on network error", %{bypass: bypass} do
+    test "returns request_failed on network error after retries", %{bypass: bypass} do
       Bypass.down(bypass)
 
       assert {:error, {:request_failed, _}} = Client.get_deal(@api_key, "301")
     end
 
     test "extracts error message from body without message key", %{bypass: bypass} do
-      Bypass.expect_once(bypass, "GET", "/crm/v3/objects/contacts/101", fn conn ->
+      # Stub (not expect_once) because retry sends multiple requests on 5xx
+      Bypass.stub(bypass, "GET", "/crm/v3/objects/contacts/101", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(500, Jason.encode!(%{"status" => "error", "category" => "INTERNAL"}))

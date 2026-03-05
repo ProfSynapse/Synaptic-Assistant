@@ -15,14 +15,6 @@ defmodule Assistant.Skills.HubSpot.Companies.Get do
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
 
-  @company_fields [
-    {"Name", "name"},
-    {"Domain", "domain"},
-    {"Website", "website"},
-    {"Industry", "industry"},
-    {"Description", "description"}
-  ]
-
   @impl true
   def execute(flags, context) do
     case Map.get(context.integrations, :hubspot) do
@@ -50,7 +42,7 @@ defmodule Assistant.Skills.HubSpot.Companies.Get do
       true ->
         case hubspot.get_company(api_key, id) do
           {:ok, company} ->
-            formatted = Helpers.format_object(company, @company_fields)
+            formatted = Helpers.format_object(company, Helpers.company_fields())
             {:ok, %Result{status: :ok, content: formatted}}
 
           {:error, {:api_error, 404, _}} = error ->

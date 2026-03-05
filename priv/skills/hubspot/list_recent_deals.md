@@ -13,6 +13,10 @@ parameters:
     type: "string"
     required: false
     description: "Maximum number of results (default 10, max 50)"
+  - name: "after"
+    type: "string"
+    required: false
+    description: "Pagination cursor from a previous response to fetch the next page"
 ---
 
 # hubspot.list_recent_deals
@@ -24,6 +28,7 @@ List recently created or updated deals from HubSpot CRM.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | limit | string | no | Maximum results to return (default 10, max 50) |
+| after | string | no | Pagination cursor from a previous response |
 
 ## Response
 
@@ -56,12 +61,15 @@ Amount: 80000
 Close Date: 2026-08-01
 Stage: qualifiedtobuy
 Pipeline: default
+
+More results available. Use --after abc123 to see the next page.
 ```
 
 ## Example
 
 ```
 /hubspot.list_recent_deals --limit 5
+/hubspot.list_recent_deals --after "abc123"
 ```
 
 ## Usage Notes
@@ -69,3 +77,4 @@ Pipeline: default
 - Returns deals sorted by most recently modified.
 - Results are capped at 50 maximum.
 - If no deals exist, returns "No deals found."
+- When more results are available, the response includes a pagination cursor.

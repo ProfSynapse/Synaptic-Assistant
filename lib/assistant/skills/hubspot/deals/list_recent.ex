@@ -2,6 +2,7 @@
 #
 # Lists recently created or updated deals from HubSpot CRM with
 # configurable limit. Returns a formatted list of deal summaries.
+# Supports cursor-based pagination via --after parameter.
 #
 # Related files:
 #   - lib/assistant/integrations/hubspot/client.ex (HubSpot API client)
@@ -14,15 +15,6 @@ defmodule Assistant.Skills.HubSpot.Deals.ListRecent do
 
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
-
-  @deal_fields [
-    {"Deal Name", "dealname"},
-    {"Amount", "amount"},
-    {"Close Date", "closedate"},
-    {"Stage", "dealstage"},
-    {"Pipeline", "pipeline"},
-    {"Description", "description"}
-  ]
 
   @impl true
   def execute(flags, context) do
@@ -40,17 +32,13 @@ defmodule Assistant.Skills.HubSpot.Deals.ListRecent do
 
   defp do_execute(hubspot, api_key, flags) do
     limit = Helpers.parse_limit(Map.get(flags, "limit"))
+    after_cursor = Map.get(flags, "after")
 
-    case hubspot.list_recent_deals(api_key, limit) do
-      {:ok, deals} ->
-        formatted = Helpers.format_object_list(deals, @deal_fields, "deals")
-        {:ok, %Result{status: :ok, content: formatted}}
-
-      {:error, {:api_error, 401, _}} = error ->
-        Helpers.handle_error(error)
-
-      {:error, {:api_error, 429, _}} = error ->
-        Helpers.handle_error(error)
+    case hubspot.list_recent_deals(api_key, limit, after_cursor) do
+      {:ok, %{results: deals, next: next}} ->
+        formatted = Helpers.format_object_list(deals, Helpers.deal_fields(), "deals")
+        content = Helpers.maybe_append_pagination(formatted, next)
+        {:ok, %Result{status: :ok, content: content}}
 
       error ->
         Helpers.handle_error(error)

@@ -14,15 +14,6 @@ defmodule Assistant.Skills.HubSpot.Deals.Get do
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
 
-  @deal_fields [
-    {"Deal Name", "dealname"},
-    {"Amount", "amount"},
-    {"Close Date", "closedate"},
-    {"Stage", "dealstage"},
-    {"Pipeline", "pipeline"},
-    {"Description", "description"}
-  ]
-
   @impl true
   def execute(flags, context) do
     case Map.get(context.integrations, :hubspot) do
@@ -50,7 +41,7 @@ defmodule Assistant.Skills.HubSpot.Deals.Get do
       true ->
         case hubspot.get_deal(api_key, id) do
           {:ok, deal} ->
-            formatted = Helpers.format_object(deal, @deal_fields)
+            formatted = Helpers.format_object(deal, Helpers.deal_fields())
             {:ok, %Result{status: :ok, content: formatted}}
 
           {:error, {:api_error, 404, _}} = error ->
