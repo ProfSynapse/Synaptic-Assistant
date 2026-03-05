@@ -1,0 +1,110 @@
+# lib/assistant/skills/hubspot/companies/update.ex — Handler for hubspot.update_company skill.
+#
+# Updates an existing company in HubSpot CRM by ID. At least one property must
+# be provided alongside the required ID.
+#
+# Related files:
+#   - lib/assistant/integrations/hubspot/client.ex (HubSpot API client)
+#   - lib/assistant/skills/hubspot/helpers.ex (shared HubSpot helpers)
+#   - priv/skills/hubspot/update_company.md (skill definition)
+
+defmodule Assistant.Skills.HubSpot.Companies.Update do
+  @behaviour Assistant.Skills.Handler
+
+  require Logger
+
+  alias Assistant.Skills.HubSpot.Helpers
+  alias Assistant.Skills.Result
+
+  @company_fields [{"Name", "name"}, {"Domain", "domain"}, {"Website", "website"}, {"Industry", "industry"}, {"Description", "description"}]
+
+  @impl true
+  def execute(flags, context) do
+    case Map.get(context.integrations, :hubspot) do
+      nil ->
+        {:ok, %Result{status: :error, content: "HubSpot integration not configured."}}
+
+      hubspot ->
+        case resolve_api_key() do
+          nil ->
+            {:ok, %Result{status: :error, content: "HubSpot API key not found. Configure it in Settings."}}
+
+          api_key ->
+            do_execute(hubspot, api_key, flags)
+        end
+    end
+  end
+
+  defp resolve_api_key do
+    Assistant.IntegrationSettings.get(:hubspot_api_key)
+  end
+
+  defp do_execute(hubspot, api_key, flags) do
+    id = Map.get(flags, "id")
+
+    if is_nil(id) || id == "" do
+      {:ok, %Result{status: :error, content: "Missing required parameter: --id (company ID)."}}
+    else
+      properties =
+        %{}
+        |> Helpers.maybe_put("name", Map.get(flags, "name"))
+        |> Helpers.maybe_put("domain", Map.get(flags, "domain"))
+        |> Helpers.maybe_put("website", Map.get(flags, "website"))
+        |> Helpers.maybe_put("industry", Map.get(flags, "industry"))
+        |> Helpers.maybe_put("description", Map.get(flags, "description"))
+        |> merge_extra_properties(Map.get(flags, "properties"))
+
+      case properties do
+        {:error, message} ->
+          {:ok, %Result{status: :error, content: message}}
+
+        props when map_size(props) == 0 ->
+          {:ok, %Result{status: :error, content: "No properties to update. Provide at least one field (--name, --domain, --website, --industry, --description, or --properties)."}}
+
+        props ->
+          case hubspot.update_company(api_key, id, props) do
+            {:ok, company} ->
+              formatted = Helpers.format_object(company, @company_fields)
+
+              Logger.info("HubSpot company updated", company_id: id)
+
+              {:ok,
+               %Result{
+                 status: :ok,
+                 content: "Company updated successfully.\n\n#{formatted}",
+                 side_effects: [:hubspot_company_updated],
+                 metadata: %{company_id: id}
+               }}
+
+            {:error, {:api_error, 404, _}} ->
+              {:ok, %Result{status: :error, content: "No company found with ID #{id}."}}
+
+            {:error, {:api_error, 401, _}} ->
+              {:ok, %Result{status: :error, content: "HubSpot API key is invalid. Check Settings."}}
+
+            {:error, {:api_error, 429, _}} ->
+              {:ok, %Result{status: :error, content: "HubSpot rate limit exceeded. Try again shortly."}}
+
+            {:error, {:api_error, _status, message}} ->
+              {:ok, %Result{status: :error, content: "HubSpot API error: #{message}"}}
+
+            {:error, {:request_failed, reason}} ->
+              {:ok, %Result{status: :error, content: "Failed to reach HubSpot: #{Exception.message(reason)}"}}
+          end
+      end
+    end
+  end
+
+  defp merge_extra_properties(props, nil), do: props
+  defp merge_extra_properties(props, ""), do: props
+
+  defp merge_extra_properties(props, json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, extra} when is_map(extra) -> Map.merge(props, extra)
+      {:ok, _} -> {:error, "Invalid --properties: must be a JSON object."}
+      {:error, _} -> {:error, "Invalid --properties: not valid JSON."}
+    end
+  end
+
+  defp merge_extra_properties(props, _), do: props
+end
