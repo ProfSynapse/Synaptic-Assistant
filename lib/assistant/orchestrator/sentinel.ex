@@ -107,8 +107,6 @@ defmodule Assistant.Orchestrator.Sentinel do
     }
   }
 
-  @hardcoded_fallback_model "openai/gpt-5-mini"
-
   @typedoc "A proposed action from a sub-agent."
   @type proposed_action :: %{
           skill_name: String.t(),
@@ -301,14 +299,25 @@ defmodule Assistant.Orchestrator.Sentinel do
 
       nil ->
         case ConfigLoader.model_for(:compaction, opts) do
-          %{id: id} -> id
-          nil -> @hardcoded_fallback_model
+          %{id: id} ->
+            id
+
+          nil ->
+            # Last resort: pick the first :fast tier model from config
+            case ConfigLoader.models_by_tier(:fast) do
+              [%{id: id} | _] ->
+                id
+
+              _ ->
+                Logger.error("No sentinel, compaction, or fast-tier model in config")
+                nil
+            end
         end
     end
   rescue
-    _error ->
-      Logger.warning("ConfigLoader unavailable for sentinel model, using hardcoded fallback")
-      @hardcoded_fallback_model
+    error ->
+      Logger.error("ConfigLoader unavailable for sentinel model: #{inspect(error)}")
+      nil
   end
 
   # --- Private Helpers ---

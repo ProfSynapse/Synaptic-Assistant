@@ -239,27 +239,33 @@ defmodule Assistant.Memory.TurnClassifier do
     end
   end
 
-  @hardcoded_fallback_model "openai/gpt-5-mini"
-
   defp resolve_classification_model(user_id) do
-    # Prefer sentinel role (cheapest fast-tier model), fall back to compaction, then hardcoded
+    # Prefer sentinel role (cheapest fast-tier model), fall back to compaction,
+    # then first :fast tier model from config
     case ConfigLoader.model_for(:sentinel, user_id: user_id) do
       %{id: id} ->
         id
 
       nil ->
         case ConfigLoader.model_for(:compaction, user_id: user_id) do
-          %{id: id} -> id
-          nil -> @hardcoded_fallback_model
+          %{id: id} ->
+            id
+
+          nil ->
+            case ConfigLoader.models_by_tier(:fast) do
+              [%{id: id} | _] ->
+                id
+
+              _ ->
+                Logger.error("No sentinel, compaction, or fast-tier model in config")
+                nil
+            end
         end
     end
   rescue
-    _error ->
-      Logger.warning(
-        "ConfigLoader unavailable for classification model, using hardcoded fallback"
-      )
-
-      @hardcoded_fallback_model
+    error ->
+      Logger.error("ConfigLoader unavailable for classification model: #{inspect(error)}")
+      nil
   end
 
   defp truncate(text, max_length) when is_binary(text) do
