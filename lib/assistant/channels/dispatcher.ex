@@ -3,12 +3,8 @@
 # Extracts the normalize → resolve → engine → reply flow for all channel
 # webhook controllers. Controllers remain thin (auth + delegation).
 #
-# Two dispatch modes:
-#   - dispatch/2,3: Async — spawns a task, returns immediately. Controller
-#     sends a placeholder response and the reply goes via ReplyRouter.
-#   - dispatch_sync/2,3: Synchronous — runs the pipeline in the caller's
-#     process, returns {:ok, response_text} or {:error, reason}. Used by
-#     channels (e.g., Google Chat) that return the response in the HTTP body.
+# Async dispatch: spawns a task, returns immediately. Controller sends a
+# placeholder response and the reply goes via ReplyRouter.
 #
 # Related files:
 #   - lib/assistant/channels/adapter.ex (behaviour that adapters implement)
@@ -26,26 +22,11 @@ defmodule Assistant.Channels.Dispatcher do
   to a DB user, start or look up the conversation engine, send the message
   through the orchestrator, and deliver the response.
 
-  ## Dispatch Modes
-
-  ### Async (default)
-
   `dispatch/2` spawns a background task. The controller returns a placeholder
   response immediately and the actual reply is sent via the ReplyRouter.
 
       Dispatcher.dispatch(ChatAdapter, message)
       json(conn, %{"text" => "Processing..."})
-
-  ### Synchronous
-
-  `dispatch_sync/2` runs the full pipeline in the caller's process and
-  returns the response text. Used by channels that need to return the
-  response in the HTTP body (e.g., Google Chat v2 Workspace Add-ons).
-
-      case Dispatcher.dispatch_sync(message) do
-        {:ok, response_text} -> json(conn, wrap_response(response_text))
-        {:error, error_text} -> json(conn, wrap_response(error_text))
-      end
   """
 
   alias Assistant.Channels.{MessageFormatter, ReplyRouter, SpaceContextFanoutWorker, UserResolver}
@@ -85,143 +66,6 @@ defmodule Assistant.Channels.Dispatcher do
          ) do
       {:ok, _pid} -> {:ok, :dispatched}
       {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @doc """
-  Dispatch a normalized message synchronously.
-
-  Runs the full resolve → engine → response pipeline in the caller's process
-  and returns the response text. Does NOT send via ReplyRouter — the caller
-  is responsible for delivering the response (e.g., in the HTTP body).
-
-  ## Parameters
-
-    * `message` - A normalized `%Channels.Message{}` struct
-    * `opts` - Optional keyword list (reserved for future use)
-
-  ## Returns
-
-    * `{:ok, response_text}` — Engine produced a response
-    * `{:error, error_message}` — An error occurred; the error_message is
-      a user-facing string suitable for returning in the response body
-  """
-  @spec dispatch_sync(Assistant.Channels.Message.t(), keyword()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  def dispatch_sync(message, opts \\ []) do
-    process_and_return(message, opts)
-  end
-
-  # --- Synchronous Processing (runs in the caller's process) ---
-
-  defp process_and_return(message, _opts) do
-    Logger.metadata(correlation_id: message.id)
-
-    start_time = System.monotonic_time()
-    metadata = %{channel: message.channel, message_id: message.id}
-
-    :telemetry.execute(
-      [:assistant, :channels, :dispatch, :start],
-      %{system_time: System.system_time()},
-      metadata
-    )
-
-    case UserResolver.resolve(message.channel, message.user_id, %{
-           display_name: message.user_display_name,
-           space_id: message.space_id,
-           user_email: message.user_email
-         }) do
-      {:ok, %{user_id: user_id, conversation_id: conversation_id}} ->
-        :telemetry.execute(
-          [:assistant, :channels, :dispatch, :resolve],
-          %{duration: System.monotonic_time() - start_time},
-          Map.put(metadata, :user_id, user_id)
-        )
-
-        case ensure_engine_started(user_id, conversation_id, message) do
-          :ok ->
-            sync_engine_response(user_id, message, start_time, metadata)
-
-          {:error, reason} ->
-            Logger.error("Failed to start engine for user #{user_id}: #{inspect(reason)}",
-              channel: message.channel,
-              user_id: user_id
-            )
-
-            emit_error_telemetry(start_time, metadata, :engine_start_failed)
-            {:error, @engine_error_message}
-        end
-
-      {:error, :not_allowed} ->
-        Logger.warning("User not on allowlist, message rejected",
-          channel: message.channel,
-          external_id: message.user_id
-        )
-
-        emit_error_telemetry(start_time, metadata, :not_allowed)
-        {:error, @not_allowed_message}
-
-      {:error, :invalid_platform_id} ->
-        Logger.warning("Rejected message with invalid platform ID",
-          channel: message.channel,
-          external_id: message.user_id
-        )
-
-        emit_error_telemetry(start_time, metadata, :invalid_platform_id)
-        {:error, @resolve_error_message}
-
-      {:error, reason} ->
-        Logger.error("User resolution failed: #{inspect(reason)}",
-          channel: message.channel,
-          external_id: message.user_id
-        )
-
-        emit_error_telemetry(start_time, metadata, reason)
-        {:error, @error_message}
-    end
-  rescue
-    error ->
-      Logger.error("Unhandled error in sync channel processing: #{inspect(error)}",
-        channel: message.channel,
-        stacktrace: inspect(__STACKTRACE__)
-      )
-
-      {:error, @error_message}
-  end
-
-  defp sync_engine_response(user_id, message, start_time, metadata) do
-    engine_start = System.monotonic_time()
-    engine_message_metadata = build_engine_message_metadata(message)
-
-    case Engine.send_message(user_id, message.content, metadata: engine_message_metadata) do
-      {:ok, response_text} ->
-        engine_time = System.monotonic_time()
-
-        :telemetry.execute(
-          [:assistant, :channels, :dispatch, :engine],
-          %{duration: engine_time - engine_start},
-          Map.put(metadata, :user_id, user_id)
-        )
-
-        :telemetry.execute(
-          [:assistant, :channels, :dispatch, :reply],
-          %{duration: engine_time - start_time},
-          Map.put(metadata, :user_id, user_id)
-        )
-
-        # Post-reply hook: enqueue space context fan-out for shared GChat spaces
-        maybe_enqueue_space_context(message, user_id, message.content, response_text)
-
-        {:ok, MessageFormatter.format(response_text, message.channel)}
-
-      {:error, reason} ->
-        Logger.error("Orchestrator processing failed: #{inspect(reason)}",
-          user_id: user_id,
-          channel: message.channel
-        )
-
-        emit_error_telemetry(start_time, Map.put(metadata, :user_id, user_id), :engine_failed)
-        {:error, @error_message}
     end
   end
 

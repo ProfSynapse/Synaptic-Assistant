@@ -3,11 +3,12 @@
 # Handles incoming Google Chat webhook events. JWT verification is performed
 # by the GoogleChatAuth plug (applied in the router). This controller
 # normalizes events, handles Google Chat-specific lifecycle events (welcome,
-# removal), and processes messages synchronously via the Dispatcher.
+# removal), and dispatches messages asynchronously via the Dispatcher.
 #
-# Uses synchronous dispatch: the engine processes the message during the
-# webhook request and the response is returned in the HTTP body. A Task
-# with a timeout guard prevents exceeding Google Chat's ~30s deadline.
+# Uses async dispatch: the controller returns an immediate acknowledgment
+# ("Thinking...") and the actual response is delivered asynchronously via
+# ReplyRouter → GoogleChat.send_reply, matching the pattern used by all
+# other channel controllers (Telegram, Discord, Slack).
 #
 # Supports both v1 (legacy) and v2 (Workspace Add-on) event formats.
 # Response envelope differs: v1 returns flat {"text": "..."}, v2 returns
@@ -29,9 +30,8 @@ defmodule AssistantWeb.GoogleChatController do
     2. Controller normalizes the raw event via `Channels.GoogleChat`
        (auto-detects v1 vs v2 format)
     3. For `ADDED_TO_SPACE`: returns a synchronous welcome message
-    4. For `MESSAGE`/`APP_COMMAND`: processes synchronously via
-       `Dispatcher.dispatch_sync/2` with a timeout guard, returns
-       the engine response in the HTTP body
+    4. For `MESSAGE`/`APP_COMMAND`: dispatches asynchronously via
+       `Dispatcher.dispatch/2` and returns an immediate acknowledgment
     5. For ignored events: returns 200 with empty body
     6. Response envelope matches the incoming format (v1 flat vs v2 wrapped)
   """
@@ -47,16 +47,12 @@ defmodule AssistantWeb.GoogleChatController do
 
   require Logger
 
-  # Google Chat webhooks must respond within ~30s. We use 25s by default to
-  # leave margin for JSON serialization and network transit.
-  @default_sync_timeout_ms 25_000
-
   @welcome_message """
   Hello! I'm your AI assistant. I can help you with tasks, answer questions, \
   search your files, and more. Just send me a message to get started.\
   """
 
-  @timeout_message "Sorry, processing took too long. Please try again."
+  @thinking_message "Thinking..."
 
   @doc """
   Handle a Google Chat webhook event.
@@ -113,70 +109,14 @@ defmodule AssistantWeb.GoogleChatController do
     send_resp(conn, 200, "")
   end
 
-  # MESSAGE / APP_COMMAND: process synchronously and return engine response.
-  # Uses a Task with timeout to stay within Google Chat's ~30s deadline.
+  # MESSAGE / APP_COMMAND: dispatch asynchronously, return immediate acknowledgment.
+  # The actual response is delivered via ReplyRouter → GoogleChat.send_reply.
   defp handle_normalized(conn, message, params) do
     Logger.info(
       "Google Chat message received: user_id=#{inspect(message.user_id)} space_id=#{inspect(message.space_id)} email=#{inspect(message.user_email)} event=#{message.metadata["event_type"]}"
     )
 
-    response_text = sync_dispatch_with_timeout(message)
-    json(conn, ChatAdapter.wrap_response(response_text, params))
-  end
-
-  # Run dispatch_sync inside a Task with a timeout guard.
-  # If the engine doesn't respond within @sync_timeout_ms, return a
-  # timeout message rather than letting Google Chat's deadline expire.
-  defp sync_dispatch_with_timeout(message) do
-    timeout_ms = sync_timeout_ms()
-    dispatcher = dispatcher_module()
-
-    task =
-      Task.Supervisor.async_nolink(
-        Assistant.Skills.TaskSupervisor,
-        fn -> dispatcher.dispatch_sync(message) end
-      )
-
-    case Task.yield(task, timeout_ms) || Task.shutdown(task) do
-      {:ok, {:ok, response_text}} ->
-        response_text
-
-      {:ok, {:error, error_text}} ->
-        error_text
-
-      {:exit, reason} ->
-        Logger.error("Google Chat sync dispatch task exited",
-          message_id: message.id,
-          user_id: message.user_id,
-          reason: inspect(reason)
-        )
-
-        @timeout_message
-
-      nil ->
-        Logger.warning("Google Chat sync dispatch timed out after #{timeout_ms}ms",
-          message_id: message.id,
-          user_id: message.user_id
-        )
-
-        @timeout_message
-
-      unexpected ->
-        Logger.error("Google Chat sync dispatch returned unexpected result",
-          message_id: message.id,
-          user_id: message.user_id,
-          result: inspect(unexpected)
-        )
-
-        @timeout_message
-    end
-  end
-
-  defp dispatcher_module do
-    Application.get_env(:assistant, :google_chat_dispatcher_module, Dispatcher)
-  end
-
-  defp sync_timeout_ms do
-    Application.get_env(:assistant, :google_chat_sync_timeout_ms, @default_sync_timeout_ms)
+    Dispatcher.dispatch(ChatAdapter, message)
+    json(conn, ChatAdapter.wrap_response(@thinking_message, params))
   end
 end
