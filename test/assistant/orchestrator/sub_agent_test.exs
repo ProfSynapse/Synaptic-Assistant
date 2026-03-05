@@ -174,7 +174,7 @@ defmodule Assistant.Orchestrator.SubAgentTest do
       assert Map.has_key?(result, :status)
       assert Map.has_key?(result, :result)
       assert Map.has_key?(result, :tool_calls_used)
-      assert result.status in [:completed, :failed, :timeout]
+      assert result.status in [:completed, :failed, :timeout, :awaiting_orchestrator]
     end
   end
 

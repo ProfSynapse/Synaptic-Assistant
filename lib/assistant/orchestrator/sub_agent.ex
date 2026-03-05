@@ -205,7 +205,8 @@ defmodule Assistant.Orchestrator.SubAgent do
     opts = [
       dispatch_params: dispatch_params,
       dep_results: dep_results,
-      engine_state: engine_state
+      engine_state: engine_state,
+      caller_pid: self()
     ]
 
     # Use GenServer.start (NOT start_link) to avoid linking the GenServer
@@ -282,7 +283,9 @@ defmodule Assistant.Orchestrator.SubAgent do
       loop_task: nil,
       loop_ref: nil,
       # Interrupt flag — when set, the loop finishes current tool call then exits
-      interrupted: false
+      interrupted: false,
+      # The process waiting in wait_for_completion (notified on pause)
+      caller_pid: Keyword.get(opts, :caller_pid)
     }
 
     # Start the LLM loop in the next tick so init returns fast
@@ -387,14 +390,21 @@ defmodule Assistant.Orchestrator.SubAgent do
       reason: reason
     )
 
-    {:noreply,
-     %{
-       state
-       | status: :awaiting_orchestrator,
-         awaiting_reason: reason,
-         awaiting_partial_history: partial_history,
-         pending_help_tc: help_tc
-     }}
+    new_state = %{
+      state
+      | status: :awaiting_orchestrator,
+        awaiting_reason: reason,
+        awaiting_partial_history: partial_history,
+        pending_help_tc: help_tc
+    }
+
+    # Notify the caller blocked in wait_for_completion so it returns immediately
+    # instead of waiting for the 120s timeout.
+    if state.caller_pid do
+      send(state.caller_pid, {:agent_paused, build_final_result_map(new_state)})
+    end
+
+    {:noreply, new_state}
   end
 
   @impl true
@@ -1220,11 +1230,11 @@ defmodule Assistant.Orchestrator.SubAgent do
   defp compute_context_file_budget(dispatch_params) do
     model_info =
       case dispatch_params[:model_override] do
-        nil ->
-          Loader.model_for(:sub_agent, user_id: dispatch_params[:user_id])
-
-        model_id ->
+        model_id when is_binary(model_id) and model_id != "" ->
           Loader.model_for(:sub_agent, id: model_id)
+
+        _ ->
+          Loader.model_for(:sub_agent, user_id: dispatch_params[:user_id])
       end
 
     max_context = (model_info && model_info.max_context_tokens) || 200_000
@@ -1544,6 +1554,12 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp wait_for_completion(_agent_id, monitor_ref) do
     receive do
+      {:agent_paused, %{status: :awaiting_orchestrator} = result_map} ->
+        # Agent hit approval gate or request_help — return immediately so the
+        # orchestrator loop can see the awaiting_orchestrator status and act.
+        Process.demonitor(monitor_ref, [:flush])
+        result_map
+
       {:DOWN, ^monitor_ref, :process, _pid,
        {:shutdown, {:error, {:context_budget_exceeded, _}} = error}} ->
         # Context budget exceeded — return the error directly
@@ -1583,13 +1599,22 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   defp build_final_result_map(state) do
-    %{
+    base = %{
       status: state.status,
       result: extract_result_text(state.result),
       tool_calls_used: state.tool_calls_used,
       duration_ms: state.duration_ms,
       messages: state.messages
     }
+
+    # Include awaiting details so get_agent_results can surface them
+    if state.status == :awaiting_orchestrator do
+      base
+      |> Map.put(:reason, state.awaiting_reason)
+      |> Map.put(:partial_history, state.awaiting_partial_history)
+    else
+      base
+    end
   end
 
   defp extract_result_text({:error, {:context_budget_exceeded, details}}) do
@@ -1672,8 +1697,11 @@ defmodule Assistant.Orchestrator.SubAgent do
   defp build_model_opts(dispatch_params, context, engine_state) do
     model =
       case dispatch_params[:model_override] do
-        nil -> LLMHelpers.resolve_model(:sub_agent, user_id: engine_state[:user_id])
-        override -> override
+        override when is_binary(override) and override != "" ->
+          override
+
+        _ ->
+          LLMHelpers.resolve_model(:sub_agent, user_id: engine_state[:user_id])
       end
 
     LLMHelpers.build_llm_opts(context.tools, model)
