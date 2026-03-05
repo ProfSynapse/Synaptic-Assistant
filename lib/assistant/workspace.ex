@@ -67,74 +67,97 @@ defmodule Assistant.Workspace do
   defp build_feed(messages) do
     result_by_call_id = build_tool_result_map(messages)
 
-    Enum.reduce(messages, {[], %{}, %{}}, fn message, {items, tool_index, sub_agent_index} ->
-      message_item = build_message_item(message)
+    {items, tool_index, sub_agent_index, _channel} =
+      Enum.reduce(messages, {[], %{}, %{}, nil}, fn message,
+                                                     {items, tool_index, sub_agent_index,
+                                                      current_channel} ->
+        {message_item, updated_channel} = build_message_item(message, current_channel)
 
-      {activity_item, activity_tool_index, activity_sub_agent_index} =
-        build_activity_item(message, result_by_call_id)
+        {activity_item, activity_tool_index, activity_sub_agent_index} =
+          build_activity_item(message, result_by_call_id)
 
-      updated_items =
-        items
-        |> maybe_append(message_item)
-        |> maybe_append(activity_item)
+        updated_items =
+          items
+          |> maybe_append(message_item)
+          |> maybe_append(activity_item)
 
-      {
-        updated_items,
-        Map.merge(tool_index, activity_tool_index),
-        Map.merge(sub_agent_index, activity_sub_agent_index)
-      }
-    end)
+        {
+          updated_items,
+          Map.merge(tool_index, activity_tool_index),
+          Map.merge(sub_agent_index, activity_sub_agent_index),
+          updated_channel
+        }
+      end)
+
+    {items, tool_index, sub_agent_index}
   end
 
   defp maybe_append(items, nil), do: items
   defp maybe_append(items, item), do: items ++ [item]
 
-  defp build_message_item(%Message{role: "system", content: content, metadata: metadata} = message)
+  defp build_message_item(
+         %Message{role: "system", content: content, metadata: metadata} = message,
+         current_channel
+       )
        when is_binary(content) do
     # Only render space context system messages in the feed
-    case metadata do
-      %{"type" => "space_context"} ->
-        sender_name =
-          get_in(metadata, ["source", "sender_display_name"]) || "A colleague"
+    item =
+      case metadata do
+        %{"type" => "space_context"} ->
+          sender_name =
+            get_in(metadata, ["source", "sender_display_name"]) || "A colleague"
 
-        sub_type = Map.get(metadata, "sub_type", "question")
+          sub_type = Map.get(metadata, "sub_type", "question")
 
-        %{
-          id: "message:#{message.id}",
-          type: :space_context,
-          sub_type: String.to_existing_atom(sub_type),
-          role: :system,
-          content: content,
-          inserted_at: message.inserted_at,
-          source_label: "Space: #{sender_name}"
-        }
+          %{
+            id: "message:#{message.id}",
+            type: :space_context,
+            sub_type: String.to_existing_atom(sub_type),
+            role: :system,
+            content: content,
+            inserted_at: message.inserted_at,
+            source_label: "Space: #{sender_name}"
+          }
 
-      _ ->
-        nil
-    end
+        _ ->
+          nil
+      end
+
+    {item, current_channel}
   end
 
-  defp build_message_item(%Message{role: role, content: content} = message)
+  defp build_message_item(%Message{role: role, content: content} = message, current_channel)
        when role in ["user", "assistant"] do
     if present?(content) do
       source_label = source_label_for_message(role, message.metadata)
       source_channel = source_channel_for_message(message.metadata)
 
-      %{
+      # For user messages, update the tracked channel
+      # For assistant messages, inherit the last user's channel if none set
+      {effective_channel, next_channel} =
+        if role == "user" do
+          {source_channel, source_channel || current_channel}
+        else
+          {source_channel || current_channel, current_channel}
+        end
+
+      item = %{
         id: "message:#{message.id}",
         type: :message,
         role: if(role == "user", do: :user, else: :assistant),
         content: content,
         inserted_at: message.inserted_at,
         source_label: source_label,
-        source_channel: source_channel
+        source_channel: effective_channel
       }
+
+      {item, next_channel}
     else
-      nil
+      {nil, current_channel}
     end
   end
 
-  defp build_message_item(_message), do: nil
+  defp build_message_item(_message, current_channel), do: {nil, current_channel}
 
   defp source_label_for_message("user", metadata) do
     source = source_map(metadata)
