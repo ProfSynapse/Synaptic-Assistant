@@ -226,9 +226,6 @@ defmodule AssistantWeb.WorkspaceLive do
                         <div class="sa-workspace-message-meta">
                           <div class="sa-workspace-message-meta-left">
                             <span class="sa-workspace-actor">{actor_label(item.role)}</span>
-                            <.badge :if={item.source_label} size="xs" color="gray" variant="soft">
-                              {item.source_label}
-                            </.badge>
                           </div>
                           <div class="sa-workspace-message-meta-right">
                             <.channel_icon :if={item[:source_channel]} channel={item.source_channel} />
