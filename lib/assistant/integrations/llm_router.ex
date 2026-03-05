@@ -41,13 +41,12 @@ defmodule Assistant.Integrations.LLMRouter do
     openai_auth = resolve_openai_auth(user_id)
     openai_key = openai_auth && Map.get(openai_auth, :access_token)
     openrouter_key = resolve_openrouter_key(user_id)
-    has_openrouter_user = is_binary(openrouter_key) and openrouter_key != ""
-    has_openrouter_system = has_system_openrouter_key?()
+    has_openrouter = is_binary(openrouter_key) and openrouter_key != ""
     has_openai = is_binary(openai_key) and openai_key != ""
 
     cond do
-      # Priority 1: Any OpenRouter key available (per-user or system) — use OpenRouter
-      has_openrouter_user or has_openrouter_system ->
+      # Priority 1: User has per-user OpenRouter key — use OpenRouter
+      has_openrouter ->
         %{
           client: OpenRouter,
           provider: :openrouter,
@@ -56,7 +55,7 @@ defmodule Assistant.Integrations.LLMRouter do
           openai_auth: nil
         }
 
-      # Priority 2: No OpenRouter key at all, but user has OpenAI creds — direct OpenAI
+      # Priority 2: No OpenRouter key, but user has OpenAI creds — direct OpenAI
       has_openai ->
         %{
           client: OpenAI,
@@ -66,7 +65,7 @@ defmodule Assistant.Integrations.LLMRouter do
           openai_auth: openai_auth
         }
 
-      # No credentials available
+      # No per-user credentials — OpenRouter with nil key (client falls back to system key)
       true ->
         %{
           client: OpenRouter,

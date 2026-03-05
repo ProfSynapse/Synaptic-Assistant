@@ -692,17 +692,21 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("toggle_skill_permission", %{"skill" => skill, "enabled" => enabled}, socket) do
-    enabled? = enabled == "true"
+    if socket.assigns.current_scope.settings_user.is_admin do
+      enabled? = enabled == "true"
 
-    case SkillPermissions.set_enabled(skill, enabled?) do
-      :ok ->
-        {:noreply,
-         socket
-         |> Loaders.load_skill_permissions()
-         |> put_flash(:info, "#{SkillPermissions.skill_label(skill)} updated")}
+      case SkillPermissions.set_enabled(skill, enabled?) do
+        :ok ->
+          {:noreply,
+           socket
+           |> Loaders.load_skill_permissions()
+           |> put_flash(:info, "#{SkillPermissions.skill_label(skill)} updated")}
 
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to update permission: #{inspect(reason)}")}
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to update permission: #{inspect(reason)}")}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Only admins can manage global skill permissions.")}
     end
   end
 
@@ -1616,7 +1620,6 @@ defmodule AssistantWeb.SettingsLive.Events do
         base_defaults =
           case ModelDefaults.mode(settings_user) do
             :global -> ModelDefaults.global_defaults()
-            :personal -> ModelDefaults.user_defaults(settings_user)
             :readonly -> %{}
           end
 

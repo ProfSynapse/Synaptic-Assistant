@@ -33,6 +33,8 @@ defmodule Assistant.Schemas.User do
     has_many :connected_drives, Assistant.Schemas.ConnectedDrive
     has_many :oauth_tokens, Assistant.Schemas.OAuthToken
     has_many :auth_tokens, Assistant.Schemas.AuthToken
+    has_many :skill_overrides, Assistant.Schemas.UserSkillOverride
+    has_many :connector_states, Assistant.Schemas.SettingsUserConnectorState
 
     timestamps(type: :utc_datetime_usec)
   end

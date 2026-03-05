@@ -65,6 +65,13 @@ defmodule Assistant.IntegrationSettings.Registry do
           env: "",
           label: "Default Memory Model",
           help: "App-wide fallback model for compaction and memory summarization"
+        },
+        %{
+          key: :model_default_fallback,
+          secret: false,
+          env: "",
+          label: "Fallback Model",
+          help: "App-wide fallback model when no role-specific default is set"
         }
       ]
     },

@@ -598,7 +598,7 @@ defmodule Assistant.Memory.Agent do
     skill_name = args["skill"]
     skill_args = args["arguments"] || %{}
 
-    if not SkillPermissions.enabled?(skill_name) do
+    if not SkillPermissions.enabled_for_user?(gen_state.user_id, skill_name) do
       {{tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}, executor_session}
     else
       if skill_name in gen_state.memory_skills do
@@ -670,7 +670,7 @@ defmodule Assistant.Memory.Agent do
 
   defp build_context(state, conversation_id) do
     system_prompt = build_system_prompt(state)
-    tools = build_scoped_tools(state.memory_skills)
+    tools = build_scoped_tools(state.memory_skills, state.user_id)
     mission = state.current_mission.mission
     mission_msg = %{role: "user", content: mission}
 
@@ -732,10 +732,10 @@ defmodule Assistant.Memory.Agent do
     end)
   end
 
-  defp build_scoped_tools(skill_names) do
+  defp build_scoped_tools(skill_names, user_id) do
     allowed_skill_names =
       skill_names
-      |> Enum.filter(&SkillPermissions.enabled?/1)
+      |> Enum.filter(&SkillPermissions.enabled_for_user?(user_id, &1))
       |> Enum.uniq()
 
     skill_defs =

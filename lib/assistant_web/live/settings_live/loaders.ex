@@ -242,6 +242,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         filtered_admin_users: filter_admin_users(all_users, search),
         integration_settings: IntegrationSettings.list_all()
       )
+      |> load_admin_model_data()
       |> maybe_refresh_current_admin_user()
     else
       assign(socket,
@@ -255,6 +256,32 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         integration_settings: []
       )
     end
+  end
+
+  defp load_admin_model_data(socket) do
+    settings_user = Context.current_settings_user(socket)
+    {openrouter_key, openai_key, _openai_auth_type} = provider_keys(socket)
+    openrouter_connected = present?(openrouter_key)
+    openai_connected = present?(openai_key)
+
+    models = ModelCatalog.list_models()
+    mode = ModelDefaults.mode(settings_user)
+    model_data = model_defaults_editor_data(settings_user, models)
+
+    {defaults_description, defaults_notice} = model_defaults_copy(mode)
+
+    socket
+    |> assign(:openrouter_connected, openrouter_connected)
+    |> assign(:openai_connected, openai_connected)
+    |> assign(:model_options, model_data.model_options)
+    |> assign(:model_defaults_mode, mode)
+    |> assign(:model_defaults_editable, ModelDefaults.editable?(settings_user))
+    |> assign(:model_defaults_description, defaults_description)
+    |> assign(:model_defaults_notice, defaults_notice)
+    |> assign(:model_default_sources, model_data.model_default_sources)
+    |> assign(:model_defaults, model_data.model_defaults)
+    |> assign(:model_default_roles, model_data.model_default_roles)
+    |> assign(:model_defaults_form, to_form(model_data.model_defaults, as: :defaults))
   end
 
   def reload_admin_users(socket) do
@@ -543,6 +570,11 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         key: :compaction,
         label: "Memory",
         tooltip: "Internally mapped to the compaction model role."
+      },
+      %{
+        key: :fallback,
+        label: "Fallback",
+        tooltip: "Only activates when explicitly set by an admin. Used when no role-specific default is configured."
       }
     ]
   end
@@ -591,17 +623,17 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   end
 
   defp admin_user_model_defaults_copy(%SettingsUser{is_admin: true}) do
-    {"Admin accounts use the app-wide defaults from the Models section.",
+    {"Admin accounts use the app-wide defaults from the Admin section.",
      "User-specific overrides are disabled for admin accounts."}
   end
 
   defp admin_user_model_defaults_copy(%SettingsUser{can_manage_model_defaults: true}) do
-    {"Set user-specific defaults for this account. This user can also edit them from their own settings page.",
+    {"Set user-specific defaults for this account. Per-user overrides are enabled.",
      "Changes save automatically. Apply Global Defaults clears every user-specific override."}
   end
 
   defp admin_user_model_defaults_copy(%SettingsUser{}) do
-    {"Set user-specific defaults for this account. This user cannot edit them unless you enable access above.",
+    {"Set user-specific defaults for this account.",
      "Changes save automatically. Apply Global Defaults clears every user-specific override."}
   end
 
@@ -618,11 +650,6 @@ defmodule AssistantWeb.SettingsLive.Loaders do
 
   defp model_defaults_copy(:global) do
     {"Choose the app-wide default model used for each system role.",
-     "Changes save automatically."}
-  end
-
-  defp model_defaults_copy(:personal) do
-    {"Choose personal model overrides for your account. Roles that match the admin defaults continue to inherit them.",
      "Changes save automatically."}
   end
 
