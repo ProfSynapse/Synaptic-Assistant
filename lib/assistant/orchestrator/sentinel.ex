@@ -9,7 +9,7 @@
 # Related files:
 #   - lib/assistant/orchestrator/sub_agent.ex (calls sentinel before each tool)
 #   - lib/assistant/orchestrator/engine.ex (passes original_request context)
-#   - lib/assistant/integrations/openrouter.ex (LLM client for classification)
+#   - lib/assistant/integrations/llm_router.ex (routes LLM calls by user credentials)
 #   - lib/assistant/config/loader.ex (model selection for sentinel tier)
 
 defmodule Assistant.Orchestrator.Sentinel do
@@ -50,10 +50,10 @@ defmodule Assistant.Orchestrator.Sentinel do
 
   alias Assistant.Config.Loader, as: ConfigLoader
 
-  @llm_client Application.compile_env(
+  @llm_router Application.compile_env(
                 :assistant,
-                :llm_client,
-                Assistant.Integrations.OpenRouter
+                :llm_router,
+                Assistant.Integrations.LLMRouter
               )
 
   @sentinel_prompt """
@@ -149,6 +149,7 @@ defmodule Assistant.Orchestrator.Sentinel do
           {:ok, :approved} | {:ok, {:rejected, String.t()}}
   def check(original_request, agent_mission, proposed_action, opts \\ []) do
     model = resolve_sentinel_model(opts)
+    user_id = Keyword.get(opts, :user_id)
     messages = build_messages(original_request, agent_mission, proposed_action)
 
     Logger.info("Sentinel check",
@@ -158,11 +159,15 @@ defmodule Assistant.Orchestrator.Sentinel do
       request_prefix: truncate(original_request, 80)
     )
 
-    case @llm_client.chat_completion(messages,
-           model: model,
-           temperature: 0.0,
-           max_tokens: 4096,
-           response_format: @sentinel_response_format
+    case @llm_router.chat_completion(
+           messages,
+           [
+             model: model,
+             temperature: 0.0,
+             max_tokens: 4096,
+             response_format: @sentinel_response_format
+           ],
+           user_id
          ) do
       {:ok, %{content: nil} = response} ->
         # Reasoning models (e.g. gpt-5-mini) may consume all tokens on

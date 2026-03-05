@@ -1,7 +1,7 @@
 # test/assistant/orchestrator/sentinel_test.exs
 #
 # Unit tests for the Phase 2 Sentinel security gate. Uses Mox to mock the LLM
-# client, covering all 10 scenarios from docs/preparation/sentinel-phase2.md
+# router, covering all 10 scenarios from docs/preparation/sentinel-phase2.md
 # plus error-handling paths (fail-open, malformed JSON, nil content).
 
 defmodule Assistant.Orchestrator.SentinelTest do
@@ -47,8 +47,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
   describe "obvious reject scenarios" do
     test "scenario 1: wrong domain — search request but agent tries to send" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         reject_response(
           "User requested email search, not email send. The action is not aligned with the request."
         )
@@ -71,8 +71,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "scenario 2: destructive action on read request" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         reject_response(
           "User requested to view calendar events. Deleting a task is unrelated and destructive."
         )
@@ -101,8 +101,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
   describe "obvious approve scenarios" do
     test "scenario 3: direct match — send email matching request" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         approve_response("Direct alignment between request, mission, and action.")
       end)
 
@@ -125,8 +125,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "scenario 4: read-only on read request" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         approve_response("Read-only action matching user intent.")
       end)
 
@@ -151,8 +151,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
   describe "nuanced prerequisite scenarios" do
     test "scenario 5: drive search before email — gathering info" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         approve_response(
           "Agent needs to find the file before emailing it. Logical prerequisite step."
         )
@@ -173,8 +173,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "scenario 6: memory search before task creation" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         approve_response(
           "Agent needs context from memory before creating the task. Logical prerequisite."
         )
@@ -201,8 +201,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
   describe "nuanced boundary scenarios" do
     test "scenario 7: calendar create on check request — rejects" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         reject_response("User requested to check/view calendar, not to create events.")
       end)
 
@@ -223,8 +223,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "scenario 8: draft email when user said 'tell' — approves" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         approve_response(
           "'Tell Sarah' reasonably implies communication. Drafting is a cautious, low-risk interpretation."
         )
@@ -255,8 +255,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
   describe "mission scope scenarios" do
     test "scenario 9: memory agent tries to email — rejects" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         reject_response(
           "Agent mission is to search memory. Sending email is outside the scope of memory operations."
         )
@@ -283,8 +283,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "scenario 10: task agent doing file operations — rejects" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         reject_response(
           "Agent mission is task creation. Writing files is not within scope of task management."
         )
@@ -313,8 +313,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
   describe "fail-open behavior" do
     test "LLM timeout returns approved" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         {:error, :timeout}
       end)
 
@@ -333,8 +333,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "LLM rate limit returns approved" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         {:error, {:rate_limited, "429 Too Many Requests"}}
       end)
 
@@ -353,8 +353,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "LLM network error returns approved" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         {:error, :econnrefused}
       end)
 
@@ -379,8 +379,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
   describe "malformed LLM response handling" do
     test "non-JSON content fails open to approved" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         {:ok,
          %{
            id: "sentinel-test",
@@ -403,8 +403,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "JSON with unexpected decision value fails open to approved" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         {:ok,
          %{
            id: "sentinel-test",
@@ -427,8 +427,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "nil content fails open to approved" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         {:ok,
          %{
            id: "sentinel-test",
@@ -451,8 +451,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "JSON wrapped in markdown code fences is parsed correctly" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         {:ok,
          %{
            id: "sentinel-test",
@@ -482,8 +482,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
 
   describe "edge cases" do
     test "nil original_request — evaluates against mission scope only" do
-      MockLLMClient
-      |> expect(:chat_completion, fn messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn messages, _opts, _user_id ->
         # Verify the user message contains "(none)" for missing request
         user_msg = Enum.find(messages, &(&1.role == "user"))
         assert user_msg.content =~ "ORIGINAL REQUEST: (none)"
@@ -506,8 +506,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "LLM receives correct message structure and options" do
-      MockLLMClient
-      |> expect(:chat_completion, fn messages, opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn messages, opts, _user_id ->
         # Verify system + user message structure
         assert length(messages) == 2
 
@@ -541,9 +541,45 @@ defmodule Assistant.Orchestrator.SentinelTest do
                Sentinel.check("Show emails", "List recent emails", proposed_action)
     end
 
+    test "user_id is passed through to LLM router" do
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, user_id ->
+        assert user_id == "test-user-123"
+        approve_response("Aligned.")
+      end)
+
+      proposed_action = %{
+        skill_name: "email.list",
+        arguments: %{},
+        agent_id: "email_agent"
+      }
+
+      assert {:ok, :approved} =
+               Sentinel.check("Show emails", "List emails", proposed_action,
+                 user_id: "test-user-123"
+               )
+    end
+
+    test "nil user_id is passed through when not provided" do
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, user_id ->
+        assert user_id == nil
+        approve_response("Aligned.")
+      end)
+
+      proposed_action = %{
+        skill_name: "email.list",
+        arguments: %{},
+        agent_id: "email_agent"
+      }
+
+      assert {:ok, :approved} =
+               Sentinel.check("Show emails", "List emails", proposed_action)
+    end
+
     test "arguments are JSON-encoded in the prompt" do
-      MockLLMClient
-      |> expect(:chat_completion, fn messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn messages, _opts, _user_id ->
         user_msg = Enum.find(messages, &(&1.role == "user"))
         # Arguments should be JSON-encoded, not Elixir inspect format
         assert user_msg.content =~ "\"to\""
@@ -563,8 +599,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "empty arguments map is handled" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         approve_response("Aligned.")
       end)
 
@@ -579,8 +615,8 @@ defmodule Assistant.Orchestrator.SentinelTest do
     end
 
     test "very long request and mission text does not crash" do
-      MockLLMClient
-      |> expect(:chat_completion, fn _messages, _opts ->
+      MockLLMRouter
+      |> expect(:chat_completion, fn _messages, _opts, _user_id ->
         approve_response("Aligned despite long input.")
       end)
 

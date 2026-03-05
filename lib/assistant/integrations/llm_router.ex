@@ -4,6 +4,8 @@ defmodule Assistant.Integrations.LLMRouter do
   per-user connected keys.
   """
 
+  @behaviour Assistant.Behaviours.LLMRouter
+
   alias Assistant.Accounts
   alias Assistant.Integrations.{OpenAI, OpenRouter}
 

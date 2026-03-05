@@ -4,13 +4,13 @@
 # Tests that the LLM makes correct approve/reject decisions on realistic
 # action-evaluation scenarios.
 #
-# The Sentinel module uses @llm_client (compile-time MockLLMClient in test),
+# The Sentinel module uses @llm_router (compile-time MockLLMRouter in test),
 # so these tests call OpenRouter directly with the same prompt structure
 # to verify real LLM decision-making quality.
 #
 # Related files:
 #   - lib/assistant/orchestrator/sentinel.ex (security gate)
-#   - lib/assistant/integrations/openrouter.ex (real LLM client)
+#   - lib/assistant/integrations/llm_router.ex (LLM routing by user credentials)
 
 defmodule Assistant.Integration.SentinelLLMTest do
   use ExUnit.Case, async: false

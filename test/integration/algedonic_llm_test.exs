@@ -88,10 +88,10 @@ defmodule Assistant.Integration.AlgedonicLLMTest do
     Assistant.Integration.MockCallRecorder.clear()
 
     # Set Mox to global mode so dynamically spawned sub-agent Task processes
-    # can access the MockLLMClient stub (sentinel auto-approve).
+    # can access the MockLLMRouter stub (sentinel auto-approve).
     Mox.set_mox_global(self())
 
-    stub(MockLLMClient, :chat_completion, fn _messages, _opts ->
+    stub(MockLLMRouter, :chat_completion, fn _messages, _opts, _user_id ->
       {:ok,
        %{
          id: "sentinel-stub",
