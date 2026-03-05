@@ -169,7 +169,7 @@ defmodule Assistant.Orchestrator.Sentinel do
         # reasoning, returning nil content. Log the finish_reason for
         # diagnosis — "length" confirms token exhaustion.
         Logger.warning(
-          "Sentinel received nil content from LLM (reasoning model token exhaustion?)",
+          "Sentinel received nil content from LLM (reasoning model token exhaustion?) model=#{model} finish_reason=#{response[:finish_reason]}",
           agent_id: proposed_action[:agent_id],
           skill_name: proposed_action[:skill_name],
           model: model,
@@ -190,7 +190,7 @@ defmodule Assistant.Orchestrator.Sentinel do
             {:ok, :approved}
 
           {:ok, :rejected, reason} ->
-            Logger.warning("Sentinel rejected",
+            Logger.warning("Sentinel rejected #{proposed_action[:skill_name]}: #{reason}",
               agent_id: proposed_action[:agent_id],
               skill_name: proposed_action[:skill_name],
               reason: reason
@@ -199,7 +199,7 @@ defmodule Assistant.Orchestrator.Sentinel do
             {:ok, {:rejected, reason}}
 
           {:error, parse_reason} ->
-            Logger.warning("Sentinel response parse failed, approving (fail-open)",
+            Logger.warning("Sentinel response parse failed (#{inspect(parse_reason)}), approving (fail-open)",
               agent_id: proposed_action[:agent_id],
               skill_name: proposed_action[:skill_name],
               content: content,
@@ -210,7 +210,7 @@ defmodule Assistant.Orchestrator.Sentinel do
         end
 
       {:error, reason} ->
-        Logger.warning("Sentinel LLM call failed, approving (fail-open)",
+        Logger.warning("Sentinel LLM call failed (#{inspect(reason)}), approving (fail-open)",
           agent_id: proposed_action[:agent_id],
           skill_name: proposed_action[:skill_name],
           model: model,
