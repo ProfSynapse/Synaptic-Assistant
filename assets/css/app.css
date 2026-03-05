@@ -2156,10 +2156,11 @@ a {
   background: #ffffff;
   color: #29465e;
   border-radius: 999px;
-  padding: 5px 12px;
-  font-weight: 700;
-  font-size: 0.77rem;
+  padding: 6px;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .sa-workspace-inspect-btn:hover,

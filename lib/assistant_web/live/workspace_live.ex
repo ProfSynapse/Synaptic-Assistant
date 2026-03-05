@@ -274,8 +274,9 @@ defmodule AssistantWeb.WorkspaceLive do
                                 class="sa-workspace-inspect-btn"
                                 phx-click="inspect_tool"
                                 phx-value-id={tool.inspect_id}
+                                aria-label="Inspect"
                               >
-                                Inspect
+                                <.icon name="hero-eye-solid" class="h-4 w-4" />
                               </button>
                             </article>
                           </div>
@@ -299,8 +300,9 @@ defmodule AssistantWeb.WorkspaceLive do
                               class="sa-workspace-inspect-btn"
                               phx-click="inspect_sub_agent"
                               phx-value-id={sub_agent.inspect_id}
+                              aria-label="Inspect"
                             >
-                              Inspect
+                              <.icon name="hero-eye-solid" class="h-4 w-4" />
                             </button>
                           </div>
                         </.card>

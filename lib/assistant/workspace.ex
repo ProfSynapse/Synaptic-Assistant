@@ -264,7 +264,12 @@ defmodule Assistant.Workspace do
          status: status,
          result_content: result_content,
          inserted_at: message.inserted_at,
-         live_snapshot: live_snapshot
+         live_snapshot: live_snapshot,
+         result_text: nil,
+         tool_calls_used: nil,
+         duration_ms: nil,
+         transcript_mode: nil,
+         transcript_text: nil
        }}
     else
       {:tool,
