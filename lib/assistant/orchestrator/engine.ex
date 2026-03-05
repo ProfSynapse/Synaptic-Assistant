@@ -418,9 +418,10 @@ defmodule Assistant.Orchestrator.Engine do
                   role: "tool",
                   tool_call_id: tc.id,
                   content:
-                    "Agent \"#{params.agent_id}\" dispatched and #{status}. " <>
-                      "Use get_agent_results to inspect full results.\n\n" <>
-                      "Summary: #{result_text}" <>
+                    "Agent \"#{params.agent_id}\" finished with status: #{status}. " <>
+                      "The task is complete — do NOT dispatch another agent for the same task. " <>
+                      "Summarize the following result for the user.\n\n" <>
+                      "Result: #{result_text}" <>
                       approval_section
                 }
               end)
