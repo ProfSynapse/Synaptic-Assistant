@@ -9,6 +9,7 @@
 #   - priv/skills/hubspot/search_contacts.md (skill definition)
 
 defmodule Assistant.Skills.HubSpot.Contacts.Search do
+  @moduledoc false
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.HubSpot.Helpers
@@ -45,25 +46,33 @@ defmodule Assistant.Skills.HubSpot.Contacts.Search do
       search_by = Map.get(flags, "search_by", "email")
       limit = Helpers.parse_limit(Map.get(flags, "limit"))
 
-      {property, operator} = resolve_search_params(search_by)
+      case resolve_search_params(search_by) do
+        {:ok, property, operator} ->
+          case hubspot.search_contacts(api_key, property, operator, query, limit) do
+            {:ok, contacts} ->
+              formatted = Helpers.format_object_list(contacts, @contact_fields, "contacts")
+              {:ok, %Result{status: :ok, content: formatted}}
 
-      case hubspot.search_contacts(api_key, property, operator, query, limit) do
-        {:ok, contacts} ->
-          formatted = Helpers.format_object_list(contacts, @contact_fields, "contacts")
-          {:ok, %Result{status: :ok, content: formatted}}
+            {:error, {:api_error, 401, _}} = error ->
+              Helpers.handle_error(error)
 
-        {:error, {:api_error, 401, _}} = error ->
-          Helpers.handle_error(error)
+            {:error, {:api_error, 429, _}} = error ->
+              Helpers.handle_error(error)
 
-        {:error, {:api_error, 429, _}} = error ->
-          Helpers.handle_error(error)
+            error ->
+              Helpers.handle_error(error)
+          end
 
-        error ->
-          Helpers.handle_error(error)
+        {:error, message} ->
+          {:ok, %Result{status: :error, content: message}}
       end
     end
   end
 
-  defp resolve_search_params("name"), do: {"firstname", "CONTAINS_TOKEN"}
-  defp resolve_search_params(_email), do: {"email", "EQ"}
+  defp resolve_search_params("email"), do: {:ok, "email", "EQ"}
+  defp resolve_search_params("name"), do: {:ok, "firstname", "CONTAINS_TOKEN"}
+
+  defp resolve_search_params(other) do
+    {:error, "Invalid --search_by value: \"#{other}\". Must be \"email\" or \"name\"."}
+  end
 end

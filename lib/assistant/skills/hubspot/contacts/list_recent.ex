@@ -9,6 +9,7 @@
 #   - priv/skills/hubspot/list_recent_contacts.md (skill definition)
 
 defmodule Assistant.Skills.HubSpot.Contacts.ListRecent do
+  @moduledoc false
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.HubSpot.Helpers

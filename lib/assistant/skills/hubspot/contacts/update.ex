@@ -10,6 +10,7 @@
 #   - priv/skills/hubspot/update_contact.md (skill definition)
 
 defmodule Assistant.Skills.HubSpot.Contacts.Update do
+  @moduledoc false
   @behaviour Assistant.Skills.Handler
 
   require Logger
@@ -42,58 +43,63 @@ defmodule Assistant.Skills.HubSpot.Contacts.Update do
   defp do_execute(hubspot, api_key, flags) do
     id = Map.get(flags, "id")
 
-    if is_nil(id) || id == "" do
-      {:ok, %Result{status: :error, content: "Missing required parameter: --id."}}
-    else
-      case Helpers.parse_properties_json(Map.get(flags, "properties")) do
-        {:error, message} ->
-          {:ok, %Result{status: :error, content: message}}
+    cond do
+      is_nil(id) || id == "" ->
+        {:ok, %Result{status: :error, content: "Missing required parameter: --id."}}
 
-        {:ok, extra_props} ->
-          properties =
-            %{}
-            |> Helpers.maybe_put("email", Map.get(flags, "email"))
-            |> Helpers.maybe_put("firstname", Map.get(flags, "first_name"))
-            |> Helpers.maybe_put("lastname", Map.get(flags, "last_name"))
-            |> Helpers.maybe_put("phone", Map.get(flags, "phone"))
-            |> Helpers.maybe_put("company", Map.get(flags, "company"))
-            |> Map.merge(extra_props)
+      not String.match?(id, ~r/^\d+$/) ->
+        {:ok, %Result{status: :error, content: "Invalid --id: must be a numeric HubSpot ID."}}
 
-          if properties == %{} do
-            {:ok,
-             %Result{
-               status: :error,
-               content: "No fields to update. Provide at least one field (--email, --first_name, --last_name, --phone, --company, or --properties)."
-             }}
-          else
-            case hubspot.update_contact(api_key, id, properties) do
-              {:ok, contact} ->
-                formatted = Helpers.format_object(contact, @contact_fields)
+      true ->
+        case Helpers.parse_properties_json(Map.get(flags, "properties")) do
+          {:error, message} ->
+            {:ok, %Result{status: :error, content: message}}
 
-                Logger.info("HubSpot contact updated", contact_id: id)
+          {:ok, extra_props} ->
+            properties =
+              %{}
+              |> Helpers.maybe_put("email", Map.get(flags, "email"))
+              |> Helpers.maybe_put("firstname", Map.get(flags, "first_name"))
+              |> Helpers.maybe_put("lastname", Map.get(flags, "last_name"))
+              |> Helpers.maybe_put("phone", Map.get(flags, "phone"))
+              |> Helpers.maybe_put("company", Map.get(flags, "company"))
+              |> Map.merge(extra_props)
 
-                {:ok,
-                 %Result{
-                   status: :ok,
-                   content: "Contact updated successfully.\n\n#{formatted}",
-                   side_effects: [:hubspot_contact_updated],
-                   metadata: %{contact_id: id}
-                 }}
+            if properties == %{} do
+              {:ok,
+               %Result{
+                 status: :error,
+                 content: "No fields to update. Provide at least one field (--email, --first_name, --last_name, --phone, --company, or --properties)."
+               }}
+            else
+              case hubspot.update_contact(api_key, id, properties) do
+                {:ok, contact} ->
+                  formatted = Helpers.format_object(contact, @contact_fields)
 
-              {:error, {:api_error, 404, _}} = error ->
-                Helpers.handle_error(error, "contact", id)
+                  Logger.info("HubSpot contact updated", contact_id: id)
 
-              {:error, {:api_error, 401, _}} = error ->
-                Helpers.handle_error(error)
+                  {:ok,
+                   %Result{
+                     status: :ok,
+                     content: "Contact updated successfully.\n\n#{formatted}",
+                     side_effects: [:hubspot_contact_updated],
+                     metadata: %{contact_id: id}
+                   }}
 
-              {:error, {:api_error, 429, _}} = error ->
-                Helpers.handle_error(error)
+                {:error, {:api_error, 404, _}} = error ->
+                  Helpers.handle_error(error, "contact", id)
 
-              error ->
-                Helpers.handle_error(error)
+                {:error, {:api_error, 401, _}} = error ->
+                  Helpers.handle_error(error)
+
+                {:error, {:api_error, 429, _}} = error ->
+                  Helpers.handle_error(error)
+
+                error ->
+                  Helpers.handle_error(error)
+              end
             end
-          end
-      end
+        end
     end
   end
 end

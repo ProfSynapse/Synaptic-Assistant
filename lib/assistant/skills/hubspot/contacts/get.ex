@@ -9,6 +9,7 @@
 #   - priv/skills/hubspot/get_contact.md (skill definition)
 
 defmodule Assistant.Skills.HubSpot.Contacts.Get do
+  @moduledoc false
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.HubSpot.Helpers
@@ -39,26 +40,31 @@ defmodule Assistant.Skills.HubSpot.Contacts.Get do
   defp do_execute(hubspot, api_key, flags) do
     id = Map.get(flags, "id")
 
-    if is_nil(id) || id == "" do
-      {:ok, %Result{status: :error, content: "Missing required parameter: --id."}}
-    else
-      case hubspot.get_contact(api_key, id) do
-        {:ok, contact} ->
-          formatted = Helpers.format_object(contact, @contact_fields)
-          {:ok, %Result{status: :ok, content: formatted}}
+    cond do
+      is_nil(id) || id == "" ->
+        {:ok, %Result{status: :error, content: "Missing required parameter: --id."}}
 
-        {:error, {:api_error, 404, _}} = error ->
-          Helpers.handle_error(error, "contact", id)
+      not String.match?(id, ~r/^\d+$/) ->
+        {:ok, %Result{status: :error, content: "Invalid --id: must be a numeric HubSpot ID."}}
 
-        {:error, {:api_error, 401, _}} = error ->
-          Helpers.handle_error(error)
+      true ->
+        case hubspot.get_contact(api_key, id) do
+          {:ok, contact} ->
+            formatted = Helpers.format_object(contact, @contact_fields)
+            {:ok, %Result{status: :ok, content: formatted}}
 
-        {:error, {:api_error, 429, _}} = error ->
-          Helpers.handle_error(error)
+          {:error, {:api_error, 404, _}} = error ->
+            Helpers.handle_error(error, "contact", id)
 
-        error ->
-          Helpers.handle_error(error)
-      end
+          {:error, {:api_error, 401, _}} = error ->
+            Helpers.handle_error(error)
+
+          {:error, {:api_error, 429, _}} = error ->
+            Helpers.handle_error(error)
+
+          error ->
+            Helpers.handle_error(error)
+        end
     end
   end
 end

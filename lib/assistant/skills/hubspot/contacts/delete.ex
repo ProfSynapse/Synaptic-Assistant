@@ -9,6 +9,7 @@
 #   - priv/skills/hubspot/delete_contact.md (skill definition)
 
 defmodule Assistant.Skills.HubSpot.Contacts.Delete do
+  @moduledoc false
   @behaviour Assistant.Skills.Handler
 
   require Logger
@@ -33,33 +34,38 @@ defmodule Assistant.Skills.HubSpot.Contacts.Delete do
   defp do_execute(hubspot, api_key, flags) do
     id = Map.get(flags, "id")
 
-    if is_nil(id) || id == "" do
-      {:ok, %Result{status: :error, content: "Missing required parameter: --id."}}
-    else
-      case hubspot.delete_contact(api_key, id) do
-        :ok ->
-          Logger.info("HubSpot contact archived", contact_id: id)
+    cond do
+      is_nil(id) || id == "" ->
+        {:ok, %Result{status: :error, content: "Missing required parameter: --id."}}
 
-          {:ok,
-           %Result{
-             status: :ok,
-             content: "Contact #{id} has been archived successfully.\n\nNote: Archived contacts can be restored from the HubSpot UI.",
-             side_effects: [:hubspot_contact_deleted],
-             metadata: %{contact_id: id}
-           }}
+      not String.match?(id, ~r/^\d+$/) ->
+        {:ok, %Result{status: :error, content: "Invalid --id: must be a numeric HubSpot ID."}}
 
-        {:error, {:api_error, 404, _}} = error ->
-          Helpers.handle_error(error, "contact", id)
+      true ->
+        case hubspot.delete_contact(api_key, id) do
+          :ok ->
+            Logger.info("HubSpot contact archived", contact_id: id)
 
-        {:error, {:api_error, 401, _}} = error ->
-          Helpers.handle_error(error)
+            {:ok,
+             %Result{
+               status: :ok,
+               content: "Contact #{id} has been archived successfully.\n\nNote: Archived contacts can be restored from the HubSpot UI.",
+               side_effects: [:hubspot_contact_deleted],
+               metadata: %{contact_id: id}
+             }}
 
-        {:error, {:api_error, 429, _}} = error ->
-          Helpers.handle_error(error)
+          {:error, {:api_error, 404, _}} = error ->
+            Helpers.handle_error(error, "contact", id)
 
-        error ->
-          Helpers.handle_error(error)
-      end
+          {:error, {:api_error, 401, _}} = error ->
+            Helpers.handle_error(error)
+
+          {:error, {:api_error, 429, _}} = error ->
+            Helpers.handle_error(error)
+
+          error ->
+            Helpers.handle_error(error)
+        end
     end
   end
 end

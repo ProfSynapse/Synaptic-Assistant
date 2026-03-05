@@ -9,6 +9,7 @@
 #   - priv/skills/hubspot/create_contact.md (skill definition)
 
 defmodule Assistant.Skills.HubSpot.Contacts.Create do
+  @moduledoc false
   @behaviour Assistant.Skills.Handler
 
   require Logger

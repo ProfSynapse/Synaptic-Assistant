@@ -9,32 +9,32 @@
 #   - priv/skills/hubspot/list_recent_companies.md (skill definition)
 
 defmodule Assistant.Skills.HubSpot.Companies.ListRecent do
+  @moduledoc false
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result
 
-  @company_fields [{"Name", "name"}, {"Domain", "domain"}, {"Website", "website"}, {"Industry", "industry"}, {"Description", "description"}]
+  @company_fields [
+    {"Name", "name"},
+    {"Domain", "domain"},
+    {"Website", "website"},
+    {"Industry", "industry"},
+    {"Description", "description"}
+  ]
 
   @impl true
   def execute(flags, context) do
     case Map.get(context.integrations, :hubspot) do
       nil ->
-        {:ok, %Result{status: :error, content: "HubSpot integration not configured."}}
+        Helpers.integration_not_configured()
 
       hubspot ->
-        case resolve_api_key() do
-          nil ->
-            {:ok, %Result{status: :error, content: "HubSpot API key not found. Configure it in Settings."}}
-
-          api_key ->
-            do_execute(hubspot, api_key, flags)
+        case Helpers.resolve_api_key() do
+          nil -> Helpers.api_key_not_found()
+          api_key -> do_execute(hubspot, api_key, flags)
         end
     end
-  end
-
-  defp resolve_api_key do
-    Assistant.IntegrationSettings.get(:hubspot_api_key)
   end
 
   defp do_execute(hubspot, api_key, flags) do
@@ -45,17 +45,14 @@ defmodule Assistant.Skills.HubSpot.Companies.ListRecent do
         formatted = Helpers.format_object_list(companies, @company_fields, "companies")
         {:ok, %Result{status: :ok, content: formatted}}
 
-      {:error, {:api_error, 401, _}} ->
-        {:ok, %Result{status: :error, content: "HubSpot API key is invalid. Check Settings."}}
+      {:error, {:api_error, 401, _}} = error ->
+        Helpers.handle_error(error)
 
-      {:error, {:api_error, 429, _}} ->
-        {:ok, %Result{status: :error, content: "HubSpot rate limit exceeded. Try again shortly."}}
+      {:error, {:api_error, 429, _}} = error ->
+        Helpers.handle_error(error)
 
-      {:error, {:api_error, _status, message}} ->
-        {:ok, %Result{status: :error, content: "HubSpot API error: #{message}"}}
-
-      {:error, {:request_failed, reason}} ->
-        {:ok, %Result{status: :error, content: "Failed to reach HubSpot: #{Exception.message(reason)}"}}
+      error ->
+        Helpers.handle_error(error)
     end
   end
 end
