@@ -2,7 +2,7 @@
 name: "hubspot.update_company"
 description: "Update a company in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Companies.Update"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm

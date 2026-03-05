@@ -2,7 +2,7 @@
 name: "hubspot.update_deal"
 description: "Update an existing deal in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Deals.Update"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm

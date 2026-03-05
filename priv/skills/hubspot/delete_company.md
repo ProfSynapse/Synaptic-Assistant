@@ -2,7 +2,7 @@
 name: "hubspot.delete_company"
 description: "Delete (archive) a company in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Companies.Delete"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm

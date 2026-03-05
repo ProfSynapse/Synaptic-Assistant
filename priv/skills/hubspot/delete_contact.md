@@ -2,7 +2,7 @@
 name: "hubspot.delete_contact"
 description: "Archive (delete) a contact in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Contacts.Delete"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm

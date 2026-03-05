@@ -2,7 +2,7 @@
 name: "hubspot.create_company"
 description: "Create a new company in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Companies.Create"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm
