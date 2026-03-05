@@ -476,6 +476,22 @@
     },
   }
 
+  Hooks.ScrollToBottom = {
+    mounted() {
+      this.el.scrollTop = this.el.scrollHeight
+    },
+
+    updated() {
+      const threshold = 100
+      const distanceFromBottom =
+        this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight
+
+      if (distanceFromBottom <= threshold) {
+        this.el.scrollTo({ top: this.el.scrollHeight, behavior: "smooth" })
+      }
+    },
+  }
+
   Hooks.WorkspaceComposer = {
     mounted() {
       this.handleKeydown = (event) => {

@@ -214,7 +214,7 @@ defmodule AssistantWeb.WorkspaceLive do
                 Showing the newest conversation events. Older history is still available.
               </p>
 
-              <div id="workspace-feed" class="sa-workspace-feed">
+              <div id="workspace-feed" class="sa-workspace-feed" phx-hook="ScrollToBottom">
                 <div :if={@feed_items == []} class="sa-workspace-empty-state">
                   <p>Start chatting. Messages from connected channels will appear here too.</p>
                 </div>
