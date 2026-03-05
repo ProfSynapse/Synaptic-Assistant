@@ -459,7 +459,7 @@ defmodule AssistantWeb.WorkspaceLive do
     assigns = assign(assigns, :icon_name, icon_name)
 
     ~H"""
-    <.icon :if={@icon_name} name={@icon_name} class="sa-channel-icon" />
+    <span :if={@icon_name} class={"#{@icon_name} sa-channel-icon"}></span>
     """
   end
 
