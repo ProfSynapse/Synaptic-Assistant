@@ -115,10 +115,10 @@ defmodule Assistant.Channels.DispatchIntegrationTest do
       name: Assistant.Orchestrator.ConversationSupervisor
     )
 
-    # Mox global mode for cross-process stub access (Sentinel uses MockLLMClient)
+    # Mox global mode for cross-process stub access (Sentinel uses MockLLMRouter)
     Mox.set_mox_global(self())
 
-    stub(MockLLMClient, :chat_completion, fn _messages, _opts ->
+    stub(MockLLMRouter, :chat_completion, fn _messages, _opts, _user_id ->
       {:ok,
        %{
          id: "sentinel-stub",

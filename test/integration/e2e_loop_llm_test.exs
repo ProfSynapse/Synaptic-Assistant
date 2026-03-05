@@ -89,12 +89,12 @@ defmodule Assistant.Integration.E2ELoopLLMTest do
     Assistant.Integration.MockCallRecorder.clear()
 
     # Set Mox to global mode so dynamically spawned sub-agent Task processes
-    # can access the MockLLMClient stub. The Sentinel uses @llm_client
-    # (MockLLMClient in test env) for security gate checks inside sub-agent
+    # can access the MockLLMRouter stub. The Sentinel uses @llm_router
+    # (MockLLMRouter in test env) for security gate checks inside sub-agent
     # Task processes that are not in the test process's caller chain.
     Mox.set_mox_global(self())
 
-    stub(MockLLMClient, :chat_completion, fn _messages, _opts ->
+    stub(MockLLMRouter, :chat_completion, fn _messages, _opts, _user_id ->
       {:ok,
        %{
          id: "sentinel-stub",

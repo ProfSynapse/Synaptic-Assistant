@@ -2,6 +2,7 @@
 #
 # Defines mock modules for behaviours used across the application.
 # These mocks are configured as the default implementations in config/test.exs
-# so that @llm_client compile_env resolves to the mock in test builds.
+# so that @llm_client / @llm_router compile_env resolves to the mock in test builds.
 
 Mox.defmock(MockLLMClient, for: Assistant.Behaviours.LLMClient)
+Mox.defmock(MockLLMRouter, for: Assistant.Behaviours.LLMRouter)

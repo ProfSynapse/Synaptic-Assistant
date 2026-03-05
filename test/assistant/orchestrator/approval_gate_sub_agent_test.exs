@@ -5,7 +5,7 @@
 #
 # Uses Bypass to intercept OpenRouter HTTP calls so the sub-agent LLM
 # returns a controlled use_skill tool call for email.send. The Sentinel
-# is stubbed via MockLLMClient (auto-approve). No real LLM calls.
+# is stubbed via MockLLMRouter (auto-approve). No real LLM calls.
 #
 # Tests verify:
 #   1. GenServer transitions to :awaiting_orchestrator with [APPROVAL_REQUIRED]
@@ -51,10 +51,10 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
 
     ensure_config_loader_started()
 
-    # Stub Sentinel (MockLLMClient) — auto-approve all security checks
+    # Stub Sentinel (MockLLMRouter) — auto-approve all security checks
     Mox.set_mox_global(self())
 
-    stub(MockLLMClient, :chat_completion, fn _messages, _opts ->
+    stub(MockLLMRouter, :chat_completion, fn _messages, _opts, _user_id ->
       {:ok,
        %{
          id: "sentinel-stub",

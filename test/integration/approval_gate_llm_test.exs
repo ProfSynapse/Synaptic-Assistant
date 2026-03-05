@@ -10,7 +10,7 @@
 #           -> Skill executes (fails: no Gmail token) -> Orchestrator reports result
 #
 # These tests are 1:1 production emulation. The ONLY mock is the Sentinel
-# (MockLLMClient) which auto-approves security checks. All orchestrator and
+# (MockLLMRouter) which auto-approves security checks. All orchestrator and
 # sub-agent LLM calls go through OpenRouter with real API keys.
 #
 # Related files:
@@ -72,11 +72,11 @@ defmodule Assistant.Integration.ApprovalGateLLMTest do
 
     ensure_config_loader_started()
 
-    # Stub Sentinel (MockLLMClient) — auto-approve all security gate checks.
+    # Stub Sentinel (MockLLMRouter) — auto-approve all security gate checks.
     # The Sentinel runs in sub-agent Task processes, so we need global mode.
     Mox.set_mox_global(self())
 
-    stub(MockLLMClient, :chat_completion, fn _messages, _opts ->
+    stub(MockLLMRouter, :chat_completion, fn _messages, _opts, _user_id ->
       {:ok,
        %{
          id: "sentinel-stub",
