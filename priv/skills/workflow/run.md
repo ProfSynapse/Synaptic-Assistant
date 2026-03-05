@@ -2,6 +2,7 @@
 name: "workflow.run"
 description: "Run a workflow immediately, bypassing its cron schedule."
 handler: "Assistant.Skills.Workflow.Run"
+requires_approval: true
 tags:
   - workflow
   - write

@@ -2,7 +2,7 @@
 name: "hubspot.create_deal"
 description: "Create a new deal in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Deals.Create"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm

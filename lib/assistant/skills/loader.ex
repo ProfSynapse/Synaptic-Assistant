@@ -167,6 +167,7 @@ defmodule Assistant.Skills.Loader do
         tags: frontmatter["tags"] || [],
         author: frontmatter["author"],
         timezone: frontmatter["timezone"],
+        requires_approval: frontmatter["requires_approval"] == true,
         parameters: parse_parameters(frontmatter["parameters"]),
         body: body,
         path: path

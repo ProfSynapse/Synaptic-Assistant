@@ -2,7 +2,7 @@
 name: "hubspot.delete_deal"
 description: "Delete (archive) a deal in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Deals.Delete"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm

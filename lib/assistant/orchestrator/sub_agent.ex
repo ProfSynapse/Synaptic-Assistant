@@ -66,7 +66,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   alias Assistant.Config.{Loader, PromptLoader}
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.LLMRouter
-  alias Assistant.Orchestrator.{GoogleContext, LLMHelpers, Limits, Sentinel}
+  alias Assistant.Orchestrator.{ApprovalGate, GoogleContext, LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Executor, Registry, Result}
 
@@ -205,7 +205,8 @@ defmodule Assistant.Orchestrator.SubAgent do
     opts = [
       dispatch_params: dispatch_params,
       dep_results: dep_results,
-      engine_state: engine_state
+      engine_state: engine_state,
+      caller_pid: self()
     ]
 
     # Use GenServer.start (NOT start_link) to avoid linking the GenServer
@@ -282,7 +283,9 @@ defmodule Assistant.Orchestrator.SubAgent do
       loop_task: nil,
       loop_ref: nil,
       # Interrupt flag — when set, the loop finishes current tool call then exits
-      interrupted: false
+      interrupted: false,
+      # The process waiting in wait_for_completion (notified on pause)
+      caller_pid: Keyword.get(opts, :caller_pid)
     }
 
     # Start the LLM loop in the next tick so init returns fast
@@ -387,14 +390,21 @@ defmodule Assistant.Orchestrator.SubAgent do
       reason: reason
     )
 
-    {:noreply,
-     %{
-       state
-       | status: :awaiting_orchestrator,
-         awaiting_reason: reason,
-         awaiting_partial_history: partial_history,
-         pending_help_tc: help_tc
-     }}
+    new_state = %{
+      state
+      | status: :awaiting_orchestrator,
+        awaiting_reason: reason,
+        awaiting_partial_history: partial_history,
+        pending_help_tc: help_tc
+    }
+
+    # Notify the caller blocked in wait_for_completion so it returns immediately
+    # instead of waiting for the 120s timeout.
+    if state.caller_pid do
+      send(state.caller_pid, {:agent_paused, build_final_result_map(new_state)})
+    end
+
+    {:noreply, new_state}
   end
 
   @impl true
@@ -619,11 +629,23 @@ defmodule Assistant.Orchestrator.SubAgent do
             extract_function_name(tc) == "request_help"
           end)
 
-        # Execute skill calls
-        {results, final_agent_state} =
-          Enum.map_reduce(skill_calls, new_agent_state, fn tc, acc_state ->
-            result = execute_single_tool(tc, dispatch_params, engine_state)
-            {result, acc_state}
+        # Pre-compute how many approval-gated skills are in this batch so the
+        # approval reason can indicate "1 of N" to the user.
+        approval_gated_count = count_approval_gated_skills(skill_calls)
+
+        # Execute skill calls (approval_seq tracks position within gated skills)
+        {results, {final_agent_state, _final_seq}} =
+          Enum.map_reduce(skill_calls, {new_agent_state, 1}, fn tc, {acc_state, approval_seq} ->
+            batch_info = %{count: approval_gated_count, seq: approval_seq}
+
+            result =
+              execute_single_tool(tc, dispatch_params, engine_state, genserver_pid, batch_info)
+
+            # Increment sequence when we pass an approval-gated skill
+            next_seq =
+              if is_approval_gated_tool_call?(tc), do: approval_seq + 1, else: approval_seq
+
+            {result, {acc_state, next_seq}}
           end)
 
         # Report tool call count back to GenServer
@@ -728,13 +750,13 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_single_tool(tc, dispatch_params, engine_state) do
+  defp execute_single_tool(tc, dispatch_params, engine_state, genserver_pid, batch_info) do
     name = extract_function_name(tc)
     args = extract_function_args(tc)
 
     case name do
       "use_skill" ->
-        execute_use_skill(tc, args, dispatch_params, engine_state)
+        execute_use_skill(tc, args, dispatch_params, engine_state, genserver_pid, batch_info)
 
       "request_help" ->
         # Handled upstream in execute_tool_calls; this is a fallback
@@ -745,7 +767,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_use_skill(tc, args, dispatch_params, engine_state) do
+  defp execute_use_skill(tc, args, dispatch_params, engine_state, genserver_pid, batch_info) do
     skill_name = args["skill"]
 
     # Strip empty strings the LLM sends for optional typed parameters.
@@ -791,7 +813,34 @@ defmodule Assistant.Orchestrator.SubAgent do
                user_id: engine_state[:user_id]
              ) do
           {:ok, :approved} ->
-            execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state)
+            # Look up skill definition early so the approval gate can inspect it
+            case Registry.lookup(skill_name) do
+              {:ok, %{requires_approval: true} = skill_def} ->
+                approval_index =
+                  if batch_info.count > 1, do: {batch_info.seq, batch_info.count}, else: nil
+
+                case ApprovalGate.check(skill_name, skill_args,
+                       skill_def: skill_def,
+                       dispatch_params: dispatch_params,
+                       genserver_pid: genserver_pid,
+                       approval_index: approval_index
+                     ) do
+                  :approved ->
+                    execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
+
+                  {:denied, message} ->
+                    {tc, message}
+
+                  {:timeout, message} ->
+                    {tc, message}
+                end
+
+              {:ok, skill_def} ->
+                execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
+
+              {:error, :not_found} ->
+                {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
+            end
 
           {:ok, {:rejected, reason}} ->
             Logger.warning("Sentinel rejected sub-agent action",
@@ -805,40 +854,33 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state) do
+  defp execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state) do
     # Level 1: Check skill circuit breaker
     case Limits.check_skill(skill_name) do
       {:ok, :closed} ->
-        # Look up the skill and execute
-        case Registry.lookup(skill_name) do
-          {:ok, skill_def} ->
-            skill_context = build_skill_context(dispatch_params, engine_state)
+        skill_context = build_skill_context(dispatch_params, engine_state)
 
-            # Lazy auth: if this is a Google skill and the user has no token,
-            # generate a magic link instead of executing.
-            case maybe_require_google_auth(skill_name, skill_context, engine_state) do
-              :ok ->
-                case execute_handler(skill_def, skill_args, skill_context) do
-                  {:ok, %Result{} = result} ->
-                    Limits.record_skill_success(skill_name)
-                    {tc, Result.truncate_content(result.content)}
+        # Lazy auth: if this is a Google skill and the user has no token,
+        # generate a magic link instead of executing.
+        case maybe_require_google_auth(skill_name, skill_context, engine_state) do
+          :ok ->
+            case execute_handler(skill_def, skill_args, skill_context) do
+              {:ok, %Result{} = result} ->
+                Limits.record_skill_success(skill_name)
+                {tc, Result.truncate_content(result.content)}
 
-                  {:error, reason} ->
-                    Limits.record_skill_failure(skill_name)
-                    {tc, "Skill execution failed: #{inspect(reason)}"}
-                end
-
-              {:needs_auth, magic_link_url} ->
-                channel = engine_state[:channel]
-                {tc, format_needs_auth_message(magic_link_url, channel)}
-
-              {:needs_auth_rate_limited} ->
-                {tc,
-                 "Authorization already in progress. Please check your messages for the link."}
+              {:error, reason} ->
+                Limits.record_skill_failure(skill_name)
+                {tc, "Skill execution failed: #{inspect(reason)}"}
             end
 
-          {:error, :not_found} ->
-            {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
+          {:needs_auth, magic_link_url} ->
+            channel = engine_state[:channel]
+            {tc, format_needs_auth_message(magic_link_url, channel)}
+
+          {:needs_auth_rate_limited} ->
+            {tc,
+             "Authorization already in progress. Please check your messages for the link."}
         end
 
       {:error, :circuit_open} ->
@@ -1030,9 +1072,18 @@ defmodule Assistant.Orchestrator.SubAgent do
           {:ok, skill_def} ->
             body_preview = String.slice(skill_def.body, 0, 2000)
 
+            approval_note =
+              if skill_def.requires_approval do
+                "\n\n> **Requires user approval** — this skill will pause for " <>
+                  "orchestrator/user approval before executing. You may receive " <>
+                  "feedback or cancellation."
+              else
+                ""
+              end
+
             """
             ### #{skill_def.name}
-            #{skill_def.description}
+            #{skill_def.description}#{approval_note}
 
             #{body_preview}\
             """
@@ -1142,11 +1193,11 @@ defmodule Assistant.Orchestrator.SubAgent do
   defp compute_context_file_budget(dispatch_params) do
     model_info =
       case dispatch_params[:model_override] do
-        nil ->
-          Loader.model_for(:sub_agent, user_id: dispatch_params[:user_id])
-
-        model_id ->
+        model_id when is_binary(model_id) and model_id != "" ->
           Loader.model_for(:sub_agent, id: model_id)
+
+        _ ->
+          Loader.model_for(:sub_agent, user_id: dispatch_params[:user_id])
       end
 
     max_context = (model_info && model_info.max_context_tokens) || 200_000
@@ -1466,6 +1517,12 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp wait_for_completion(_agent_id, monitor_ref) do
     receive do
+      {:agent_paused, %{status: :awaiting_orchestrator} = result_map} ->
+        # Agent hit approval gate or request_help — return immediately so the
+        # orchestrator loop can see the awaiting_orchestrator status and act.
+        Process.demonitor(monitor_ref, [:flush])
+        result_map
+
       {:DOWN, ^monitor_ref, :process, _pid,
        {:shutdown, {:error, {:context_budget_exceeded, _}} = error}} ->
         # Context budget exceeded — return the error directly
@@ -1505,13 +1562,22 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   defp build_final_result_map(state) do
-    %{
+    base = %{
       status: state.status,
       result: extract_result_text(state.result),
       tool_calls_used: state.tool_calls_used,
       duration_ms: state.duration_ms,
       messages: state.messages
     }
+
+    # Include awaiting details so get_agent_results can surface them
+    if state.status == :awaiting_orchestrator do
+      base
+      |> Map.put(:reason, state.awaiting_reason)
+      |> Map.put(:partial_history, state.awaiting_partial_history)
+    else
+      base
+    end
   end
 
   defp extract_result_text({:error, {:context_budget_exceeded, details}}) do
@@ -1594,8 +1660,11 @@ defmodule Assistant.Orchestrator.SubAgent do
   defp build_model_opts(dispatch_params, context, engine_state) do
     model =
       case dispatch_params[:model_override] do
-        nil -> LLMHelpers.resolve_model(:sub_agent, user_id: engine_state[:user_id])
-        override -> override
+        override when is_binary(override) and override != "" ->
+          override
+
+        _ ->
+          LLMHelpers.resolve_model(:sub_agent, user_id: engine_state[:user_id])
       end
 
     LLMHelpers.build_llm_opts(context.tools, model)
@@ -1605,6 +1674,29 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp via_tuple(agent_id) do
     {:via, Elixir.Registry, {Assistant.SubAgent.Registry, agent_id}}
+  end
+
+  # --- Approval Gate Helpers ---
+
+  # Counts how many tool calls in a batch target approval-gated skills.
+  # Used to populate the "Action X of N" indicator in the approval reason.
+  defp count_approval_gated_skills(skill_calls) do
+    Enum.count(skill_calls, &is_approval_gated_tool_call?/1)
+  end
+
+  defp is_approval_gated_tool_call?(tc) do
+    case extract_function_name(tc) do
+      "use_skill" ->
+        skill_name = extract_function_args(tc)["skill"]
+
+        case skill_name && Registry.lookup(skill_name) do
+          {:ok, %{requires_approval: true}} -> true
+          _ -> false
+        end
+
+      _ ->
+        false
+    end
   end
 
   # --- Response Parsing Helpers (delegated to LLMHelpers) ---

@@ -2,7 +2,7 @@
 name: "hubspot.update_contact"
 description: "Update an existing contact in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Contacts.Update"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm

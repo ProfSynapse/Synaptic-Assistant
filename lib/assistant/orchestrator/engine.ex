@@ -199,15 +199,23 @@ defmodule Assistant.Orchestrator.Engine do
       message_length: String.length(message)
     )
 
-    # Interrupt any still-running sub-agents from the previous turn
+    # Interrupt any still-running sub-agents from the previous turn,
+    # but preserve agents awaiting approval (they need to survive across turns).
     interrupt_active_agents(state)
+
+    # Preserve awaiting_orchestrator agents across turns so the orchestrator
+    # can resume them via send_agent_update(approved: true/false).
+    preserved_agents =
+      Map.filter(state.dispatched_agents, fn {_id, result} ->
+        result[:status] == :awaiting_orchestrator
+      end)
 
     # Reset per-turn state for each new user message
     state =
       state
       |> Map.put(:turn_state, CircuitBreaker.new_turn_state())
       |> Map.put(:iteration_count, 0)
-      |> Map.put(:dispatched_agents, %{})
+      |> Map.put(:dispatched_agents, preserved_agents)
       |> Map.put(:agent_tasks, %{})
       |> Map.put(:skipped, [])
 
@@ -397,13 +405,23 @@ defmodule Assistant.Orchestrator.Engine do
                 status = agent_result[:status] || :completed
                 result_text = agent_result[:result] || "Agent completed."
 
+                # Surface the approval reason directly so the orchestrator can
+                # present it to the user without an extra get_agent_results call.
+                approval_section =
+                  if status == :awaiting_orchestrator and is_binary(agent_result[:reason]) do
+                    "\n\n#{agent_result[:reason]}"
+                  else
+                    ""
+                  end
+
                 %{
                   role: "tool",
                   tool_call_id: tc.id,
                   content:
                     "Agent \"#{params.agent_id}\" dispatched and #{status}. " <>
                       "Use get_agent_results to inspect full results.\n\n" <>
-                      "Summary: #{result_text}"
+                      "Summary: #{result_text}" <>
+                      approval_section
                 }
               end)
 
@@ -725,7 +743,9 @@ defmodule Assistant.Orchestrator.Engine do
     Enum.each(state.dispatched_agents, fn {agent_id, result} ->
       status = result[:status]
 
-      if status not in [:completed, :failed, :timeout, :skipped] do
+      # Skip awaiting_orchestrator agents — they're paused for approval and
+      # need to survive across turns so the orchestrator can resume them.
+      if status not in [:completed, :failed, :timeout, :skipped, :awaiting_orchestrator] do
         case SubAgent.interrupt(agent_id) do
           :ok ->
             Logger.debug("Interrupted sub-agent",

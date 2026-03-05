@@ -22,6 +22,7 @@ defmodule Assistant.Skills.SkillDefinition do
     * `:tags` - Searchable tags for skill discovery
     * `:author` - Who created the skill (optional, for custom skills)
     * `:timezone` - Default timezone override for scheduled execution (optional)
+    * `:requires_approval` - Whether this skill requires user approval before execution (default false)
     * `:parameters` - Typed parameter definitions from YAML frontmatter (list of maps)
     * `:body` - Raw markdown body (everything after YAML frontmatter)
     * `:path` - Absolute filesystem path to the source .md file
@@ -36,6 +37,7 @@ defmodule Assistant.Skills.SkillDefinition do
           tags: [String.t()],
           author: String.t() | nil,
           timezone: String.t() | nil,
+          requires_approval: boolean(),
           parameters: [map()],
           body: String.t(),
           path: String.t()
@@ -53,6 +55,7 @@ defmodule Assistant.Skills.SkillDefinition do
     :body,
     :path,
     tags: [],
+    requires_approval: false,
     parameters: []
   ]
 end

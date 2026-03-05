@@ -2,7 +2,7 @@
 name: "hubspot.create_contact"
 description: "Create a new contact in HubSpot CRM."
 handler: "Assistant.Skills.HubSpot.Contacts.Create"
-confirm: true
+requires_approval: true
 tags:
   - hubspot
   - crm
