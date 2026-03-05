@@ -3,8 +3,6 @@ defmodule AssistantWeb.GoogleChatControllerTest do
 
   alias AssistantWeb.GoogleChatController
 
-  @thinking_message "Thinking..."
-
   describe "event/2 async dispatch" do
     test "returns v1 thinking response immediately for MESSAGE event", %{conn: conn} do
       conn =
@@ -12,7 +10,8 @@ defmodule AssistantWeb.GoogleChatControllerTest do
         |> put_req_header("content-type", "application/json")
         |> GoogleChatController.event(v1_message_event())
 
-      assert json_response(conn, 200) == %{"text" => @thinking_message}
+      %{"text" => text} = json_response(conn, 200)
+      assert is_binary(text) and text != ""
     end
 
     test "returns v2 hostAppDataAction envelope for MESSAGE event", %{conn: conn} do
@@ -21,16 +20,17 @@ defmodule AssistantWeb.GoogleChatControllerTest do
         |> put_req_header("content-type", "application/json")
         |> GoogleChatController.event(v2_message_event())
 
-      assert json_response(conn, 200) ==
-               %{
-                 "hostAppDataAction" => %{
-                   "chatDataAction" => %{
-                     "createMessageAction" => %{
-                       "message" => %{"text" => @thinking_message}
-                     }
-                   }
-                 }
-               }
+      %{
+        "hostAppDataAction" => %{
+          "chatDataAction" => %{
+            "createMessageAction" => %{
+              "message" => %{"text" => text}
+            }
+          }
+        }
+      } = json_response(conn, 200)
+
+      assert is_binary(text) and text != ""
     end
   end
 

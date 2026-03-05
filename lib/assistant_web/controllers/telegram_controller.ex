@@ -30,7 +30,9 @@ defmodule AssistantWeb.TelegramController do
 
   alias Assistant.Channels.Dispatcher
   alias Assistant.Channels.Telegram, as: TelegramAdapter
+  alias Assistant.Channels.ThinkingMessages
   alias Assistant.Integrations.Telegram.AccountLink
+  alias Assistant.Integrations.Telegram.Client, as: TelegramClient
 
   require Logger
 
@@ -59,6 +61,7 @@ defmodule AssistantWeb.TelegramController do
             )
 
             Dispatcher.dispatch(TelegramAdapter, message)
+            send_thinking_indicator(message.space_id)
 
           true ->
             Logger.info("Ignoring unauthorized Telegram message",
@@ -106,4 +109,12 @@ defmodule AssistantWeb.TelegramController do
   end
 
   defp telegram_start?(message), do: message.slash_command == "/start"
+
+  # Fire-and-forget thinking indicator — never blocks or crashes the controller
+  defp send_thinking_indicator(chat_id) do
+    Task.start(fn ->
+      TelegramClient.send_chat_action(chat_id, "typing")
+      TelegramClient.send_message(chat_id, ThinkingMessages.random(), parse_mode: nil)
+    end)
+  end
 end

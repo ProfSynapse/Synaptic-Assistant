@@ -34,6 +34,9 @@ defmodule AssistantWeb.SlackController do
 
   alias Assistant.Channels.Dispatcher
   alias Assistant.Channels.Slack, as: SlackAdapter
+  alias Assistant.Channels.ThinkingMessages
+  alias Assistant.IntegrationSettings
+  alias Assistant.Integrations.Slack.Client, as: SlackClient
 
   require Logger
 
@@ -81,6 +84,7 @@ defmodule AssistantWeb.SlackController do
         )
 
         Dispatcher.dispatch(SlackAdapter, message)
+        send_thinking_message(event_data)
 
         # Slack expects 200 within 3 seconds — always acknowledge
         json(conn, %{})
@@ -105,5 +109,22 @@ defmodule AssistantWeb.SlackController do
       [num] -> num
       _ -> nil
     end
+  end
+
+  # Fire-and-forget thinking message — never blocks or crashes the controller.
+  # Uses raw event_data to get the unscoped channel_id for the Slack API.
+  defp send_thinking_message(event_data) do
+    Task.start(fn ->
+      with bot_token when is_binary(bot_token) <- IntegrationSettings.get(:slack_bot_token),
+           channel_id when is_binary(channel_id) <- event_data["channel"] do
+        opts =
+          case event_data["thread_ts"] do
+            nil -> []
+            thread_ts -> [thread_ts: thread_ts]
+          end
+
+        SlackClient.post_message(bot_token, channel_id, ThinkingMessages.random(), opts)
+      end
+    end)
   end
 end

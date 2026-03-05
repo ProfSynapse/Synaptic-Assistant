@@ -42,6 +42,7 @@ defmodule AssistantWeb.GoogleChatController do
 
   alias Assistant.Channels.Dispatcher
   alias Assistant.Channels.GoogleChat, as: ChatAdapter
+  alias Assistant.Channels.ThinkingMessages
   alias Assistant.Repo
   alias Assistant.Schemas.UserIdentity
 
@@ -51,8 +52,6 @@ defmodule AssistantWeb.GoogleChatController do
   Hello! I'm your AI assistant. I can help you with tasks, answer questions, \
   search your files, and more. Just send me a message to get started.\
   """
-
-  @thinking_message "Thinking..."
 
   @doc """
   Handle a Google Chat webhook event.
@@ -117,6 +116,6 @@ defmodule AssistantWeb.GoogleChatController do
     )
 
     Dispatcher.dispatch(ChatAdapter, message)
-    json(conn, ChatAdapter.wrap_response(@thinking_message, params))
+    json(conn, ChatAdapter.wrap_response(ThinkingMessages.random(), params))
   end
 end
