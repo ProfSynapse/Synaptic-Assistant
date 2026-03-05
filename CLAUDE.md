@@ -6,9 +6,9 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume b8acb651-84a0-473f-b0c4-3d7983b607ca`
-- Team: `pact-b8acb651`
-- Started: 2026-03-04 12:10:54 UTC
+- Resume: `claude --resume 21d70a72-99b4-4fde-8cbc-2394ee7e6ad0`
+- Team: `pact-21d70a72`
+- Started: 2026-03-05 17:48:05 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -24,6 +24,7 @@ All helper extraction follows this hierarchy — do NOT re-duplicate functions:
 - `Skills.Helpers` — cross-domain: `parse_limit/3` (value, default, max)
 - `Email.Helpers` — email-domain: `has_newlines?`, `truncate_log`, `truncate`, `full_mode?`, `parse_limit/1` (delegates to Skills.Helpers)
 - `Calendar.Helpers` — calendar-domain: `normalize_datetime`, `parse_attendees`, `maybe_put`, `parse_limit/1` (delegates to Skills.Helpers)
+- `HubSpot.Helpers` — hubspot-domain: `parse_properties_json`, `format_object`, `format_object_list`, `resolve_api_key`, `handle_error`, `contact_fields/0`, `company_fields/0`, `deal_fields/0`, `parse_limit/1` (delegates to Skills.Helpers)
 - `Workflow.Helpers` — workflow-domain: `resolve_workflows_dir/0`
 - All helper modules use `@moduledoc false`
 
@@ -35,7 +36,7 @@ case Map.get(context.integrations, :gmail) do
   gmail -> ...
 end
 ```
-This applies to `:gmail`, `:calendar`, `:drive`. The fallback-to-real-module pattern was removed in Phase 4.
+This applies to `:gmail`, `:calendar`, `:drive`, `:hubspot`. The fallback-to-real-module pattern was removed in Phase 4.
 
 ### Workflow File Security
 All workflow skills that take a `name` flag must validate with `~r/^[a-z][a-z0-9_-]*$/` before path construction. `WorkflowWorker.resolve_path/1` rejects absolute paths, `../` traversal, and symlinks as a safety net — but callers must also validate.
@@ -107,6 +108,27 @@ Single dispatch pipeline for all channels (Telegram, Discord, Slack, Google Chat
 - **Migrations**: 3 new — `create_user_identities`, `update_conversations_for_unified` (channel, thread_id, last_active_at), `backfill_user_identities`
 - **User schema**: `external_id` and `channel` moved to `@optional_fields` — identity now authoritative in `user_identities`
 
+### HubSpot CRM Connector Architecture (PR #37)
+18 skills (6 per object: contacts, companies, deals) with CRUD + search + list_recent. Key patterns:
+- **Auth**: Single org-wide Bearer token via `IntegrationSettings.get(:hubspot_api_key)` — resolved in each handler (NOT context builder). No per-user OAuth.
+- **Client DRY pattern**: Generic `crm_create/3`, `crm_get/4`, `crm_update/4`, `crm_delete/3`, `crm_search/7`, `crm_list/5` private functions — all 3 CRM types share identical REST patterns (`/crm/v3/objects/{type}`)
+- **Registry**: `:hubspot => HubSpot.Client` in `Integrations.Registry.default_integrations/0`
+- **ID validation**: All get/update/delete handlers validate `String.match?(id, ~r/^\d+$/)` before API call
+- **Pagination**: `crm_list/5` accepts optional `after` cursor; returns `%{results: [...], next: cursor_or_nil}`
+- **Retry**: `retry: :transient`, `max_retries: 3`, `retry_delay: 500 * attempt` on all CRM operations (NOT health_check)
+- **Multi-filter search**: `crm_search_multi/5` accepts list of `{property, operator, value}` tuples (AND logic); simple `query+search_by` still works
+- **Confirm gate**: `confirm: true` on all mutating skill definitions (create, update, delete)
+- **Configurable base_url**: `Application.get_env(:assistant, :hubspot_api_base_url)` for Bypass test mocking
+
+### Admin-Only Model Management + LLM Router (PR #45)
+Credential-based LLM routing and admin-only model/skill management. Key patterns:
+- **LLMRouter.route/2**: 3-tier priority: (1) user OpenRouter key → OpenRouter, (2) user OpenAI creds → Direct OpenAI (strip `openai/` prefix), (3) neither → OpenRouter with nil api_key (client falls back to system key). No guessing/parsing — credentials are source of truth.
+- **ModelDefaults admin-only**: `mode/1` returns `:global` for admins, `:readonly` for all others. `:personal` mode removed entirely. `save_defaults/2` guards on `is_admin: true`.
+- **Fallback model cascade**: `ConfigLoader.resolve_fast_model/2` shared helper — tries role-specific → compaction → `:model_default_fallback` (registry) → `models_by_tier(:fast)`. Used by sentinel + turn_classifier.
+- **3-layer skill permissions**: `SkillPermissions.enabled_for_user?/2` — `global_enabled AND user_enabled AND connector_enabled`. Admin gate on `toggle_skill_permission` LiveView event.
+- **Per-user connectors**: `settings_user_connector_states` table (FK to settings_users) + `user_skill_overrides` table. Upsert pattern with unique indexes.
+- **Elixir 1.19 gotcha**: Schema modules need `@type t :: %__MODULE__{}` or compilation fails with `type t/0 undefined`.
+
 ### Phase Status
 - Phase 1-4 complete and merged (PR #9). Branch: `main`.
 - Phase 4 covers: Gmail (5 skills), Calendar (3 skills), Workflow scheduler (4 skills + WorkflowWorker + QuantumLoader).
@@ -116,3 +138,5 @@ Single dispatch pipeline for all channels (Telegram, Discord, Slack, Google Chat
 - Phase 12 (PR #29): Connection validation — real API handshakes for integration status.
 - PR #31: Unified cross-channel conversation architecture (UserResolver, Dispatcher, ReplyRouter, CircuitBreaker, ConversationArchiver).
 - PR #32: Cross-channel OAuth key resolution fix — CrossChannelBridge module, ensure_linked_user dedup, data repair migration.
+- PR #37: HubSpot CRM connector — 18 skills (contacts, companies, deals) with pagination, retry, multi-filter search.
+- PR #45: Admin-only model management, credential-based LLM routing, fallback model cascade, 3-layer skill permissions, per-user connector states.
