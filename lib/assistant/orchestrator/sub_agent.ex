@@ -622,7 +622,7 @@ defmodule Assistant.Orchestrator.SubAgent do
         # Execute skill calls
         {results, final_agent_state} =
           Enum.map_reduce(skill_calls, new_agent_state, fn tc, acc_state ->
-            result = execute_single_tool(tc, dispatch_params, engine_state)
+            result = execute_single_tool(tc, dispatch_params, engine_state, genserver_pid)
             {result, acc_state}
           end)
 
@@ -728,13 +728,13 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_single_tool(tc, dispatch_params, engine_state) do
+  defp execute_single_tool(tc, dispatch_params, engine_state, genserver_pid) do
     name = extract_function_name(tc)
     args = extract_function_args(tc)
 
     case name do
       "use_skill" ->
-        execute_use_skill(tc, args, dispatch_params, engine_state)
+        execute_use_skill(tc, args, dispatch_params, engine_state, genserver_pid)
 
       "request_help" ->
         # Handled upstream in execute_tool_calls; this is a fallback
@@ -745,7 +745,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_use_skill(tc, args, dispatch_params, engine_state) do
+  defp execute_use_skill(tc, args, dispatch_params, engine_state, genserver_pid) do
     skill_name = args["skill"]
 
     # Strip empty strings the LLM sends for optional typed parameters.
@@ -791,7 +791,20 @@ defmodule Assistant.Orchestrator.SubAgent do
                user_id: engine_state[:user_id]
              ) do
           {:ok, :approved} ->
-            execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state)
+            # Look up skill definition early so the approval gate can inspect it
+            case Registry.lookup(skill_name) do
+              {:ok, %{requires_approval: true} = skill_def} ->
+                handle_approval_gate(
+                  tc, skill_name, skill_args, skill_def,
+                  dispatch_params, engine_state, genserver_pid
+                )
+
+              {:ok, skill_def} ->
+                execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
+
+              {:error, :not_found} ->
+                {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
+            end
 
           {:ok, {:rejected, reason}} ->
             Logger.warning("Sentinel rejected sub-agent action",
@@ -805,40 +818,96 @@ defmodule Assistant.Orchestrator.SubAgent do
     end
   end
 
-  defp execute_skill_call(tc, skill_name, skill_args, dispatch_params, engine_state) do
+  defp handle_approval_gate(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state, genserver_pid) do
+    reason = build_approval_reason(skill_name, skill_args, skill_def)
+    synthetic_tc = %{id: "approval_#{System.unique_integer([:positive])}"}
+
+    Logger.info("Approval gate triggered — pausing sub-agent",
+      agent_id: dispatch_params.agent_id,
+      skill: skill_name
+    )
+
+    # Pause using existing mechanism
+    send(genserver_pid, {:loop_paused, reason, nil, synthetic_tc})
+
+    # Block until orchestrator resumes via send_agent_update(approved: bool)
+    receive do
+      {:resume, %{approved: true}} ->
+        execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
+
+      {:resume, %{approved: false, message: feedback}} when is_binary(feedback) ->
+        {tc,
+         "APPROVAL_DENIED: User requested changes: #{feedback}\n\n" <>
+           "Adjust your approach based on the feedback and try again."}
+
+      {:resume, %{approved: false}} ->
+        {tc, "APPROVAL_DENIED: User cancelled this action."}
+
+      {:resume, _update} ->
+        # Fallback for resume without approved field (e.g., plain message update)
+        {tc, "APPROVAL_DENIED: Approval response was unclear. Action not executed."}
+    after
+      300_000 ->
+        Logger.warning("Approval gate timed out after 5 minutes",
+          agent_id: dispatch_params.agent_id,
+          skill: skill_name
+        )
+
+        {tc, "Approval request timed out (5 minutes). The action was not executed."}
+    end
+  end
+
+  defp build_approval_reason(skill_name, skill_args, skill_def) do
+    args_text =
+      skill_def.parameters
+      |> Enum.map(fn param ->
+        param_name = param[:name] || param["name"]
+        value = Map.get(skill_args, param_name, "(not provided)")
+        "  #{param_name}: #{value}"
+      end)
+      |> Enum.join("\n")
+
+    # Fall back to raw args if no parameters are defined in the skill
+    args_text =
+      if args_text == "" and map_size(skill_args) > 0 do
+        skill_args
+        |> Enum.map(fn {k, v} -> "  #{k}: #{v}" end)
+        |> Enum.join("\n")
+      else
+        args_text
+      end
+
+    "[APPROVAL_REQUIRED] Skill \"#{skill_name}\" requires user approval.\n\n" <>
+      "Proposed action:\n#{args_text}"
+  end
+
+  defp execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state) do
     # Level 1: Check skill circuit breaker
     case Limits.check_skill(skill_name) do
       {:ok, :closed} ->
-        # Look up the skill and execute
-        case Registry.lookup(skill_name) do
-          {:ok, skill_def} ->
-            skill_context = build_skill_context(dispatch_params, engine_state)
+        skill_context = build_skill_context(dispatch_params, engine_state)
 
-            # Lazy auth: if this is a Google skill and the user has no token,
-            # generate a magic link instead of executing.
-            case maybe_require_google_auth(skill_name, skill_context, engine_state) do
-              :ok ->
-                case execute_handler(skill_def, skill_args, skill_context) do
-                  {:ok, %Result{} = result} ->
-                    Limits.record_skill_success(skill_name)
-                    {tc, Result.truncate_content(result.content)}
+        # Lazy auth: if this is a Google skill and the user has no token,
+        # generate a magic link instead of executing.
+        case maybe_require_google_auth(skill_name, skill_context, engine_state) do
+          :ok ->
+            case execute_handler(skill_def, skill_args, skill_context) do
+              {:ok, %Result{} = result} ->
+                Limits.record_skill_success(skill_name)
+                {tc, Result.truncate_content(result.content)}
 
-                  {:error, reason} ->
-                    Limits.record_skill_failure(skill_name)
-                    {tc, "Skill execution failed: #{inspect(reason)}"}
-                end
-
-              {:needs_auth, magic_link_url} ->
-                channel = engine_state[:channel]
-                {tc, format_needs_auth_message(magic_link_url, channel)}
-
-              {:needs_auth_rate_limited} ->
-                {tc,
-                 "Authorization already in progress. Please check your messages for the link."}
+              {:error, reason} ->
+                Limits.record_skill_failure(skill_name)
+                {tc, "Skill execution failed: #{inspect(reason)}"}
             end
 
-          {:error, :not_found} ->
-            {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
+          {:needs_auth, magic_link_url} ->
+            channel = engine_state[:channel]
+            {tc, format_needs_auth_message(magic_link_url, channel)}
+
+          {:needs_auth_rate_limited} ->
+            {tc,
+             "Authorization already in progress. Please check your messages for the link."}
         end
 
       {:error, :circuit_open} ->
@@ -1030,9 +1099,18 @@ defmodule Assistant.Orchestrator.SubAgent do
           {:ok, skill_def} ->
             body_preview = String.slice(skill_def.body, 0, 2000)
 
+            approval_note =
+              if skill_def.requires_approval do
+                "\n\n> **Requires user approval** — this skill will pause for " <>
+                  "orchestrator/user approval before executing. You may receive " <>
+                  "feedback or cancellation."
+              else
+                ""
+              end
+
             """
             ### #{skill_def.name}
-            #{skill_def.description}
+            #{skill_def.description}#{approval_note}
 
             #{body_preview}\
             """

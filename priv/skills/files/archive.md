@@ -2,6 +2,7 @@
 name: "files.archive"
 description: "Move a file to the Archive folder in Google Drive."
 handler: "Assistant.Skills.Files.Archive"
+requires_approval: true
 tags:
   - files
   - archive

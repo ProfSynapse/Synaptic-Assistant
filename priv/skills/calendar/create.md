@@ -3,6 +3,7 @@ name: "calendar.create"
 description: "Create a new Google Calendar event."
 handler: "Assistant.Skills.Calendar.Create"
 confirm: true
+requires_approval: true
 tags:
   - calendar
   - write

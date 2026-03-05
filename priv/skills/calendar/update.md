@@ -3,6 +3,7 @@ name: "calendar.update"
 description: "Update an existing Google Calendar event."
 handler: "Assistant.Skills.Calendar.Update"
 confirm: true
+requires_approval: true
 tags:
   - calendar
   - write

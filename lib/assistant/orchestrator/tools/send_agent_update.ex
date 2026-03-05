@@ -54,12 +54,16 @@ defmodule Assistant.Orchestrator.Tools.SendAgentUpdate do
     %{
       name: "send_agent_update",
       description: """
-      Send an update to a paused sub-agent that called request_help. \
-      The agent must be in awaiting_orchestrator state (visible via \
-      get_agent_results). Provide instructions, additional skills, \
-      or context files to help the agent continue.
+      Send an update to a paused sub-agent. The agent must be in \
+      awaiting_orchestrator state (visible via get_agent_results).
 
-      At least one of message, skills, or context_files must be provided.\
+      For agents paused by request_help: provide instructions, additional \
+      skills, or context files to help the agent continue. At least one of \
+      message, skills, or context_files must be provided.
+
+      For agents paused by an approval gate ([APPROVAL_REQUIRED]): set \
+      approved=true to proceed or approved=false to deny/request changes \
+      (include feedback in message).\
       """,
       parameters: %{
         "type" => "object",
@@ -73,8 +77,15 @@ defmodule Assistant.Orchestrator.Tools.SendAgentUpdate do
           "message" => %{
             "type" => "string",
             "description" =>
-              "Instructions or information for the agent. This is injected " <>
-                "as the tool result for the agent's request_help call."
+              "Instructions or information for the agent. For approval gates, " <>
+                "include user feedback when denying (approved=false)."
+          },
+          "approved" => %{
+            "type" => "boolean",
+            "description" =>
+              "For approval-gated skills only. true = user approves, proceed " <>
+                "with execution. false = user denies or wants changes (include " <>
+                "feedback in message)."
           },
           "skills" => %{
             "type" => "array",
@@ -178,14 +189,16 @@ defmodule Assistant.Orchestrator.Tools.SendAgentUpdate do
     message = params["message"]
     skills = params["skills"]
     context_files = params["context_files"]
+    approved = params["approved"]
 
     has_message = is_binary(message) and message != ""
     has_skills = is_list(skills) and skills != []
     has_context_files = is_list(context_files) and context_files != []
+    has_approved = is_boolean(approved)
 
-    if not has_message and not has_skills and not has_context_files do
+    if not has_message and not has_skills and not has_context_files and not has_approved do
       {:error,
-       "At least one of message, skills, or context_files must be provided. " <>
+       "At least one of message, skills, context_files, or approved must be provided. " <>
          "The agent needs something to continue with."}
     else
       update =
@@ -193,6 +206,7 @@ defmodule Assistant.Orchestrator.Tools.SendAgentUpdate do
         |> maybe_put(:message, message, has_message)
         |> maybe_put(:skills, skills, has_skills)
         |> maybe_put(:context_files, context_files, has_context_files)
+        |> maybe_put(:approved, approved, has_approved)
 
       {:ok, update}
     end

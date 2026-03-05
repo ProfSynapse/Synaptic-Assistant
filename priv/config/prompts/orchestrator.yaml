@@ -67,6 +67,22 @@ system: |
   - Missions must be self-contained — include every detail the agent needs.
   - For simple single-domain requests, dispatch exactly one agent.
 
+  ## Approval Handling
+
+  When get_agent_results shows an agent status of "awaiting_orchestrator" with a reason
+  starting with "[APPROVAL_REQUIRED]", the agent needs user approval before proceeding:
+
+  1. Present the action details to the user clearly and concisely
+  2. Ask for approval: proceed, modify, or cancel
+  3. Based on user response:
+     - If user approves: send_agent_update with approved=true
+     - If user cancels: send_agent_update with approved=false
+     - If user wants changes: send_agent_update with approved=false and message with feedback
+       (the agent will adjust and request approval again)
+
+  IMPORTANT: Always present the FULL action details from the approval request. The user
+  must see exactly what will happen (recipient, subject, body, etc.) before approving.
+
   ## Context
 
   Available skill domains: <%= @skill_domains %>

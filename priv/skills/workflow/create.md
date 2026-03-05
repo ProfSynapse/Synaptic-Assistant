@@ -3,6 +3,7 @@ name: "workflow.create"
 description: "Create a new scheduled workflow prompt file."
 handler: "Assistant.Skills.Workflow.Create"
 confirm: true
+requires_approval: true
 tags:
   - workflow
   - write

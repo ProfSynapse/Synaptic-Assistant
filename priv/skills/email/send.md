@@ -2,6 +2,7 @@
 name: "email.send"
 description: "Send an email via Gmail."
 handler: "Assistant.Skills.Email.Send"
+requires_approval: true
 tags:
   - email
   - write
