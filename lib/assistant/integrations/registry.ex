@@ -28,6 +28,7 @@ defmodule Assistant.Integrations.Registry do
 
   alias Assistant.Integrations.Google.{Calendar, Drive, Gmail}
   alias Assistant.Integrations.Web.{HtmlExtractor, HttpFetcher}
+  alias Assistant.Integrations.HubSpot
   alias Assistant.Integrations.{OpenAI, OpenRouter}
 
   @doc """
@@ -41,6 +42,7 @@ defmodule Assistant.Integrations.Registry do
     - `:openai` → `Assistant.Integrations.OpenAI`
     - `:openrouter` → `Assistant.Integrations.OpenRouter`
     - `:web_fetcher` → `Assistant.Integrations.Web.HttpFetcher`
+    - `:hubspot` → `Assistant.Integrations.HubSpot.Client`
     - `:web_extractor` → `Assistant.Integrations.Web.HtmlExtractor`
   """
   @spec default_integrations() :: Assistant.Skills.Context.integrations()
@@ -49,6 +51,7 @@ defmodule Assistant.Integrations.Registry do
       drive: Drive,
       gmail: Gmail,
       calendar: Calendar,
+      hubspot: HubSpot.Client,
       openai: OpenAI,
       openrouter: OpenRouter,
       web_fetcher: HttpFetcher,
