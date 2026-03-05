@@ -686,7 +686,7 @@ defmodule Assistant.Memory.StoreTest do
 
       messages = [
         %{role: "user", content: "Search for X"},
-        %{role: "tool_call", tool_calls: %{"name" => "search", "args" => %{"q" => "X"}}},
+        %{role: "tool_call", tool_calls: [%{"name" => "search", "args" => %{"q" => "X"}}]},
         %{role: "tool_result", tool_results: %{"result" => "Found X"}},
         %{role: "assistant", content: "I found X for you"}
       ]

@@ -230,7 +230,10 @@ defmodule AssistantWeb.WorkspaceLive do
                               {item.source_label}
                             </.badge>
                           </div>
-                          <span>{format_time(item.inserted_at)}</span>
+                          <div class="sa-workspace-message-meta-right">
+                            <.channel_icon :if={item[:source_channel]} channel={item.source_channel} />
+                            <span>{format_time(item.inserted_at)}</span>
+                          </div>
                         </div>
                         <p class="sa-workspace-message-content">{item.content}</p>
                       </article>
@@ -448,6 +451,24 @@ defmodule AssistantWeb.WorkspaceLive do
     </div>
     """
   end
+
+  attr :channel, :string, required: true
+
+  defp channel_icon(assigns) do
+    icon_name = channel_icon_name(assigns.channel)
+    assigns = assign(assigns, :icon_name, icon_name)
+
+    ~H"""
+    <.icon :if={@icon_name} name={@icon_name} class="sa-channel-icon" />
+    """
+  end
+
+  defp channel_icon_name("google_chat"), do: "hero-channel-google-chat"
+  defp channel_icon_name("telegram"), do: "hero-channel-telegram"
+  defp channel_icon_name("slack"), do: "hero-channel-slack"
+  defp channel_icon_name("discord"), do: "hero-channel-discord"
+  defp channel_icon_name("in_app"), do: "hero-channel-in-app"
+  defp channel_icon_name(_), do: nil
 
   defp maybe_load_workspace(socket) do
     workspace_user_id = resolve_workspace_user_id(socket)

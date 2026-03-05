@@ -118,6 +118,7 @@ defmodule Assistant.Workspace do
        when role in ["user", "assistant"] do
     if present?(content) do
       source_label = source_label_for_message(role, message.metadata)
+      source_channel = source_channel_for_message(message.metadata)
 
       %{
         id: "message:#{message.id}",
@@ -125,7 +126,8 @@ defmodule Assistant.Workspace do
         role: if(role == "user", do: :user, else: :assistant),
         content: content,
         inserted_at: message.inserted_at,
-        source_label: source_label
+        source_label: source_label,
+        source_channel: source_channel
       }
     else
       nil
@@ -158,6 +160,18 @@ defmodule Assistant.Workspace do
   end
 
   defp source_label_for_message(_role, _metadata), do: nil
+
+  defp source_channel_for_message(metadata) do
+    source = source_map(metadata)
+    channel = source |> map_value(:channel) |> normalize_text()
+    kind = source |> map_value(:kind) |> normalize_text()
+
+    cond do
+      kind == "in_app" or channel == "in_app" -> "in_app"
+      is_binary(channel) -> channel
+      true -> nil
+    end
+  end
 
   defp source_map(%{} = metadata) do
     case map_value(metadata, :source) do

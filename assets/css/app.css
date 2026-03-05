@@ -1958,6 +1958,20 @@ a {
   min-width: 0;
 }
 
+.sa-workspace-message-meta-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.sa-channel-icon {
+  width: 14px;
+  height: 14px;
+  color: #8da4b5;
+  opacity: 0.7;
+}
+
 .sa-workspace-actor {
   font-weight: 700;
   text-transform: uppercase;

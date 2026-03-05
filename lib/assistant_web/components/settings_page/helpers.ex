@@ -96,7 +96,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       is_binary(content) and String.trim(content) != "" ->
         content
 
-      is_map(tool_calls) ->
+      is_list(tool_calls) and tool_calls != [] ->
         "Tool calls: " <> Jason.encode!(tool_calls)
 
       is_map(tool_results) ->

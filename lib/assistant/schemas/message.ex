@@ -15,7 +15,7 @@ defmodule Assistant.Schemas.Message do
   schema "messages" do
     field :role, :string
     field :content, :string
-    field :tool_calls, :map
+    field :tool_calls, {:array, :map}
     field :tool_results, :map
     field :metadata, :map, default: %{}
     field :token_count, :integer
