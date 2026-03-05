@@ -1,6 +1,7 @@
 defmodule AssistantWeb.Components.SettingsPage.Admin do
   # Settings page admin section component.
-  # Renders the allow list management, user card grid, and user detail view.
+  # Renders the allow list management, user card grid, user detail view,
+  # and admin-only model management (providers + role defaults).
   @moduledoc false
 
   use AssistantWeb, :html
@@ -28,6 +29,9 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
     </section>
 
     <section :if={@current_scope.settings_user.is_admin} class="space-y-6">
+      <.admin_model_providers {assigns} />
+      <.admin_role_defaults {assigns} />
+
       <div class="sa-card">
         <div>
           <h2>Allow List</h2>
@@ -207,6 +211,182 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
       />
     </section>
     """
+  end
+
+  defp admin_model_providers(assigns) do
+    ~H"""
+    <div class="sa-card">
+      <div class="sa-row" style="align-items: baseline;">
+        <h2>Model Providers</h2>
+      </div>
+      <p class="sa-muted">
+        Connect providers to make their models available for role defaults and active model selection.
+      </p>
+      <div class="sa-card-grid">
+        <article class="sa-card">
+          <div class="sa-row">
+            <div class="sa-app-title" style="margin-bottom: 0; flex: 1;">
+              <img src="/images/apps/openrouter.svg" alt="OpenRouter" class="sa-app-icon" />
+              <h3>OpenRouter</h3>
+            </div>
+            <div class="sa-row" style="gap: 0.5rem;">
+              <button
+                type="button"
+                class="sa-icon-btn"
+                phx-click="toggle_openrouter_key_form"
+                aria-label="Use OpenRouter API key"
+                aria-expanded={to_string(@openrouter_key_form_open)}
+                title="Use API key"
+              >
+                <.icon name="hero-key" class="h-4 w-4" />
+              </button>
+              <button
+                :if={!@openrouter_connected}
+                type="button"
+                class="sa-btn"
+                phx-click="connect_openrouter"
+              >
+                Connect
+              </button>
+              <button
+                :if={@openrouter_connected}
+                type="button"
+                class="sa-btn secondary"
+                phx-click="disconnect_openrouter"
+                data-confirm="Disconnect OpenRouter? The assistant will use the system-level API key instead."
+              >
+                Disconnect
+              </button>
+            </div>
+          </div>
+          <p class="sa-muted" style="margin-top: 0.5rem;">
+            Status:
+            <span :if={@openrouter_connected}>Connected</span>
+            <span :if={!@openrouter_connected}>Not connected</span>
+          </p>
+          <div :if={@openrouter_key_form_open} style="margin-top: 0.75rem;">
+            <.form for={@openrouter_key_form} id="openrouter-key-form" phx-submit="save_openrouter_api_key">
+              <.field
+                type="password"
+                field={@openrouter_key_form[:api_key]}
+                label="OpenRouter API key"
+                required
+                no_margin
+              />
+              <button type="submit" class="sa-btn secondary">Validate & Connect</button>
+            </.form>
+          </div>
+        </article>
+
+        <article class="sa-card">
+          <div class="sa-row">
+            <div class="sa-app-title" style="margin-bottom: 0; flex: 1;">
+              <img src="/images/apps/openai.svg" alt="OpenAI" class="sa-app-icon" />
+              <h3>OpenAI</h3>
+            </div>
+            <div class="sa-row" style="gap: 0.5rem;">
+              <button
+                type="button"
+                class="sa-icon-btn"
+                phx-click="toggle_openai_key_form"
+                aria-label="Use OpenAI API key"
+                aria-expanded={to_string(@openai_key_form_open)}
+                title="Use API key"
+              >
+                <.icon name="hero-key" class="h-4 w-4" />
+              </button>
+              <button :if={!@openai_connected} type="button" class="sa-btn" phx-click="connect_openai">
+                Connect
+              </button>
+              <button
+                :if={@openai_connected}
+                type="button"
+                class="sa-btn secondary"
+                phx-click="disconnect_openai"
+                data-confirm="Disconnect OpenAI?"
+              >
+                Disconnect
+              </button>
+            </div>
+          </div>
+          <p class="sa-muted" style="margin-top: 0.5rem;">
+            Status:
+            <span :if={@openai_connected}>Connected</span>
+            <span :if={!@openai_connected}>Not connected</span>
+          </p>
+          <p class="sa-muted" style="margin-top: 0.25rem;">
+            Connect starts ChatGPT OAuth (Codex-compatible). Use the key icon to manually add your OpenAI API key.
+          </p>
+          <div :if={@openai_key_form_open} style="margin-top: 0.75rem;">
+            <.form for={@openai_key_form} id="openai-key-form" phx-submit="save_openai_api_key">
+              <.field type="password" field={@openai_key_form[:api_key]} label="OpenAI API key" required no_margin />
+              <button type="submit" class="sa-btn secondary">Validate & Connect</button>
+            </.form>
+          </div>
+        </article>
+      </div>
+    </div>
+    """
+  end
+
+  defp admin_role_defaults(assigns) do
+    ~H"""
+    <div class="sa-card">
+      <h2>Role Defaults</h2>
+      <p class="sa-muted">{@model_defaults_description}</p>
+
+      <.form
+        for={@model_defaults_form}
+        id="model-defaults-form"
+        phx-change="change_model_defaults"
+        phx-submit="save_model_defaults"
+        class="sa-model-defaults-form"
+      >
+        <div class="sa-model-defaults-grid">
+          <div :for={role <- @model_default_roles} class="sa-model-default-row">
+            <div class="sa-model-default-meta">
+              <div class="sa-model-default-title">
+                <span class="sa-model-default-role">{role.label}</span>
+                <span class="sa-muted" style="font-size: 0.8rem;">
+                  {model_default_source_label(@model_default_sources, @model_defaults_mode, role.key)}
+                </span>
+                <button
+                  type="button"
+                  class="sa-role-tooltip"
+                  aria-label={"About #{role.label}"}
+                  title={role.tooltip}
+                >
+                  <.icon name="hero-information-circle" class="h-4 w-4" />
+                  <span class="sa-role-tooltip-bubble">{role.tooltip}</span>
+                </button>
+              </div>
+            </div>
+            <div class="sa-model-default-select">
+              <.field
+                type="select"
+                name={"defaults[#{role.key}]"}
+                label={"Default model for #{role.label}"}
+                label_class="sr-only"
+                no_margin={true}
+                options={@model_options}
+                selected={Map.get(@model_defaults, Atom.to_string(role.key))}
+                prompt="Select model"
+              />
+            </div>
+          </div>
+        </div>
+        <p class="sa-muted">{@model_defaults_notice}</p>
+      </.form>
+    </div>
+    """
+  end
+
+  defp model_default_source_label(source_map, _mode, role_key) do
+    case Map.get(source_map || %{}, Atom.to_string(role_key), :system) do
+      :user -> "Admin override"
+      :global -> "Admin default"
+      :system -> "System fallback"
+    end
   end
 
   defp form_scopes(form) do

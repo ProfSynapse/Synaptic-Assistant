@@ -241,7 +241,7 @@ defmodule Assistant.Memory.TurnClassifier do
 
   defp resolve_classification_model(user_id) do
     # Prefer sentinel role (cheapest fast-tier model), fall back to compaction,
-    # then first :fast tier model from config
+    # then fallback setting, then first :fast tier model from config
     case ConfigLoader.model_for(:sentinel, user_id: user_id) do
       %{id: id} ->
         id
@@ -252,13 +252,22 @@ defmodule Assistant.Memory.TurnClassifier do
             id
 
           nil ->
-            case ConfigLoader.models_by_tier(:fast) do
-              [%{id: id} | _] ->
+            case ConfigLoader.model_for(:fallback, user_id: user_id) do
+              %{id: id} ->
                 id
 
-              _ ->
-                Logger.error("No sentinel, compaction, or fast-tier model in config")
-                nil
+              nil ->
+                case ConfigLoader.models_by_tier(:fast) do
+                  [%{id: id} | _] ->
+                    id
+
+                  _ ->
+                    Logger.error(
+                      "No sentinel, compaction, fallback, or fast-tier model in config"
+                    )
+
+                    nil
+                end
             end
         end
     end

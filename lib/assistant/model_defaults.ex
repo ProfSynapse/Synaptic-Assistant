@@ -2,10 +2,9 @@ defmodule Assistant.ModelDefaults do
   @moduledoc """
   Database-backed default model selections by role.
 
-  Global defaults are stored in `integration_settings`. User-scoped overrides
-  live on `settings_users.model_defaults`. Admins may manage any user's scoped
-  defaults; non-admin users may only edit their own when
-  `can_manage_model_defaults` is enabled.
+  Global defaults are stored in `integration_settings`. Only admins may edit
+  global defaults. Admins may also manage user-scoped overrides via the admin
+  user detail view. User-scoped overrides live on `settings_users.model_defaults`.
 
   For backwards compatibility, legacy file-backed defaults are still read as a
   fallback until the new DB-backed keys are populated.
@@ -13,23 +12,23 @@ defmodule Assistant.ModelDefaults do
 
   alias Assistant.Accounts
   alias Assistant.Accounts.SettingsUser
-  alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.IntegrationSettings
 
   @default_rel_path "priv/config/model_defaults.json"
 
-  @role_keys ~w(orchestrator sub_agent sentinel compaction)
+  @role_keys ~w(orchestrator sub_agent sentinel compaction fallback)
 
   @global_setting_keys %{
     "orchestrator" => :model_default_orchestrator,
     "sub_agent" => :model_default_sub_agent,
     "sentinel" => :model_default_sentinel,
-    "compaction" => :model_default_compaction
+    "compaction" => :model_default_compaction,
+    "fallback" => :model_default_fallback
   }
 
   @role_atoms Enum.map(@role_keys, &String.to_atom/1)
 
-  @type mode :: :global | :personal | :readonly
+  @type mode :: :global | :readonly
 
   @spec roles() :: [atom()]
   def roles, do: @role_atoms
@@ -62,11 +61,10 @@ defmodule Assistant.ModelDefaults do
 
   @spec mode(SettingsUser.t() | nil) :: mode()
   def mode(%SettingsUser{is_admin: true}), do: :global
-  def mode(%SettingsUser{can_manage_model_defaults: true}), do: :personal
   def mode(_), do: :readonly
 
   @spec editable?(SettingsUser.t() | nil) :: boolean()
-  def editable?(settings_user), do: mode(settings_user) in [:global, :personal]
+  def editable?(settings_user), do: mode(settings_user) == :global
 
   @spec source_for(SettingsUser.t() | nil, atom() | String.t()) :: :global | :user | :system
   def source_for(settings_user, role) do
@@ -102,19 +100,9 @@ defmodule Assistant.ModelDefaults do
   end
 
   @spec save_defaults(SettingsUser.t(), map()) :: :ok | {:error, term()}
-  def save_defaults(%SettingsUser{} = settings_user, params) when is_map(params) do
+  def save_defaults(%SettingsUser{is_admin: true} = settings_user, params) when is_map(params) do
     normalized = normalize_params(params)
-
-    case mode(settings_user) do
-      :global ->
-        save_global_defaults(normalized, settings_user.id)
-
-      :personal ->
-        save_user_defaults(settings_user, normalized)
-
-      :readonly ->
-        {:error, :not_authorized}
-    end
+    save_global_defaults(normalized, settings_user.id)
   end
 
   def save_defaults(_, _), do: {:error, :not_authorized}
@@ -133,6 +121,21 @@ defmodule Assistant.ModelDefaults do
 
       true ->
         {:error, :not_authorized}
+    end
+  end
+
+  defp save_user_defaults(%SettingsUser{} = settings_user, normalized) do
+    overrides =
+      Enum.reduce(@role_keys, %{}, fn role_key, acc ->
+        case Map.get(normalized, role_key, "") do
+          "" -> acc
+          value -> Map.put(acc, role_key, value)
+        end
+      end)
+
+    case Accounts.update_settings_user_model_defaults(settings_user, overrides) do
+      {:ok, _settings_user} -> :ok
+      {:error, _} = error -> error
     end
   end
 
@@ -178,39 +181,6 @@ defmodule Assistant.ModelDefaults do
         {:error, _} = error -> {:halt, error}
       end
     end)
-  end
-
-  defp save_user_defaults(%SettingsUser{} = settings_user, normalized) do
-    inherited_settings_user = %SettingsUser{settings_user | model_defaults: %{}}
-
-    overrides =
-      Enum.reduce(@role_keys, %{}, fn role_key, acc ->
-        value = Map.get(normalized, role_key, "")
-        inherited_value = inherited_default_model_id(inherited_settings_user, role_key) || ""
-
-        cond do
-          value == "" -> acc
-          value == inherited_value -> acc
-          true -> Map.put(acc, role_key, value)
-        end
-      end)
-
-    case Accounts.update_settings_user_model_defaults(settings_user, overrides) do
-      {:ok, _settings_user} -> :ok
-      {:error, _} = error -> error
-    end
-  end
-
-  defp inherited_default_model_id(%SettingsUser{} = settings_user, role_key)
-       when role_key in @role_keys do
-    role = String.to_atom(role_key)
-
-    case ConfigLoader.model_for(role, settings_user: settings_user) do
-      nil -> nil
-      model -> model.id
-    end
-  rescue
-    _ -> Map.get(global_defaults(), role_key)
   end
 
   defp settings_user_from_opts(opts) do

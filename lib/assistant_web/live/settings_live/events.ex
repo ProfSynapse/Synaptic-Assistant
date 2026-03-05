@@ -1616,7 +1616,6 @@ defmodule AssistantWeb.SettingsLive.Events do
         base_defaults =
           case ModelDefaults.mode(settings_user) do
             :global -> ModelDefaults.global_defaults()
-            :personal -> ModelDefaults.user_defaults(settings_user)
             :readonly -> %{}
           end
 
