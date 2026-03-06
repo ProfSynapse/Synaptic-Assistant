@@ -25,7 +25,7 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
     assigns = assign(assigns, :is_admin, is_admin)
 
     ~H"""
-    <div>
+    <div class="sa-app-detail">
       <header class="sa-page-header">
         <div style="display: flex; align-items: center; gap: 1rem;">
           <.link navigate={~p"/settings/apps"} class="sa-icon-btn" title="Back to Apps">
@@ -99,7 +99,7 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
 
       <section
         :if={@current_app.id == "google_workspace"}
-        class="sa-card"
+        class="sa-card sa-app-panel sa-app-panel--drive"
         style="margin-top: 1.5rem;"
       >
         <.google_workspace_drive_access
@@ -245,47 +245,62 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
         </p>
       </section>
 
-      <section class="sa-card" style="margin-top: 1.5rem;">
-        <h2>Personal Tool Access</h2>
-        <p style="margin-top: 0.25rem; margin-bottom: 1rem;" class="sa-page-subtitle">
-          Control which {@current_app.name} tools the model can use for your account.
-        </p>
+      <section class="sa-card sa-app-panel" style="margin-top: 1.5rem;">
+        <div class="sa-app-panel-header">
+          <div>
+            <h2>Personal Tool Access</h2>
+            <p style="margin-top: 0.25rem;" class="sa-page-subtitle">
+              Control which {@current_app.name} tools the model can use for your account.
+            </p>
+          </div>
+        </div>
 
         <div :if={@personal_skill_permissions == []} class="sa-empty">
           No {@current_app.name} tools are available for personal control.
         </div>
 
-        <table :if={@personal_skill_permissions != []} class="sa-table">
-          <thead>
-            <tr>
-              <th>Domain</th>
-              <th>Skill</th>
-              <th>Enabled</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={perm <- @personal_skill_permissions}>
-              <td>{perm.domain_label}</td>
-              <td>{perm.skill_label}</td>
-              <td>
-                <label class="sa-switch">
-                  <input
-                    type="checkbox"
-                    checked={perm.enabled}
-                    class="sa-switch-input"
-                    role="switch"
-                    aria-checked={to_string(perm.enabled)}
-                    aria-label={"Toggle #{perm.skill_label}"}
-                    phx-click="toggle_personal_skill"
-                    phx-value-skill={perm.id}
-                    phx-value-enabled={to_string(!perm.enabled)}
-                  />
-                  <span class="sa-switch-slider"></span>
-                </label>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div :if={@personal_skill_permissions != []} class="sa-personal-tools-table-shell">
+          <table class="sa-table sa-personal-tools-table">
+            <thead>
+              <tr>
+                <th>Domain</th>
+                <th>Skill</th>
+                <th>Enabled</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={perm <- @personal_skill_permissions}>
+                <td>
+                  <span class="sa-personal-tools-domain-pill">{perm.domain_label}</span>
+                </td>
+                <td>
+                  <div class="sa-personal-tools-skill">
+                    <span class="sa-personal-tools-skill-label">{perm.skill_label}</span>
+                    <span class="sa-personal-tools-skill-meta">
+                      {perm.domain_label} personal tool access
+                    </span>
+                  </div>
+                </td>
+                <td>
+                  <label class="sa-switch sa-personal-tools-switch">
+                    <input
+                      type="checkbox"
+                      checked={perm.enabled}
+                      class="sa-switch-input"
+                      role="switch"
+                      aria-checked={to_string(perm.enabled)}
+                      aria-label={"Toggle #{perm.skill_label}"}
+                      phx-click="toggle_personal_skill"
+                      phx-value-skill={perm.id}
+                      phx-value-enabled={to_string(!perm.enabled)}
+                    />
+                    <span class="sa-switch-slider"></span>
+                  </label>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
     </div>
     """

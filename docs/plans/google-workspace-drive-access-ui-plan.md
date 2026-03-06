@@ -121,50 +121,55 @@ Behavior:
 
 This is the primary interaction because it matches the common case you called out.
 
-### 3. Manage Opens Folder Accordions
+### 3. Manage Opens A Dedicated Modal
 
-The `Manage` column opens a per-drive management view directly on the page.
+The `Manage` action should open a dedicated modal for that specific drive.
 
-That management view should render:
+This should not expand inline beneath the table row. The inline approach makes the page feel heavy, breaks the table rhythm, and causes the file tree to visually spill out into the rest of the settings page.
 
-- top-level folders as accordions
-- each folder row as a tree row with:
-  - selection checkbox
-  - expand/collapse chevron
-  - folder icon
-- nested subfolders and files inside the accordion body
+The manage modal should render:
+
+- a header with the drive name
+- a short summary of what the user is doing
+- the scoped-access tree
+- sticky footer actions:
+  - `Cancel`
+  - `Save Access`
 
 This gives one strong mental model:
 
 - full drive access from the table
-- folder/file access from the manage view
+- folder/file access inside a focused, dedicated browser surface
 
 ### 4. Folder Rows Support Selection And Traversal
 
-For each folder accordion:
+For each folder row:
 
 - use the existing folder open/closed icons to communicate state
-- expanding/collapsing the folder is a separate interaction from selection
+- the checkbox controls selection
+- the rest of the row controls expand/collapse
 - checking the folder selects the whole subtree
 - unchecking the folder clears the whole subtree unless specific children are selected again
 - indeterminate `-` means only part of the subtree is selected
 - the user can open the folder at any time to inspect or edit child selections
 
-There are therefore two controls on a folder row:
+There should not be a separate chevron if the row itself already communicates expand/collapse through the folder icon and row hover state.
 
-- selection checkbox
-- expand/collapse control
+There are therefore two interactions on a folder row:
 
-This is adjacent to an existing pattern already used elsewhere in the codebase:
+- checkbox click = selection
+- row click = expand/collapse
+
+This is still adjacent to an existing pattern already used elsewhere in the codebase:
 
 - the accordion shell and open/close behavior already exist
 - see `lib/assistant_web/live/workflow_editor_live.ex`
 
-That should be reused as the shared accordion pattern, while the recursive checkbox tree and indeterminate states are added on top.
+But the final surface should feel more like a modern permission browser than a literal accordion list.
 
 ### 5. Nested Selection Rules
 
-Inside an expanded folder accordion:
+Inside an expanded folder row:
 
 - subfolders have checkboxes
 - files have checkboxes
@@ -182,16 +187,16 @@ This makes the hierarchy behave like a normal file-permissions tree:
 
 ### 6. Granular File Access Is Only Visible After Drilldown
 
-The manage view should not dump the whole file tree immediately.
+The manage modal should not dump the whole file tree immediately.
 
 Recommended behavior:
 
 - show top-level folders first
-- only show subfolders/files when a folder accordion opens
+- only show subfolders/files when a folder row is opened
 - keep file-level checkboxes inside the opened hierarchy
 - allow recursive traversal through all subfolders
 
-That keeps the top-level table compact while still supporting specific-file access.
+That keeps the drive table compact while still supporting specific-file access in the modal.
 
 ## Recommended UI Shape
 
@@ -211,7 +216,7 @@ Example row behavior:
 - if `Full Access` is off but granular selections exist, status can say `Granular access configured`
 - if no access exists, status can say `No access`
 
-### Manage Panel Structure
+### Manage Modal Structure
 
 The details column should use a compact icon button rather than repeating a `Manage` text button in every row.
 
@@ -224,24 +229,22 @@ Recommended pattern:
   - chevron/expand
   - settings/cog if it does not conflict with the top-level app settings meaning
 
-Clicking that icon button should expand or reveal a drive-specific management section beneath the selected row.
+Clicking that icon button should open a drive-specific management modal.
 
-That section should contain:
+That modal should contain:
 
-- folder accordions
-- checkbox + chevron + icon in each folder row
-- nested checkbox tree for subfolders/files
+- a short explanatory header
+- optional selection summary
+- the file tree
+- sticky footer actions
 
-It should read like a file tree, not like a separate "folders section" block.
-
-The manage surface should not require a separate modal unless the on-page layout becomes too heavy.
+It should read like a focused file-permissions browser, not like a settings accordion embedded inside the page.
 
 ### Folder Row Rules
 
 Each folder summary row should contain:
 
 - selection checkbox
-- expand/collapse affordance
 - folder icon
 - folder name
 - optional selection summary
@@ -250,23 +253,25 @@ Rules:
 
 - closed folders use the closed-folder icon
 - open folders use the open-folder icon
+- clicking the row opens/closes the folder
 - expanding the row reveals the child tree
 - collapsing the row hides the child tree
 - checked row = entire subtree allowed
 - unchecked row = subtree not allowed unless descendants are checked
 - indeterminate row = partial descendant selection
 - if child tree has partial selection, show a subtle summary like `3 of 12 items allowed`
+- checkbox click must not toggle expand/collapse
 
 ### Checkbox Tree Rules
 
-Within the accordion body:
+Within the expanded child area:
 
 - subfolders render with folder icons
 - files render with file icons
 - subfolder checkbox selects all descendants
 - file checkbox selects only that file
 - partial child selection makes the parent visually indeterminate
-- subfolders get their own chevron so the user can keep traversing deeper
+- subfolders open when the user clicks their row
 
 This is where file-level access lives. It should not compete with the simpler drive-level full access control.
 
@@ -275,18 +280,198 @@ This is where file-level access lives. It should not compete with the simpler dr
 Each selectable row should look like:
 
 - checkbox
-- chevron if the row is a folder
 - type icon
 - label
 
 Examples:
 
-- `[-] v [folder] Launch Materials`
-- `[ ] > [folder] Assets`
+- `[-] [folder-open] Launch Materials`
+- `[ ] [folder] Assets`
 - `[x] [doc] Plan`
 - `[ ] [pdf] Passwords`
 
 This should be the canonical tree pattern for the feature.
+
+Checkboxes should be visually real and explicit:
+
+- `[ ] [icon] Title`
+- `[x] [icon] Title`
+- `[-] [icon] Title`
+
+This is important because the current interaction can feel ambiguous if the selected state is communicated only through custom boxes or row tinting.
+
+## Visual Design Spec
+
+The current functionality is correct, but the file tree still feels like a raw filesystem dump. The updated visual spec should aim for a more modern permission-browser feel.
+
+### Design Goals
+
+1. Make the tree feel intentional and interactive, not like plain indented text.
+2. Make hierarchy readable without relying only on indentation.
+3. Make selection feel obvious and high-confidence.
+4. Make the modal feel like a dedicated browser surface rather than a generic settings dialog.
+5. Let the drive table and personal tool access sections use the full available page width.
+
+### Drive Table Width
+
+The `Available Drives` table should take the full width of the content area.
+
+Recommended behavior:
+
+- table stretches to the full card width
+- `Drive` column gets the majority of the width
+- `Scope` column gets flexible middle width
+- `Full Access` stays compact
+- action column stays tight
+
+This should avoid the current cramped feel where the table occupies only part of the page and leaves too much empty space to the right.
+
+### Personal Tool Access Width
+
+`Personal Tool Access` should also stretch across the full content width.
+
+Recommended behavior:
+
+- use a full-width table or grouped rows
+- avoid narrow columns with excessive wrapping
+- give the `Skill` label room to breathe
+- keep the toggle column compact and aligned right
+
+This section should feel like a peer to the drive table, not like a squeezed secondary control.
+
+### Modal Proportions
+
+The drive manage modal should feel more like a browser panel than a small dialog.
+
+Recommended proportions:
+
+- width: approximately `min(1100px, calc(100vw - 64px))`
+- height cap: approximately `80vh` to `85vh`
+- sticky header
+- sticky footer
+- scrolling only in the tree content region
+
+### File Tree Visual Treatment
+
+Each item should be rendered as a full-width row block, not as loose inline text.
+
+Recommended row anatomy:
+
+- checkbox
+- icon
+- label
+- optional trailing metadata
+
+Recommended row styling:
+
+- row hover state
+- subtle selected background tint
+- rounded row container
+- slightly larger row height than the current implementation
+
+### Hierarchy Treatment
+
+Hierarchy should be visible through more than indentation.
+
+Recommended techniques:
+
+- soft inset container for children when a folder is open
+- faint left guide or rail for nested content
+- stronger visual treatment for folders than files
+- consistent spacing between top-level rows
+
+This will make the tree easier to scan and prevent the current “wall of filenames” feeling.
+
+### Folder Row Behavior
+
+Folders should feel like expandable sections inside a permission browser.
+
+Recommended styling:
+
+- closed folder icon
+- open folder icon
+- row hover state
+- row click target across the full row except the checkbox
+
+Folders should not need a separate chevron if:
+
+- the icon changes state clearly
+- the row hover/click affordance is strong
+
+### File Row Behavior
+
+Files should feel quieter than folders but still interactive.
+
+Recommended styling:
+
+- smaller visual emphasis than folders
+- type-specific icon or badge
+- selected state uses row tint plus checkbox state
+- long filenames truncate cleanly with ellipsis
+
+### Selection Feedback
+
+Selection should be visible in multiple ways, not just the checkbox box itself.
+
+Recommended techniques:
+
+- checkbox state
+- subtle selected-row background tint
+- optional trailing chip like `Included` only when useful
+- indeterminate rows use a distinct mixed-state treatment
+
+### Density
+
+The tree should feel modern and breathable, not cramped.
+
+Recommended baseline:
+
+- row height around `40px` to `44px`
+- slightly larger spacing between top-level nodes
+- smaller but still comfortable spacing for nested nodes
+
+### Footer Actions
+
+The modal footer should stay visible and actionable.
+
+Recommended footer behavior:
+
+- sticky footer
+- `Cancel` on the left
+- `Save Access` on the right
+- disabled save state when there are no changes
+- optional dirty-state text like `Unsaved changes`
+
+## Modern File Tree Pattern
+
+The target pattern should feel closer to a modern permission browser used in cloud tools than to a raw Finder/Explorer dump.
+
+### Recommended Mental Model
+
+This should feel like:
+
+- a scoped access browser
+- a selective sync picker
+- a permissions tree
+
+It should not feel like:
+
+- a raw shell listing
+- a plain indented document outline
+- a settings accordion with checkboxes bolted on
+
+### Recommended Visual Example
+
+```text
+[ ] [folder] Launch Materials                               12 items
+    [ ] [folder] Assets
+    [x] [doc] Plan
+    [-] [folder-open] SOPs
+        [x] [pdf] Setup Guide
+        [ ] [image] Diagram
+```
+
+Visually, however, each line should really behave as a full row block with hover, spacing, and selected state, not as monospaced plain text.
 
 ### File Icon Rules
 
@@ -322,7 +507,7 @@ Reference:
 
 - `lib/assistant_web/live/workflow_editor_live.ex`
 
-We should reuse the accordion/open-close structure from there, but the recursive checkbox tree and indeterminate states will be new behavior layered on top.
+We should reuse the general open/close control patterns and modal structure where useful, but the final Drive browser should not be constrained to look like a generic accordion.
 
 ### Other Existing Patterns To Reuse
 
@@ -445,10 +630,12 @@ This should be one action from the main table.
 
 1. User leaves `Full Access` off
 2. User clicks the row details icon
-3. User sees top-level folder rows
-4. User checks a folder row
-5. System treats the whole subtree as allowed
-6. Sync is queued for that folder
+3. A modal opens for that drive
+4. User sees top-level folder rows
+5. User checks a folder row
+6. User clicks `Save Access`
+7. System treats the whole subtree as allowed
+8. Sync is queued for that folder
 
 This should be the fastest granular path.
 
@@ -456,11 +643,13 @@ This should be the fastest granular path.
 
 1. User leaves `Full Access` off
 2. User clicks the row details icon
-3. User finds the folder
-4. User expands the folder with the chevron
-5. User checks subfolders and/or files
-6. User continues traversing deeper subfolders as needed
-7. Parent rows become indeterminate when only some children are selected
+3. A modal opens for that drive
+4. User finds the folder
+5. User expands the folder by clicking the row
+6. User checks subfolders and/or files
+7. User continues traversing deeper subfolders as needed
+8. Parent rows become indeterminate when only some children are selected
+9. User clicks `Save Access`
 
 This keeps specific-file access available without adding more primary buttons, including for PDFs and images.
 
@@ -474,18 +663,20 @@ This keeps specific-file access available without adding more primary buttons, i
 
 ### Revoke Folder
 
-1. User opens the row details panel
+1. User opens the drive manage modal
 2. User unchecks a folder row
 3. The subtree is deselected unless specific children are reselected
-4. User can either:
+4. User clicks `Save Access`
+5. User can either:
    - leave everything unchecked to remove all folder access
    - check only the specific subfolders/files that should remain allowed
 
 ### Revoke Specific Files
 
-1. User opens the folder accordion from the row details panel
+1. User opens the manage modal
 2. User unchecks one or more files
 3. Parent subfolder/folder shifts to indeterminate if only part of it remains allowed
+4. User clicks `Save Access`
 
 This keeps reduction of access in the same place access was granted.
 
@@ -637,6 +828,19 @@ Connected as user@company.com
 ```
 
 ## ASCII Diagrams
+
+### Updated Direction
+
+The diagrams below are superseded by the more specific visual rules in `Visual Design Spec` and `Modern File Tree Pattern`.
+
+The final direction should assume:
+
+- full-width drive table
+- full-width personal tool access section
+- drive-specific manage modal
+- row-click folder expansion
+- explicit checkboxes
+- sticky modal footer with save action
 
 ### 1. Apps Overview
 

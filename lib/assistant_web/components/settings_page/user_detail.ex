@@ -9,7 +9,9 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
   attr :managed_scopes, :list, required: true
 
   def user_create_section(assigns) do
-    selected_scopes = List.wrap(assigns.allowlist_form[:scopes] && assigns.allowlist_form[:scopes].value)
+    selected_scopes =
+      List.wrap(assigns.allowlist_form[:scopes] && assigns.allowlist_form[:scopes].value)
+
     assigns = assign(assigns, :selected_scopes, selected_scopes)
 
     ~H"""

@@ -56,6 +56,7 @@ defmodule Assistant.SkillPermissions do
 
   @spec list_permissions_for_user(String.t() | nil, keyword()) :: [map()]
   def list_permissions_for_user(user_id, opts \\ [])
+
   def list_permissions_for_user(user_id, opts) when is_binary(user_id) do
     integration_group = Keyword.get(opts, :integration_group)
 
@@ -174,7 +175,8 @@ defmodule Assistant.SkillPermissions do
 
   defp skill_in_integration_group?(_skill_name, nil), do: true
 
-  defp skill_in_integration_group?(skill_name, integration_group) when is_binary(integration_group) do
+  defp skill_in_integration_group?(skill_name, integration_group)
+       when is_binary(integration_group) do
     integration_group_for_skill(skill_name) == integration_group
   end
 
