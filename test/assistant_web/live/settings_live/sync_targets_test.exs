@@ -30,12 +30,14 @@ defmodule AssistantWeb.SettingsLive.SyncTargetsTest do
         has_google_token: true,
         sync_scopes: [%{drive_id: nil, folder_id: "folder-1", scope_type: "folder"}],
         manager_drive: nil,
+        manager_scopes: [],
         tree_nodes: %{},
         tree_root_keys: [],
         tree_expanded: MapSet.new(),
         tree_loading: false,
         tree_loading_nodes: MapSet.new(),
-        tree_error: nil
+        tree_error: nil,
+        drive_scope_dirty: false
       )
 
     assert html =~ "Drive Access"
@@ -64,7 +66,7 @@ defmodule AssistantWeb.SettingsLive.SyncTargetsTest do
     assert html =~ "Personal Tool Access"
   end
 
-  test "scoped tree creates folder include and file exclude scopes", %{conn: conn} do
+  test "scoped tree saves folder include and file exclude scopes from the modal", %{conn: conn} do
     Application.put_env(
       :assistant,
       :google_drive_module,
@@ -113,6 +115,7 @@ defmodule AssistantWeb.SettingsLive.SyncTargetsTest do
         "drive_type" => "shared"
       })
 
+    assert html =~ "Manage Engineering"
     assert html =~ "Launch Materials"
 
     html =
@@ -129,8 +132,8 @@ defmodule AssistantWeb.SettingsLive.SyncTargetsTest do
         "node_type" => "folder"
       })
 
-    assert StateStore.get_synced_file(user.id, "plan-file")
-    assert StateStore.get_synced_file(user.id, "passwords-file")
+    refute StateStore.get_synced_file(user.id, "plan-file")
+    refute StateStore.get_synced_file(user.id, "passwords-file")
     refute StateStore.get_synced_file(user.id, "overview-file")
 
     _html =
@@ -138,6 +141,8 @@ defmodule AssistantWeb.SettingsLive.SyncTargetsTest do
         "node_key" => "file:passwords-file",
         "node_type" => "file"
       })
+
+    _html = render_click(lv, "save_drive_scope_manager", %{})
 
     folder_scope = StateStore.get_scope(user.id, "drive_123", "launch-folder")
     assert folder_scope.scope_effect == "include"

@@ -335,7 +335,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     socket =
       socket
       |> assign(:app_integration_settings, [])
-      |> load_personal_skill_permissions()
+      |> load_personal_skill_permissions(integration_group: app.integration_group)
       |> maybe_load_google_workspace_app_detail(app)
 
     if app.id == "telegram" do
@@ -459,14 +459,16 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     _ -> assign(socket, :connector_states, %{})
   end
 
-  def load_personal_skill_permissions(socket) do
+  def load_personal_skill_permissions(socket, opts \\ []) do
+    integration_group = Keyword.get(opts, :integration_group)
+
     permissions =
       case Context.current_user_id(socket) do
         user_id when is_binary(user_id) ->
-          SkillPermissions.list_permissions_for_user(user_id)
+          SkillPermissions.list_permissions_for_user(user_id, integration_group: integration_group)
 
         _ ->
-          SkillPermissions.list_permissions()
+          SkillPermissions.list_permissions(integration_group: integration_group)
       end
 
     assign(socket, :personal_skill_permissions, permissions)

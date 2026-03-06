@@ -1110,14 +1110,8 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp build_context(dispatch_params, dep_results, _engine_state) do
     allowed_skills = effective_skills(dispatch_params)
-
-    case build_system_prompt(dispatch_params, dep_results) do
-      {:error, _} = error ->
-        error
-
-      {:ok, system_prompt} ->
-        build_context_with_files(system_prompt, dispatch_params, allowed_skills)
-    end
+    {:ok, system_prompt} = build_system_prompt(dispatch_params, dep_results)
+    build_context_with_files(system_prompt, dispatch_params, allowed_skills)
   end
 
   defp build_context_with_files(system_prompt, dispatch_params, allowed_skills) do

@@ -531,6 +531,7 @@ defmodule AssistantWeb.SettingsLive.Events do
       {:noreply,
        socket
        |> assign(:drive_manager_drive, drive_to_manager_assign(drive))
+       |> seed_drive_scope_draft(drive)
        |> refresh_manager_drive()}
     else
       {:error, :not_connected, socket} ->
@@ -553,7 +554,10 @@ defmodule AssistantWeb.SettingsLive.Events do
      |> assign(:drive_tree_expanded, MapSet.new())
      |> assign(:drive_tree_loading, false)
      |> assign(:drive_tree_loading_nodes, MapSet.new())
-     |> assign(:drive_tree_error, nil)}
+     |> assign(:drive_tree_error, nil)
+     |> assign(:drive_scope_draft_scopes, %{})
+     |> assign(:drive_scope_pending_ops, [])
+     |> assign(:drive_scope_dirty, false)}
   end
 
   def handle_event("toggle_drive_tree_node_expanded", %{"node_key" => node_key}, socket) do
@@ -606,29 +610,57 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("toggle_drive_tree_node_scope", %{"node_key" => node_key}, socket) do
-    with %{drive_id: drive_id} = manager_drive when not is_nil(manager_drive) <-
+    with %{drive_id: _drive_id} = manager_drive when not is_nil(manager_drive) <-
            socket.assigns[:drive_manager_drive],
-         user_id when is_binary(user_id) <- Context.current_user_id(socket),
-         node when not is_nil(node) <- socket.assigns.drive_tree_nodes[node_key],
-         {:ok, access_token} <- GoogleAuth.user_token(user_id),
-         {:ok, socket} <- persist_tree_scope_toggle(socket, user_id, access_token, drive_id, node) do
-      {:noreply,
-       socket
-       |> Loaders.load_sync_scopes()
-       |> refresh_manager_drive()
-       |> reconcile_drive_workspace(drive_id)}
+         node when not is_nil(node) <- socket.assigns.drive_tree_nodes[node_key] do
+      {:noreply, update_drive_scope_draft(socket, manager_drive, node)}
     else
       nil ->
         {:noreply, socket}
 
+      _ ->
+        {:noreply, put_flash(socket, :error, "Failed to update Drive access.")}
+    end
+  end
+
+  def handle_event("save_drive_scope_manager", _params, socket) do
+    with %{drive_id: drive_id} = manager_drive when not is_nil(manager_drive) <-
+           socket.assigns[:drive_manager_drive],
+         user_id when is_binary(user_id) <- Context.current_user_id(socket),
+         {:ok, access_token} <- GoogleAuth.user_token(user_id),
+         :ok <-
+           persist_drive_scope_draft(
+             user_id,
+             access_token,
+             drive_id,
+             socket.assigns.drive_tree_nodes,
+             socket.assigns.drive_scope_pending_ops || []
+           ) do
+      {:noreply,
+       socket
+       |> Loaders.load_sync_scopes()
+       |> refresh_manager_drive()
+       |> reconcile_drive_workspace(drive_id)
+       |> assign(:drive_scope_draft_scopes, %{})
+       |> assign(:drive_scope_pending_ops, [])
+       |> assign(:drive_scope_dirty, false)
+       |> assign(:drive_manager_drive, nil)
+       |> assign(:drive_tree_nodes, %{})
+       |> assign(:drive_tree_root_keys, [])
+       |> assign(:drive_tree_expanded, MapSet.new())
+       |> assign(:drive_tree_loading, false)
+       |> assign(:drive_tree_loading_nodes, MapSet.new())
+       |> assign(:drive_tree_error, nil)
+       |> put_flash(:info, "Drive access updated.")}
+    else
       {:error, :not_connected} ->
         {:noreply, put_flash(socket, :error, "Connect your Google account first.")}
 
-      {:error, reason, socket} ->
+      {:error, reason} ->
         {:noreply, put_flash(socket, :error, drive_tree_error_message(reason))}
 
       _ ->
-        {:noreply, put_flash(socket, :error, "Failed to update Drive access.")}
+        {:noreply, socket}
     end
   end
 
@@ -902,6 +934,7 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   def handle_event("toggle_personal_skill", %{"skill" => skill, "enabled" => enabled}, socket) do
     enabled? = enabled == "true"
+    integration_group = socket.assigns[:current_app] && socket.assigns.current_app.integration_group
 
     Context.with_settings_user(socket, fn settings_user ->
       case Context.ensure_linked_user(settings_user) do
@@ -911,7 +944,7 @@ defmodule AssistantWeb.SettingsLive.Events do
               {:noreply,
                socket
                |> reload_current_user_scope()
-               |> Loaders.load_personal_skill_permissions()
+               |> Loaders.load_personal_skill_permissions(integration_group: integration_group)
                |> put_flash(:info, "#{SkillPermissions.skill_label(skill)} updated")}
 
             {:error, _changeset} ->
@@ -1512,6 +1545,23 @@ defmodule AssistantWeb.SettingsLive.Events do
     }
   end
 
+  defp seed_drive_scope_draft(socket, drive) do
+    drive_scopes =
+      socket.assigns.sync_scopes
+      |> Enum.filter(&scope_in_drive?(&1, drive.drive_id))
+      |> Enum.reduce(%{}, fn scope, acc ->
+        case draft_scope_key(scope) do
+          nil -> acc
+          key -> Map.put(acc, key, draft_scope_from_sync_scope(scope))
+        end
+      end)
+
+    socket
+    |> assign(:drive_scope_draft_scopes, drive_scopes)
+    |> assign(:drive_scope_pending_ops, [])
+    |> assign(:drive_scope_dirty, false)
+  end
+
   defp ensure_drive_for_access(socket, %{"id" => id} = params, mode)
        when is_binary(id) and id != "" do
     case ConnectedDrives.get(id) do
@@ -1679,26 +1729,35 @@ defmodule AssistantWeb.SettingsLive.Events do
     end)
   end
 
-  defp persist_tree_scope_toggle(socket, user_id, access_token, drive_id, node) do
-    {inherited_selected?, currently_selected?} = tree_node_selection(socket, node)
-    desired_selected? = !currently_selected?
-    explicit_scope = explicit_scope_for_node(user_id, drive_id, node)
+  defp update_drive_scope_draft(socket, manager_drive, node) do
+    draft_scopes = socket.assigns.drive_scope_draft_scopes || %{}
+    tree_nodes = socket.assigns.drive_tree_nodes || %{}
 
-    with :ok <- maybe_clear_descendant_scopes(user_id, access_token, drive_id, node),
-         :ok <-
-           persist_explicit_scope(
-             user_id,
-             drive_id,
-             socket.assigns.drive_tree_nodes,
-             node,
-             explicit_scope,
-             inherited_selected?,
-             desired_selected?
-           ) do
-      {:ok, socket}
-    else
-      {:error, reason} -> {:error, reason, socket}
-    end
+    {inherited_selected?, currently_selected?} =
+      tree_node_selection_from_draft(draft_scopes, tree_nodes, node)
+
+    desired_selected? = !currently_selected?
+
+    updated_scopes =
+      draft_scopes
+      |> clear_loaded_descendant_draft_scopes(node, tree_nodes)
+      |> persist_draft_explicit_scope(
+        manager_drive.drive_id,
+        tree_nodes,
+        node,
+        inherited_selected?,
+        desired_selected?
+      )
+
+    pending_ops = socket.assigns.drive_scope_pending_ops || []
+
+    socket
+    |> assign(:drive_scope_draft_scopes, updated_scopes)
+    |> assign(
+      :drive_scope_pending_ops,
+      pending_ops ++ [%{node_key: node.key, desired_selected?: desired_selected?}]
+    )
+    |> assign(:drive_scope_dirty, true)
   end
 
   defp maybe_clear_descendant_scopes(_user_id, _access_token, _drive_id, %{node_type: "file"}),
@@ -1758,6 +1817,46 @@ defmodule AssistantWeb.SettingsLive.Events do
     end
   end
 
+  defp persist_drive_scope_draft(_user_id, _access_token, _drive_id, _tree_nodes, []), do: :ok
+
+  defp persist_drive_scope_draft(user_id, access_token, drive_id, tree_nodes, operations) do
+    Enum.reduce_while(operations, :ok, fn operation, :ok ->
+      case persist_drive_scope_operation(user_id, access_token, drive_id, tree_nodes, operation) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp persist_drive_scope_operation(user_id, access_token, drive_id, tree_nodes, operation) do
+    case tree_nodes[operation.node_key] do
+      nil ->
+        :ok
+
+      node ->
+        sync_scopes = StateStore.list_scopes(user_id, drive_id: drive_scope_filter(drive_id))
+
+        {inherited_selected?, _currently_selected?} =
+          tree_node_selection_from_scopes(sync_scopes, tree_nodes, node, drive_id)
+
+        explicit_scope = explicit_scope_for_node(user_id, drive_id, node)
+
+        with :ok <- maybe_clear_descendant_scopes(user_id, access_token, drive_id, node),
+             :ok <-
+               persist_explicit_scope(
+                 user_id,
+                 drive_id,
+                 tree_nodes,
+                 node,
+                 explicit_scope,
+                 inherited_selected?,
+                 operation.desired_selected?
+               ) do
+          :ok
+        end
+    end
+  end
+
   defp node_scope_attrs(%{node_type: "folder", id: folder_id, name: folder_name}, _nodes) do
     %{folder_id: folder_id}
     |> Map.put(:folder_name, folder_name)
@@ -1802,13 +1901,11 @@ defmodule AssistantWeb.SettingsLive.Events do
     StateStore.get_file_scope(user_id, drive_id, file_id)
   end
 
-  defp tree_node_selection(socket, node) do
-    drive_id = socket.assigns.drive_manager_drive && socket.assigns.drive_manager_drive.drive_id
-
+  defp tree_node_selection_from_draft(draft_scopes, tree_nodes, node) do
     inherited_selected? =
-      node_ancestor_chain(socket.assigns.drive_tree_nodes, node)
+      node_ancestor_chain(tree_nodes, node)
       |> Enum.reduce(false, fn ancestor, acc ->
-        case explicit_effect_for_tree_node(socket.assigns.sync_scopes, drive_id, ancestor) do
+        case draft_explicit_effect_for_tree_node(draft_scopes, ancestor) do
           "include" -> true
           "exclude" -> false
           nil -> acc
@@ -1816,7 +1913,28 @@ defmodule AssistantWeb.SettingsLive.Events do
       end)
 
     current_selected? =
-      case explicit_effect_for_tree_node(socket.assigns.sync_scopes, drive_id, node) do
+      case draft_explicit_effect_for_tree_node(draft_scopes, node) do
+        "include" -> true
+        "exclude" -> false
+        nil -> inherited_selected?
+      end
+
+    {inherited_selected?, current_selected?}
+  end
+
+  defp tree_node_selection_from_scopes(sync_scopes, tree_nodes, node, drive_id) do
+    inherited_selected? =
+      node_ancestor_chain(tree_nodes, node)
+      |> Enum.reduce(false, fn ancestor, acc ->
+        case explicit_effect_for_tree_node(sync_scopes, drive_id, ancestor) do
+          "include" -> true
+          "exclude" -> false
+          nil -> acc
+        end
+      end)
+
+    current_selected? =
+      case explicit_effect_for_tree_node(sync_scopes, drive_id, node) do
         "include" -> true
         "exclude" -> false
         nil -> inherited_selected?
@@ -1859,6 +1977,81 @@ defmodule AssistantWeb.SettingsLive.Events do
       scope -> scope.scope_effect
     end
   end
+
+  defp draft_explicit_effect_for_tree_node(draft_scopes, %{key: key}) do
+    case Map.get(draft_scopes, key) do
+      nil -> nil
+      scope -> scope.scope_effect
+    end
+  end
+
+  defp clear_loaded_descendant_draft_scopes(draft_scopes, %{node_type: "file"}, _tree_nodes),
+    do: draft_scopes
+
+  defp clear_loaded_descendant_draft_scopes(draft_scopes, node, tree_nodes) do
+    loaded_descendant_node_keys(tree_nodes, node)
+    |> Enum.reduce(draft_scopes, &Map.delete(&2, &1))
+  end
+
+  defp loaded_descendant_node_keys(tree_nodes, node) do
+    (node.child_keys || [])
+    |> Enum.flat_map(fn child_key ->
+      case tree_nodes[child_key] do
+        nil -> []
+        child -> [child.key | loaded_descendant_node_keys(tree_nodes, child)]
+      end
+    end)
+  end
+
+  defp persist_draft_explicit_scope(
+         draft_scopes,
+         drive_id,
+         tree_nodes,
+         node,
+         inherited_selected?,
+         desired_selected?
+       ) do
+    if desired_selected? == inherited_selected? do
+      Map.delete(draft_scopes, node.key)
+    else
+      Map.put(
+        draft_scopes,
+        node.key,
+        %{
+          drive_id: drive_id,
+          scope_type: node.node_type,
+          scope_effect: if(desired_selected?, do: "include", else: "exclude")
+        }
+        |> Map.merge(node_scope_attrs(node, tree_nodes))
+      )
+    end
+  end
+
+  defp draft_scope_key(%{scope_type: "folder", folder_id: folder_id}) when is_binary(folder_id),
+    do: "folder:#{folder_id}"
+
+  defp draft_scope_key(%{scope_type: "file", file_id: file_id}) when is_binary(file_id),
+    do: "file:#{file_id}"
+
+  defp draft_scope_key(_scope), do: nil
+
+  defp draft_scope_from_sync_scope(scope) do
+    %{
+      drive_id: scope.drive_id,
+      scope_type: scope.scope_type,
+      scope_effect: scope.scope_effect,
+      folder_id: scope.folder_id,
+      folder_name: scope.folder_name,
+      file_id: scope.file_id,
+      file_name: scope.file_name,
+      file_mime_type: scope.file_mime_type
+    }
+  end
+
+  defp scope_in_drive?(scope, drive_id), do: scope.drive_id == drive_id
+
+  defp drive_scope_filter(nil), do: :personal
+  defp drive_scope_filter(drive_id), do: drive_id
 
   defp fetch_subtree_descendants(access_token, drive_id, folder_id) do
     do_fetch_subtree_descendants(access_token, drive_id, [folder_id], MapSet.new(), MapSet.new())

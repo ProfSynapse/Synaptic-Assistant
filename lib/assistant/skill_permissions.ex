@@ -33,11 +33,13 @@ defmodule Assistant.SkillPermissions do
 
   @default_permissions_rel_path "priv/config/skill_permissions.json"
 
-  @spec list_permissions() :: [map()]
-  def list_permissions do
+  @spec list_permissions(keyword()) :: [map()]
+  def list_permissions(opts \\ []) do
+    integration_group = Keyword.get(opts, :integration_group)
     global_overrides = read_overrides()
 
     Registry.list_all()
+    |> Enum.filter(&skill_in_integration_group?(&1.name, integration_group))
     |> Enum.map(fn skill ->
       enabled = Map.get(global_overrides, skill.name, true)
 
@@ -52,9 +54,13 @@ defmodule Assistant.SkillPermissions do
     |> Enum.sort_by(&{&1.domain_label, &1.skill_label})
   end
 
-  @spec list_permissions_for_user(String.t()) :: [map()]
-  def list_permissions_for_user(user_id) when is_binary(user_id) do
+  @spec list_permissions_for_user(String.t() | nil, keyword()) :: [map()]
+  def list_permissions_for_user(user_id, opts \\ [])
+  def list_permissions_for_user(user_id, opts) when is_binary(user_id) do
+    integration_group = Keyword.get(opts, :integration_group)
+
     Registry.list_all()
+    |> Enum.filter(&skill_in_integration_group?(&1.name, integration_group))
     |> Enum.map(fn skill ->
       %{
         id: skill.name,
@@ -67,7 +73,7 @@ defmodule Assistant.SkillPermissions do
     |> Enum.sort_by(&{&1.domain_label, &1.skill_label})
   end
 
-  def list_permissions_for_user(_), do: list_permissions()
+  def list_permissions_for_user(_, opts), do: list_permissions(opts)
 
   @spec enabled?(String.t()) :: boolean()
   def enabled?(skill_name) when is_binary(skill_name) do
@@ -164,6 +170,12 @@ defmodule Assistant.SkillPermissions do
       [prefix, _action] -> Map.get(@skill_prefix_to_group, prefix)
       _ -> nil
     end
+  end
+
+  defp skill_in_integration_group?(_skill_name, nil), do: true
+
+  defp skill_in_integration_group?(skill_name, integration_group) when is_binary(integration_group) do
+    integration_group_for_skill(skill_name) == integration_group
   end
 
   defp read_overrides do
