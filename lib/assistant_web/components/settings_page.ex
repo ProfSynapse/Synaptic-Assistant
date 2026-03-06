@@ -5,15 +5,14 @@ defmodule AssistantWeb.Components.SettingsPage do
 
   alias AssistantWeb.Components.SettingsPage.Helpers
 
-  import AssistantWeb.Components.SettingsPage.Admin, only: [admin_section: 1]
+  import AssistantWeb.Components.SettingsPage.Admin,
+    only: [admin_integration_detail_section: 1, admin_section: 1]
   import AssistantWeb.Components.SettingsPage.Analytics, only: [analytics_section: 1]
   import AssistantWeb.Components.SettingsPage.AppDetail, only: [app_detail_section: 1]
   import AssistantWeb.Components.SettingsPage.Apps, only: [apps_section: 1]
   import AssistantWeb.Components.SettingsPage.Help, only: [help_section: 1]
   import AssistantWeb.Components.SettingsPage.Memory, only: [memory_section: 1]
-  import AssistantWeb.Components.SettingsPage.Models, only: [models_section: 1]
   import AssistantWeb.Components.SettingsPage.Profile, only: [profile_section: 1]
-  import AssistantWeb.Components.SettingsPage.Skills, only: [skills_section: 1]
   import AssistantWeb.Components.SettingsPage.Workflows, only: [workflows_section: 1]
 
   def settings_page(assigns) do
@@ -70,7 +69,7 @@ defmodule AssistantWeb.Components.SettingsPage do
       </aside>
 
       <section class="sa-content">
-        <header :if={!@current_app} class="sa-page-header">
+        <header :if={!@current_app and !@current_admin_integration} class="sa-page-header">
           <h1>{Helpers.page_title(@section)}</h1>
           <p :if={@section == "profile"} class="sa-page-subtitle">
             Welcome back, {Helpers.profile_first_name(@profile)}.
@@ -78,14 +77,19 @@ defmodule AssistantWeb.Components.SettingsPage do
         </header>
 
         <.app_detail_section :if={@current_app} {assigns} />
+        <.admin_integration_detail_section
+          :if={@section == "admin" and @is_admin and @current_admin_integration}
+          {assigns}
+        />
         <.profile_section :if={@section == "profile" and !@current_app} {assigns} />
-        <.models_section :if={@section == "models" and !@current_app} {assigns} />
         <.analytics_section :if={@section == "analytics" and !@current_app} {assigns} />
         <.memory_section :if={@section == "memory" and !@current_app} {assigns} />
         <.apps_section :if={@section == "apps" and !@current_app} {assigns} />
         <.workflows_section :if={@section == "workflows" and !@current_app} {assigns} />
-        <.skills_section :if={@section == "skills" and !@current_app} {assigns} />
-        <.admin_section :if={@section == "admin" and @is_admin and !@current_app} {assigns} />
+        <.admin_section
+          :if={@section == "admin" and @is_admin and !@current_app and !@current_admin_integration}
+          {assigns}
+        />
         <.help_section :if={@section == "help" and !@current_app} {assigns} />
       </section>
     </div>

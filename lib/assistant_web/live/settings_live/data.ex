@@ -1,7 +1,8 @@
 defmodule AssistantWeb.SettingsLive.Data do
   @moduledoc false
 
-  @sections ~w(profile models analytics memory apps workflows skills admin help)
+  @sections ~w(profile analytics memory apps workflows admin help)
+  @admin_integration_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
   @app_catalog [
     %{
@@ -85,12 +86,19 @@ defmodule AssistantWeb.SettingsLive.Data do
       integration_group: "google_chat",
       connect_type: :api_key,
       setup_instructions: [
-        "Create a Google Chat space or use an existing one",
-        "Go to Manage webhooks in the space settings",
-        "Copy the webhook URL"
+        "Step 1 — Create service account: Open Google Cloud Console -> IAM & Admin -> Service Accounts -> Create Service Account.",
+        "Service account name: Synaptic Assistant Chat Bot",
+        "Service account ID: synaptic-chat-bot (auto-fills from name)",
+        "Description: Service account for Synaptic Assistant to send messages in Google Chat spaces",
+        "Click Create and Continue.",
+        "Step 2 — Roles: no additional project-level IAM roles are required for this integration.",
+        "Click Continue (skip role assignment), then Done.",
+        "Step 3 — Create JSON key: open the new service account, go to Keys, Add Key -> Create new key, select JSON, then Create.",
+        "Copy the downloaded JSON contents into the Google Chat Service Account JSON field in Admin > Integrations > Google Chat.",
+        "Copy your Google Cloud Project Number from Project Settings and save it in the Project Number field."
       ],
-      portal_url: "https://console.cloud.google.com/apis/credentials",
-      docs_url: "https://developers.google.com/workspace/chat/quickstart/webhooks"
+      portal_url: "https://console.cloud.google.com/iam-admin/serviceaccounts",
+      docs_url: "https://developers.google.com/workspace/chat/authenticate-authorize-chat-app"
     },
     %{
       id: "hubspot",
@@ -161,13 +169,13 @@ defmodule AssistantWeb.SettingsLive.Data do
       ]
     },
     %{
-      slug: "skill-permissions",
-      title: "Skill Permissions Guide",
-      summary: "Enable or disable skills using user-friendly labels.",
+      slug: "personal-tool-access",
+      title: "Personal Tool Access Guide",
+      summary: "Enable or disable skills for your own account.",
       body: [
-        "Go to Skill Permissions and toggle by Domain and Skill.",
-        "Disabled skills are blocked at runtime for sub-agents and memory agent.",
-        "Use this to enforce operational boundaries, such as disabling Send Email."
+        "Open Apps & Connections and click the settings icon on any card.",
+        "Use Personal Tool Access to toggle model skills for your account.",
+        "Disabled skills are blocked at runtime for sub-agents and memory agent."
       ]
     }
   ]
@@ -240,6 +248,14 @@ defmodule AssistantWeb.SettingsLive.Data do
   def sections, do: @sections
   def app_catalog, do: @app_catalog
   def find_app(app_id), do: Enum.find(@app_catalog, &(&1.id == app_id))
+
+  def admin_integration_catalog,
+    do: Enum.filter(@app_catalog, &(&1.integration_group in @admin_integration_groups))
+
+  def find_admin_integration(integration_group) do
+    Enum.find(admin_integration_catalog(), &(&1.integration_group == integration_group))
+  end
+
   def help_articles, do: @help_articles
   def empty_analytics, do: @empty_analytics
   def blank_profile, do: @blank_profile

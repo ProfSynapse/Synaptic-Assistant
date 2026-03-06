@@ -23,7 +23,12 @@ defmodule Assistant.WorkspaceSpaceContextTest do
 
   describe "load/2 — space context messages in feed" do
     test "renders space_context messages as feed items with correct structure" do
-      user = chat_user_fixture(%{channel: "google_chat", external_id: "users/ws_ctx_#{System.unique_integer([:positive])}"})
+      user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/ws_ctx_#{System.unique_integer([:positive])}"
+        })
+
       {:ok, conv} = Store.get_or_create_perpetual_conversation(user.id)
 
       # Insert space context paired messages (as SpaceContextFanoutWorker would)
@@ -39,18 +44,19 @@ defmodule Assistant.WorkspaceSpaceContextTest do
         }
       }
 
-      {:ok, _msgs} = Store.batch_append_messages(conv.id, [
-        %{
-          role: "system",
-          content: "[Space context from Alice] What is the deadline?",
-          metadata: context_metadata
-        },
-        %{
-          role: "system",
-          content: "[Bot response] The deadline is March 15.",
-          metadata: Map.put(context_metadata, "sub_type", "response")
-        }
-      ])
+      {:ok, _msgs} =
+        Store.batch_append_messages(conv.id, [
+          %{
+            role: "system",
+            content: "[Space context from Alice] What is the deadline?",
+            metadata: context_metadata
+          },
+          %{
+            role: "system",
+            content: "[Bot response] The deadline is March 15.",
+            metadata: Map.put(context_metadata, "sub_type", "response")
+          }
+        ])
 
       assert {:ok, workspace} = Workspace.load(user.id)
 
@@ -76,13 +82,19 @@ defmodule Assistant.WorkspaceSpaceContextTest do
     end
 
     test "does NOT render regular system messages as feed items" do
-      user = chat_user_fixture(%{channel: "telegram", external_id: "#{System.unique_integer([:positive])}"})
+      user =
+        chat_user_fixture(%{
+          channel: "telegram",
+          external_id: "#{System.unique_integer([:positive])}"
+        })
+
       {:ok, conv} = Store.get_or_create_perpetual_conversation(user.id)
 
       # Insert a regular system message (no space_context metadata)
-      {:ok, _} = Store.batch_append_messages(conv.id, [
-        %{role: "system", content: "System notification"}
-      ])
+      {:ok, _} =
+        Store.batch_append_messages(conv.id, [
+          %{role: "system", content: "System notification"}
+        ])
 
       assert {:ok, workspace} = Workspace.load(user.id)
 

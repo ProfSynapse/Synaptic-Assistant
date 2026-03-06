@@ -39,7 +39,11 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
     end
 
     test "returns same user_id on repeated calls (idempotent)" do
-      real_user = chat_user_fixture(%{channel: "telegram", external_id: "#{System.unique_integer([:positive])}"})
+      real_user =
+        chat_user_fixture(%{
+          channel: "telegram",
+          external_id: "#{System.unique_integer([:positive])}"
+        })
       settings_user = settings_user_fixture()
 
       settings_user =
@@ -66,17 +70,19 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       email = "upgrade-match-#{System.unique_integer([:positive])}@example.com"
 
       # Create a real chat user with the same email
-      real_user = chat_user_fixture(%{
-        channel: "google_chat",
-        external_id: "users/real_upgrade_#{System.unique_integer([:positive])}",
-        email: String.downcase(email)
-      })
+      real_user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/real_upgrade_#{System.unique_integer([:positive])}",
+          email: String.downcase(email)
+        })
 
       # Create a pseudo-user linked to the settings_user
-      pseudo_user = chat_user_fixture(%{
-        channel: "settings",
-        external_id: "settings:pseudo_#{System.unique_integer([:positive])}"
-      })
+      pseudo_user =
+        chat_user_fixture(%{
+          channel: "settings",
+          external_id: "settings:pseudo_#{System.unique_integer([:positive])}"
+        })
 
       # Create a settings_user with that email, linked to the pseudo
       settings_user = settings_user_fixture(%{email: email})
@@ -98,15 +104,17 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
 
     test "keeps pseudo-user when no email match exists" do
       # Create a pseudo-user
-      pseudo_user = chat_user_fixture(%{
-        channel: "settings",
-        external_id: "settings:keep_#{System.unique_integer([:positive])}"
-      })
+      pseudo_user =
+        chat_user_fixture(%{
+          channel: "settings",
+          external_id: "settings:keep_#{System.unique_integer([:positive])}"
+        })
 
       # Settings user with email that doesn't match any real user
-      settings_user = settings_user_fixture(%{
-        email: "no-match-#{System.unique_integer([:positive])}@example.com"
-      })
+      settings_user =
+        settings_user_fixture(%{
+          email: "no-match-#{System.unique_integer([:positive])}@example.com"
+        })
 
       settings_user =
         settings_user

@@ -447,6 +447,173 @@ defmodule Assistant.Config.LoaderTest do
   end
 
   # ---------------------------------------------------------------
+  # resolve_fast_model/2
+  # ---------------------------------------------------------------
+
+  describe "resolve_fast_model/2" do
+    test "returns primary role model when it exists", %{config_path: path} do
+      # sentinel defaults to :fast tier, test/model-fast has sentinel use_case
+      {:ok, _pid} = Loader.start_link(path: path)
+
+      assert Loader.resolve_fast_model(:sentinel) == "test/model-fast"
+    end
+
+    test "falls back to _fallback role when primary not found" do
+      # Custom YAML: no model for :sentinel directly, but :sentinel_fallback has one
+      yaml = """
+      defaults:
+        orchestrator: primary
+        sentinel_fallback: fast
+
+      models:
+        - id: "test/primary-only"
+          tier: primary
+          description: "Primary model"
+          use_cases:
+            - orchestrator
+          supports_tools: true
+          max_context_tokens: 200000
+          cost_tier: high
+
+        - id: "test/fallback-model"
+          tier: fast
+          description: "Fallback model"
+          use_cases:
+            - sentinel_fallback
+          supports_tools: true
+          max_context_tokens: 100000
+          cost_tier: low
+
+      http:
+        max_retries: 1
+        base_backoff_ms: 100
+        max_backoff_ms: 1000
+        request_timeout_ms: 5000
+        streaming_timeout_ms: 10000
+
+      limits:
+        context_utilization_target: 0.8
+        compaction_trigger_threshold: 0.7
+        response_reserve_tokens: 1024
+        orchestrator_turn_limit: 10
+        sub_agent_turn_limit: 5
+        cache_ttl_seconds: 60
+        orchestrator_cache_breakpoints: 2
+        sub_agent_cache_breakpoints: 1
+      """
+
+      tmp_path = Path.join(System.tmp_dir!(), "cascade_fallback_#{System.unique_integer([:positive])}.yaml")
+      File.write!(tmp_path, yaml)
+      {:ok, _pid} = Loader.start_link(path: tmp_path)
+
+      # :sentinel has no default tier and no model with sentinel use_case
+      # but :sentinel_fallback defaults to :fast and test/fallback-model has that use_case
+      assert Loader.resolve_fast_model(:sentinel) == "test/fallback-model"
+
+      File.rm(tmp_path)
+    end
+
+    test "falls back to first :fast tier model when neither primary nor fallback found" do
+      # Custom YAML: no model matches :compaction or :compaction_fallback use_case,
+      # but a :fast tier model exists
+      yaml = """
+      defaults:
+        orchestrator: primary
+
+      models:
+        - id: "test/primary-only"
+          tier: primary
+          description: "Primary model"
+          use_cases:
+            - orchestrator
+          supports_tools: true
+          max_context_tokens: 200000
+          cost_tier: high
+
+        - id: "test/fast-generic"
+          tier: fast
+          description: "Fast generic model"
+          use_cases:
+            - orchestrator
+          supports_tools: true
+          max_context_tokens: 100000
+          cost_tier: low
+
+      http:
+        max_retries: 1
+        base_backoff_ms: 100
+        max_backoff_ms: 1000
+        request_timeout_ms: 5000
+        streaming_timeout_ms: 10000
+
+      limits:
+        context_utilization_target: 0.8
+        compaction_trigger_threshold: 0.7
+        response_reserve_tokens: 1024
+        orchestrator_turn_limit: 10
+        sub_agent_turn_limit: 5
+        cache_ttl_seconds: 60
+        orchestrator_cache_breakpoints: 2
+        sub_agent_cache_breakpoints: 1
+      """
+
+      tmp_path = Path.join(System.tmp_dir!(), "cascade_fast_#{System.unique_integer([:positive])}.yaml")
+      File.write!(tmp_path, yaml)
+      {:ok, _pid} = Loader.start_link(path: tmp_path)
+
+      # :compaction has no default tier, no model with compaction use_case,
+      # no compaction_fallback either, but fast-generic exists
+      assert Loader.resolve_fast_model(:compaction) == "test/fast-generic"
+
+      File.rm(tmp_path)
+    end
+
+    test "returns nil when no model found at any cascade level" do
+      # Custom YAML: no :fast tier models at all
+      yaml = """
+      defaults:
+        orchestrator: primary
+
+      models:
+        - id: "test/primary-only"
+          tier: primary
+          description: "Primary model"
+          use_cases:
+            - orchestrator
+          supports_tools: true
+          max_context_tokens: 200000
+          cost_tier: high
+
+      http:
+        max_retries: 1
+        base_backoff_ms: 100
+        max_backoff_ms: 1000
+        request_timeout_ms: 5000
+        streaming_timeout_ms: 10000
+
+      limits:
+        context_utilization_target: 0.8
+        compaction_trigger_threshold: 0.7
+        response_reserve_tokens: 1024
+        orchestrator_turn_limit: 10
+        sub_agent_turn_limit: 5
+        cache_ttl_seconds: 60
+        orchestrator_cache_breakpoints: 2
+        sub_agent_cache_breakpoints: 1
+      """
+
+      tmp_path = Path.join(System.tmp_dir!(), "cascade_nil_#{System.unique_integer([:positive])}.yaml")
+      File.write!(tmp_path, yaml)
+      {:ok, _pid} = Loader.start_link(path: tmp_path)
+
+      # :sentinel has no match, no fallback, no fast tier
+      assert Loader.resolve_fast_model(:sentinel) == nil
+
+      File.rm(tmp_path)
+    end
+  end
+
+  # ---------------------------------------------------------------
   # reload/0
   # ---------------------------------------------------------------
 

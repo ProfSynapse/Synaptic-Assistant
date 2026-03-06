@@ -24,6 +24,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.ModelCatalog
   alias Assistant.ModelDefaults
   alias Assistant.OrchestratorSystemPrompt
+  alias Assistant.SettingsUserConnectorStates
   alias Assistant.SkillPermissions
   alias Assistant.Sync.StateStore
   alias Assistant.Transcripts
@@ -156,23 +157,27 @@ defmodule AssistantWeb.SettingsLive.Events do
       unless Registry.known_key?(key) do
         {:noreply, put_flash(socket, :error, "Unknown integration key.")}
       else
-        value = String.trim(value)
-
-        if value == "" do
-          {:noreply, put_flash(socket, :error, "Value cannot be blank.")}
+        if not key_allowed_for_current_admin_integration?(socket, key) do
+          {:noreply, put_flash(socket, :error, "Invalid integration key for this page.")}
         else
-          admin_id = socket.assigns.current_scope.settings_user.id
+          value = String.trim(value)
 
-          case save_integration_setting(key, value, admin_id, socket) do
-            {:ok, _setting} ->
-              {:noreply,
-               socket
-               |> maybe_generate_telegram_connect_link_after_save(key, value)
-               |> maybe_put_saved_integration_flash(key)
-               |> maybe_reload_integration_settings_after_save(key)}
+          if value == "" do
+            {:noreply, put_flash(socket, :error, "Value cannot be blank.")}
+          else
+            admin_id = socket.assigns.current_scope.settings_user.id
 
-            {:error, _} ->
-              {:noreply, put_flash(socket, :error, "Unable to save integration setting.")}
+            case save_integration_setting(key, value, admin_id, socket) do
+              {:ok, _setting} ->
+                {:noreply,
+                 socket
+                 |> maybe_generate_telegram_connect_link_after_save(key, value)
+                 |> maybe_put_saved_integration_flash(key)
+                 |> maybe_reload_integration_settings_after_save(key)}
+
+              {:error, _} ->
+                {:noreply, put_flash(socket, :error, "Unable to save integration setting.")}
+            end
           end
         end
       end
@@ -691,23 +696,69 @@ defmodule AssistantWeb.SettingsLive.Events do
     {:noreply, persist_model_defaults(socket, params, flash?: true)}
   end
 
-  def handle_event("toggle_skill_permission", %{"skill" => skill, "enabled" => enabled}, socket) do
-    if socket.assigns.current_scope.settings_user.is_admin do
-      enabled? = enabled == "true"
+  def handle_event("toggle_connector", %{"group" => group, "enabled" => enabled} = params, socket) do
+    enabled? = enabled == "true"
+    app_id = Map.get(params, "app_id", "")
+    app = Data.find_app(app_id)
 
-      case SkillPermissions.set_enabled(skill, enabled?) do
-        :ok ->
-          {:noreply,
-           socket
-           |> Loaders.load_skill_permissions()
-           |> put_flash(:info, "#{SkillPermissions.skill_label(skill)} updated")}
+    Context.with_settings_user(socket, fn settings_user ->
+      case Context.ensure_linked_user(settings_user) do
+        {:ok, user_id} ->
+          case maybe_require_telegram_setup(app, user_id, enabled?) do
+            :ok ->
+              case SettingsUserConnectorStates.set_enabled_for_user(user_id, group, enabled?) do
+                {:ok, _state} ->
+                  {:noreply,
+                   socket
+                   |> reload_current_user_scope()
+                   |> Loaders.load_connector_states()
+                   |> maybe_reload_current_app_detail()
+                   |> put_flash(:info, connector_toggle_flash(app, enabled?))}
+
+                {:error, _changeset} ->
+                  {:noreply, put_flash(socket, :error, "Unable to update connector state.")}
+              end
+
+            {:redirect, reason} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, reason)
+               |> push_navigate(to: "/settings/apps/telegram")}
+          end
 
         {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Failed to update permission: #{inspect(reason)}")}
+          Logger.error("toggle_connector: ensure_linked_user failed", reason: inspect(reason))
+          {:noreply, put_flash(socket, :error, "Unable to prepare your account.")}
       end
-    else
-      {:noreply, put_flash(socket, :error, "Only admins can manage global skill permissions.")}
-    end
+    end)
+  end
+
+  def handle_event("toggle_personal_skill", %{"skill" => skill, "enabled" => enabled}, socket) do
+    enabled? = enabled == "true"
+
+    Context.with_settings_user(socket, fn settings_user ->
+      case Context.ensure_linked_user(settings_user) do
+        {:ok, user_id} ->
+          case SkillPermissions.set_enabled_for_user(user_id, skill, enabled?) do
+            {:ok, _override} ->
+              {:noreply,
+               socket
+               |> reload_current_user_scope()
+               |> Loaders.load_personal_skill_permissions()
+               |> put_flash(:info, "#{SkillPermissions.skill_label(skill)} updated")}
+
+            {:error, _changeset} ->
+              {:noreply, put_flash(socket, :error, "Failed to update personal tool access.")}
+          end
+
+        {:error, reason} ->
+          Logger.error("toggle_personal_skill: ensure_linked_user failed",
+            reason: inspect(reason)
+          )
+
+          {:noreply, put_flash(socket, :error, "Unable to prepare your account.")}
+      end
+    end)
   end
 
   def handle_event("search_help", %{"help" => %{"q" => query}}, socket) do
@@ -868,16 +919,20 @@ defmodule AssistantWeb.SettingsLive.Events do
       unless Registry.known_key?(key) do
         {:noreply, put_flash(socket, :error, "Unknown integration key.")}
       else
-        case IntegrationSettings.delete(String.to_existing_atom(key)) do
-          {:ok, _} ->
-            {:noreply,
-             socket
-             |> maybe_clear_deleted_telegram_setting(key)
-             |> put_flash(:info, "Integration setting reverted to environment variable.")
-             |> reload_integration_settings()}
+        if not key_allowed_for_current_admin_integration?(socket, key) do
+          {:noreply, put_flash(socket, :error, "Invalid integration key for this page.")}
+        else
+          case IntegrationSettings.delete(String.to_existing_atom(key)) do
+            {:ok, _} ->
+              {:noreply,
+               socket
+               |> maybe_clear_deleted_telegram_setting(key)
+               |> put_flash(:info, "Integration setting reverted to environment variable.")
+               |> reload_integration_settings()}
 
-          {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Unable to delete integration setting.")}
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Unable to delete integration setting.")}
+          end
         end
       end
     end
@@ -1332,17 +1387,26 @@ defmodule AssistantWeb.SettingsLive.Events do
   defp reload_integration_settings(socket) do
     section = socket.assigns[:section]
     current_app = socket.assigns[:current_app]
+    current_admin_integration = socket.assigns[:current_admin_integration]
 
     cond do
       current_app != nil ->
         Loaders.load_app_detail_settings(socket, current_app)
 
+      current_admin_integration != nil ->
+        Loaders.load_admin_integration_settings(
+          socket,
+          current_admin_integration.integration_group
+        )
+
       section == "admin" ->
-        assign(socket, :integration_settings, IntegrationSettings.list_all())
+        Loaders.load_admin(socket)
 
       section == "apps" ->
         socket
         |> Loaders.load_apps_integration_settings()
+        |> Loaders.load_workspace_enabled_groups()
+        |> Loaders.load_connector_states()
         |> Loaders.load_connection_status()
 
       true ->
@@ -1367,6 +1431,56 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   defp maybe_prepare_integration_toggle(_group, _enabled, _admin_id), do: :ok
+
+  defp key_allowed_for_current_admin_integration?(socket, key) do
+    case socket.assigns[:current_admin_integration] do
+      nil ->
+        true
+
+      %{integration_group: integration_group} ->
+        case Registry.definition_for_key(key) do
+          %{group: ^integration_group} -> true
+          _ -> false
+        end
+    end
+  end
+
+  defp maybe_reload_current_app_detail(socket) do
+    case socket.assigns[:current_app] do
+      nil -> socket
+      app -> Loaders.load_app_detail_settings(socket, app)
+    end
+  end
+
+  defp connector_toggle_flash(%{name: name}, true), do: "#{name} enabled."
+  defp connector_toggle_flash(%{name: name}, false), do: "#{name} disabled."
+  defp connector_toggle_flash(_, true), do: "Connector enabled."
+  defp connector_toggle_flash(_, false), do: "Connector disabled."
+
+  defp maybe_require_telegram_setup(%{id: "telegram"}, user_id, true) do
+    cond do
+      not telegram_bot_configured?() ->
+        {:redirect, "Your admin must configure Telegram before you can enable it."}
+
+      true ->
+        case AccountLink.linked_identity_for_user(user_id) do
+          {:ok, _identity} ->
+            :ok
+
+          {:error, :not_connected} ->
+            {:redirect, "Finish Telegram setup in Settings before enabling it."}
+        end
+    end
+  end
+
+  defp maybe_require_telegram_setup(_app, _user_id, _enabled), do: :ok
+
+  defp telegram_bot_configured? do
+    case IntegrationSettings.get(:telegram_bot_token) do
+      token when is_binary(token) -> String.trim(token) != ""
+      _ -> false
+    end
+  end
 
   defp ensure_telegram_webhook_secret(admin_id) do
     case IntegrationSettings.get(:telegram_webhook_secret) do

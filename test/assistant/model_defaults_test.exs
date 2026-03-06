@@ -179,10 +179,10 @@ defmodule Assistant.ModelDefaultsTest do
 
     test "nil returns global defaults only" do
       admin = admin_settings_user_fixture()
-      :ok = save_and_warm_cache([admin, %{"fallback" => "openai/gpt-5-mini"}])
+      :ok = save_and_warm_cache([admin, %{"orchestrator_fallback" => "openai/gpt-5-mini"}])
 
       effective = ModelDefaults.effective_defaults(nil)
-      assert Map.get(effective, "fallback") == "openai/gpt-5-mini"
+      assert Map.get(effective, "orchestrator_fallback") == "openai/gpt-5-mini"
     end
   end
 
@@ -195,7 +195,7 @@ defmodule Assistant.ModelDefaultsTest do
       # With legacy defaults path overridden to nonexistent file,
       # no DB defaults set, should return nil for any valid role
       assert ModelDefaults.default_model_id(:orchestrator) == nil
-      assert ModelDefaults.default_model_id(:fallback) == nil
+      assert ModelDefaults.default_model_id(:orchestrator_fallback) == nil
     end
 
     test "returns the global default when set" do

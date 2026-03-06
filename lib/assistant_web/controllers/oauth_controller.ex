@@ -325,7 +325,10 @@ defmodule AssistantWeb.OAuthController do
         case Assistant.Repo.get(Assistant.Schemas.User, existing_user_id) do
           %{channel: "settings"} ->
             # Pseudo-user — upgrade to the real chat user
-            case Assistant.Channels.UserResolver.upgrade_pseudo_user(existing_user_id, chat_user_id) do
+            case Assistant.Channels.UserResolver.upgrade_pseudo_user(
+                   existing_user_id,
+                   chat_user_id
+                 ) do
               {:ok, _} ->
                 Logger.info("OAuth callback: upgraded pseudo-user to chat user",
                   settings_user_id: settings_user.id,
