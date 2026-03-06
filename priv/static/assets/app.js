@@ -113,6 +113,10 @@
       window.removeEventListener("resize", this.handleResize)
     },
 
+    nodeRadius(node) {
+      return Math.sqrt(Math.max(4, 2 + (node.connection_count || 0) * 1.5)) * 2
+    },
+
     initGraph() {
       const createForceGraph = window.ForceGraph
 
@@ -120,25 +124,102 @@
         return
       }
 
+      const self = this
+
       this.graph = createForceGraph()(this.canvasEl)
         .nodeId("id")
-        .nodeLabel((node) => node.label || node.id || "node")
-        .nodeColor((node) => node.color || "#29abe2")
-        .nodeVal((node) => node.val || 6)
+        .nodeLabel("")
+        .nodeVal((node) => Math.max(4, 2 + (node.connection_count || 0) * 1.5))
+        .nodeCanvasObject((node, ctx, globalScale) => {
+          const r = self.nodeRadius(node)
+          const fontSize = Math.max(10 / globalScale, 1.5)
+          const nodeOpacity = node._opacity !== undefined ? node._opacity : 1
+
+          ctx.globalAlpha = nodeOpacity
+
+          // Glow
+          ctx.shadowColor = node.color || "#29abe2"
+          ctx.shadowBlur = nodeOpacity > 0.5 ? 8 : 0
+
+          // Circle
+          ctx.beginPath()
+          ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
+          ctx.fillStyle = node.color || "#29abe2"
+          ctx.fill()
+
+          ctx.shadowBlur = 0
+
+          // Label (only if zoomed in enough)
+          if (globalScale > 0.7) {
+            ctx.font = `${fontSize}px Sans-Serif`
+            ctx.textAlign = "center"
+            ctx.textBaseline = "top"
+            ctx.fillStyle = `rgba(220, 225, 230, ${nodeOpacity})`
+            ctx.fillText(node.label || "", node.x, node.y + r + 2)
+          }
+
+          ctx.globalAlpha = 1
+        })
+        .nodePointerAreaPaint((node, color, ctx) => {
+          const r = self.nodeRadius(node)
+          ctx.beginPath()
+          ctx.arc(node.x, node.y, r, 0, 2 * Math.PI)
+          ctx.fillStyle = color
+          ctx.fill()
+        })
         .linkColor((link) => link.color || "rgba(104, 123, 135, 0.32)")
         .linkWidth((link) => (link.kind === "relation" ? 1.9 : 1.3))
+        .linkLineDash((link) => (link.kind === "mention" ? [4, 2] : null))
         .linkLabel((link) => link.label || "")
         .linkDirectionalArrowLength((link) => (link.directional ? 4 : 0))
         .linkDirectionalArrowRelPos(1)
-        .cooldownTicks(90)
+        .backgroundColor("transparent")
+        .cooldownTicks(Infinity)
+        .d3AlphaDecay(0.008)
+        .d3VelocityDecay(0.3)
+        .onNodeHover((hoveredNode) => {
+          self.canvasEl.style.cursor = hoveredNode ? "pointer" : "grab"
+
+          if (hoveredNode) {
+            const neighborIds = new Set()
+            neighborIds.add(hoveredNode.id)
+
+            self.graphData.links.forEach((link) => {
+              const sourceId = typeof link.source === "object" ? link.source.id : link.source
+              const targetId = typeof link.target === "object" ? link.target.id : link.target
+              if (sourceId === hoveredNode.id) neighborIds.add(targetId)
+              if (targetId === hoveredNode.id) neighborIds.add(sourceId)
+            })
+
+            self.graphData.nodes.forEach((n) => {
+              n._opacity = neighborIds.has(n.id) ? 1 : 0.12
+            })
+          } else {
+            self.graphData.nodes.forEach((n) => {
+              n._opacity = 1
+            })
+          }
+
+          self.graph.linkColor((link) => {
+            if (!hoveredNode) return link.color || "rgba(104, 123, 135, 0.32)"
+            const sourceId = typeof link.source === "object" ? link.source.id : link.source
+            const targetId = typeof link.target === "object" ? link.target.id : link.target
+            const isConnected = sourceId === hoveredNode.id || targetId === hoveredNode.id
+            return isConnected
+              ? (link.color || "rgba(104, 123, 135, 0.8)")
+              : "rgba(104, 123, 135, 0.05)"
+          })
+        })
         .onNodeClick((node) => {
-          if (node && node.id) {
-            this.pushEvent("expand_node", { node_id: node.id })
+          if (!node || !node.id) return
+          const parts = node.id.split(":")
+          if (parts.length >= 2) {
+            self.pushEvent("navigate_node", { kind: parts[0], id: parts.slice(1).join(":") })
           }
         })
 
       if (typeof this.graph.enableNodeDrag === "function") {
-        this.graph.enableNodeDrag(false)
+        this.graph.enableNodeDrag(true)
       }
 
       if (typeof this.graph.enableZoomPanInteraction === "function") {
@@ -225,6 +306,7 @@
       if (!this.graph) return
 
       this.graphData = this.normalizePayload(payload)
+      this.graphData.nodes.forEach((n) => { n._opacity = 1 })
       this.graph.graphData(this.graphData)
       this.resize()
     },
@@ -237,6 +319,7 @@
       const nextNodes = this.mergeNodes(this.graphData.nodes, incoming.nodes)
       const nextLinks = this.mergeLinks(this.graphData.links, incoming.links)
       this.graphData = { nodes: nextNodes, links: nextLinks }
+      this.graphData.nodes.forEach((n) => { n._opacity = 1 })
       this.graph.graphData(this.graphData)
       this.resize()
     },

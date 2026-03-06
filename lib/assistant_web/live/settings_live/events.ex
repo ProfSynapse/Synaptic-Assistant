@@ -1280,6 +1280,24 @@ defmodule AssistantWeb.SettingsLive.Events do
     {:noreply, assign(socket, :selected_memory, nil)}
   end
 
+  def handle_event("navigate_node", %{"kind" => "memory", "id" => id}, socket) do
+    case MemoryExplorer.get_memory(id) do
+      {:ok, memory} ->
+        {:noreply, assign(socket, :selected_memory, memory)}
+
+      {:error, :not_found} ->
+        {:noreply, put_flash(socket, :error, "Memory not found")}
+    end
+  end
+
+  def handle_event("navigate_node", %{"kind" => "entity", "id" => id}, socket) do
+    {:noreply, assign(socket, :selected_entity_id, id)}
+  end
+
+  def handle_event("navigate_node", _params, socket) do
+    {:noreply, socket}
+  end
+
   defp sync_target_drives(socket) do
     socket.assigns[:connected_drives]
     |> List.wrap()
