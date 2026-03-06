@@ -128,7 +128,9 @@ defmodule Assistant.Config.ModelForDefaultsTest do
 
     # Admin sets a global model default for orchestrator
     admin = admin_settings_user_fixture(%{email: unique_settings_user_email()})
-    assert :ok = ModelDefaults.save_defaults(admin, %{"orchestrator" => "test/admin-override-model"})
+
+    assert :ok =
+             ModelDefaults.save_defaults(admin, %{"orchestrator" => "test/admin-override-model"})
 
     # Allow PubSub invalidation, then re-warm cache
     Process.sleep(10)

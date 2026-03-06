@@ -14,8 +14,8 @@ defmodule Assistant.Repo.Migrations.AddLeftAtToUserIdentities do
     end
 
     create index(:user_identities, [:space_id],
-      name: :idx_user_identities_space_active,
-      where: "left_at IS NULL AND space_id IS NOT NULL"
-    )
+             name: :idx_user_identities_space_active,
+             where: "left_at IS NULL AND space_id IS NOT NULL"
+           )
   end
 end

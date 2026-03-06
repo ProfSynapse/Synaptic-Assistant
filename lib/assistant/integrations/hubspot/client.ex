@@ -137,7 +137,8 @@ defmodule Assistant.Integrations.HubSpot.Client do
   def get_company(api_key, id), do: crm_get(api_key, "companies", id, @company_properties)
 
   @spec update_company(String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def update_company(api_key, id, properties), do: crm_update(api_key, "companies", id, properties)
+  def update_company(api_key, id, properties),
+    do: crm_update(api_key, "companies", id, properties)
 
   @spec delete_company(String.t(), String.t()) :: :ok | {:error, term()}
   def delete_company(api_key, id), do: crm_delete(api_key, "companies", id)
@@ -204,7 +205,13 @@ defmodule Assistant.Integrations.HubSpot.Client do
     * `{:ok, [map()]}` — list of matching objects
     * `{:error, reason}` — API or network error
   """
-  @spec crm_search_multi(String.t(), String.t(), [{String.t(), String.t(), String.t()}], pos_integer(), [String.t()]) ::
+  @spec crm_search_multi(
+          String.t(),
+          String.t(),
+          [{String.t(), String.t(), String.t()}],
+          pos_integer(),
+          [String.t()]
+        ) ::
           {:ok, [map()]} | {:error, term()}
   def crm_search_multi(api_key, object_type, filters, limit, properties_list) do
     crm_search(api_key, object_type, filters, limit, properties_list)

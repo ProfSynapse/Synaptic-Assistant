@@ -35,7 +35,8 @@ defmodule Assistant.Skills.HubSpot.Deals.Create do
     dealname = Map.get(flags, "dealname")
 
     if is_nil(dealname) || dealname == "" do
-      {:ok, %Result{status: :error, content: "Missing required parameter: --dealname (deal name)."}}
+      {:ok,
+       %Result{status: :error, content: "Missing required parameter: --dealname (deal name)."}}
     else
       case Helpers.parse_properties_json(Map.get(flags, "properties")) do
         {:error, message} ->

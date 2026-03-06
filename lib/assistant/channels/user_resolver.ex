@@ -429,7 +429,8 @@ defmodule Assistant.Channels.UserResolver do
           # Second: check settings_users for a linked pseudo-user
           pseudo_query =
             from su in SettingsUser,
-              join: u in User, on: u.id == su.user_id,
+              join: u in User,
+              on: u.id == su.user_id,
               where: fragment("lower(?)", su.email) == ^normalized_email,
               where: not is_nil(su.user_id),
               where: u.channel == "settings",
@@ -445,7 +446,8 @@ defmodule Assistant.Channels.UserResolver do
               # (handles case where settings_user email matches but user.email wasn't set yet)
               settings_real_query =
                 from su in SettingsUser,
-                  join: u in User, on: u.id == su.user_id,
+                  join: u in User,
+                  on: u.id == su.user_id,
                   where: fragment("lower(?)", su.email) == ^normalized_email,
                   where: not is_nil(su.user_id),
                   where: u.channel != "settings" or is_nil(u.channel),

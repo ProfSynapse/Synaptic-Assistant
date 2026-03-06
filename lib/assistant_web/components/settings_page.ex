@@ -7,6 +7,7 @@ defmodule AssistantWeb.Components.SettingsPage do
 
   import AssistantWeb.Components.SettingsPage.Admin,
     only: [admin_integration_detail_section: 1, admin_section: 1]
+
   import AssistantWeb.Components.SettingsPage.Analytics, only: [analytics_section: 1]
   import AssistantWeb.Components.SettingsPage.AppDetail, only: [app_detail_section: 1]
   import AssistantWeb.Components.SettingsPage.Apps, only: [apps_section: 1]

@@ -145,7 +145,9 @@ defmodule Assistant.SkillPermissions.EnabledForUserTest do
   end
 
   describe "3-layer gate: all enabled" do
-    test "returns true when global enabled, no user override, non-hubspot skill", %{user_id: user_id} do
+    test "returns true when global enabled, no user override, non-hubspot skill", %{
+      user_id: user_id
+    } do
       assert SkillPermissions.enabled_for_user?(user_id, "email.send") == true
     end
 

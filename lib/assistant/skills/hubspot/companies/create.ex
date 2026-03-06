@@ -35,7 +35,8 @@ defmodule Assistant.Skills.HubSpot.Companies.Create do
     name = Map.get(flags, "name")
 
     if is_nil(name) || name == "" do
-      {:ok, %Result{status: :error, content: "Missing required parameter: --name (company name)."}}
+      {:ok,
+       %Result{status: :error, content: "Missing required parameter: --name (company name)."}}
     else
       case Helpers.parse_properties_json(Map.get(flags, "properties")) do
         {:error, message} ->

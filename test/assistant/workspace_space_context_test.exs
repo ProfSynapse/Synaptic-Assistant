@@ -108,26 +108,32 @@ defmodule Assistant.WorkspaceSpaceContextTest do
     end
 
     test "space context messages appear alongside normal user/assistant messages" do
-      user = chat_user_fixture(%{channel: "google_chat", external_id: "users/ws_mixed_#{System.unique_integer([:positive])}"})
+      user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/ws_mixed_#{System.unique_integer([:positive])}"
+        })
+
       {:ok, conv} = Store.get_or_create_perpetual_conversation(user.id)
 
       # Insert mixed messages
-      {:ok, _} = Store.batch_append_messages(conv.id, [
-        %{role: "user", content: "My own question"},
-        %{role: "assistant", content: "My own answer"},
-        %{
-          role: "system",
-          content: "[Space context from Bob] His question",
-          metadata: %{
-            "type" => "space_context",
-            "sub_type" => "question",
-            "source" => %{
-              "kind" => "space_context",
-              "sender_display_name" => "Bob"
+      {:ok, _} =
+        Store.batch_append_messages(conv.id, [
+          %{role: "user", content: "My own question"},
+          %{role: "assistant", content: "My own answer"},
+          %{
+            role: "system",
+            content: "[Space context from Bob] His question",
+            metadata: %{
+              "type" => "space_context",
+              "sub_type" => "question",
+              "source" => %{
+                "kind" => "space_context",
+                "sender_display_name" => "Bob"
+              }
             }
           }
-        }
-      ])
+        ])
 
       assert {:ok, workspace} = Workspace.load(user.id)
 
@@ -138,23 +144,29 @@ defmodule Assistant.WorkspaceSpaceContextTest do
     end
 
     test "uses 'A colleague' as fallback when sender_display_name is missing" do
-      user = chat_user_fixture(%{channel: "google_chat", external_id: "users/ws_noname_#{System.unique_integer([:positive])}"})
+      user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/ws_noname_#{System.unique_integer([:positive])}"
+        })
+
       {:ok, conv} = Store.get_or_create_perpetual_conversation(user.id)
 
-      {:ok, _} = Store.batch_append_messages(conv.id, [
-        %{
-          role: "system",
-          content: "[Space context from A colleague] Question text",
-          metadata: %{
-            "type" => "space_context",
-            "sub_type" => "question",
-            "source" => %{
-              "kind" => "space_context"
-              # no sender_display_name
+      {:ok, _} =
+        Store.batch_append_messages(conv.id, [
+          %{
+            role: "system",
+            content: "[Space context from A colleague] Question text",
+            metadata: %{
+              "type" => "space_context",
+              "sub_type" => "question",
+              "source" => %{
+                "kind" => "space_context"
+                # no sender_display_name
+              }
             }
           }
-        }
-      ])
+        ])
 
       assert {:ok, workspace} = Workspace.load(user.id)
 

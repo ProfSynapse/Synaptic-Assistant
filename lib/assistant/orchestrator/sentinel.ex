@@ -202,7 +202,8 @@ defmodule Assistant.Orchestrator.Sentinel do
             {:ok, {:rejected, reason}}
 
           {:error, parse_reason} ->
-            Logger.warning("Sentinel response parse failed (#{inspect(parse_reason)}), approving (fail-open)",
+            Logger.warning(
+              "Sentinel response parse failed (#{inspect(parse_reason)}), approving (fail-open)",
               agent_id: proposed_action[:agent_id],
               skill_name: proposed_action[:skill_name],
               content: content,

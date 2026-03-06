@@ -294,8 +294,17 @@ defmodule Assistant.Integration.ApprovalGateLLMTest do
       turn1_lower = String.downcase(turn1_response)
 
       approval_indicators =
-        ["approv", "confirm", "proceed", "shall i", "would you like",
-         "go ahead", "authorize", "review", "send"]
+        [
+          "approv",
+          "confirm",
+          "proceed",
+          "shall i",
+          "would you like",
+          "go ahead",
+          "authorize",
+          "review",
+          "send"
+        ]
 
       assert Enum.any?(approval_indicators, &String.contains?(turn1_lower, &1)),
              "Turn 1: Expected approval prompt. Got: #{turn1_response}"
@@ -386,8 +395,16 @@ defmodule Assistant.Integration.ApprovalGateLLMTest do
       # Should present approval prompt with details
       has_approval =
         Enum.any?(
-          ["approv", "confirm", "proceed", "shall i", "would you like",
-           "go ahead", "send", "review"],
+          [
+            "approv",
+            "confirm",
+            "proceed",
+            "shall i",
+            "would you like",
+            "go ahead",
+            "send",
+            "review"
+          ],
           &String.contains?(turn1_lower, &1)
         )
 
@@ -407,9 +424,20 @@ defmodule Assistant.Integration.ApprovalGateLLMTest do
 
       # The orchestrator should acknowledge the cancellation
       cancellation_indicators =
-        ["cancel", "won't send", "not send", "understood", "okay",
-         "noted", "acknowledged", "didn't send", "haven't sent",
-         "will not", "stopped", "discarded"]
+        [
+          "cancel",
+          "won't send",
+          "not send",
+          "understood",
+          "okay",
+          "noted",
+          "acknowledged",
+          "didn't send",
+          "haven't sent",
+          "will not",
+          "stopped",
+          "discarded"
+        ]
 
       has_cancellation =
         Enum.any?(cancellation_indicators, &String.contains?(turn2_lower, &1))
@@ -452,8 +480,16 @@ defmodule Assistant.Integration.ApprovalGateLLMTest do
 
       has_approval =
         Enum.any?(
-          ["approv", "confirm", "proceed", "shall i", "would you like",
-           "go ahead", "send", "review"],
+          [
+            "approv",
+            "confirm",
+            "proceed",
+            "shall i",
+            "would you like",
+            "go ahead",
+            "send",
+            "review"
+          ],
           &String.contains?(turn1_lower, &1)
         )
 
@@ -475,9 +511,21 @@ defmodule Assistant.Integration.ApprovalGateLLMTest do
       # a) Present updated email for approval (ideal)
       # b) Acknowledge and ask for confirmation with new details
       modification_indicators =
-        ["dana@example.com", "q2 project update", "cc", "updated",
-         "changed", "modified", "revised", "new version",
-         "approv", "confirm", "proceed", "shall i", "send"]
+        [
+          "dana@example.com",
+          "q2 project update",
+          "cc",
+          "updated",
+          "changed",
+          "modified",
+          "revised",
+          "new version",
+          "approv",
+          "confirm",
+          "proceed",
+          "shall i",
+          "send"
+        ]
 
       has_modification_response =
         Enum.any?(modification_indicators, &String.contains?(turn2_lower, &1))
@@ -520,8 +568,11 @@ defmodule Assistant.Integration.ApprovalGateLLMTest do
           response_lower = String.downcase(response)
 
           # Should NOT contain approval-gate-specific language
-          approval_phrases = ["requires.*approval", "approve this action",
-                              "\\[approval_required\\]"]
+          approval_phrases = [
+            "requires.*approval",
+            "approve this action",
+            "\\[approval_required\\]"
+          ]
 
           has_approval_gate =
             Enum.any?(approval_phrases, fn phrase ->
