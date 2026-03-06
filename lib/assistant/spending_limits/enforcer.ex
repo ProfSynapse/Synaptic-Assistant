@@ -40,4 +40,24 @@ defmodule Assistant.SpendingLimits.Enforcer do
 
     :ok
   end
+
+  @doc """
+  Extracts usage from an LLM response and records spending for the user.
+
+  Accepts a state map with `:user_id` and an LLM response map. Extracts
+  `:cost`, `:prompt_tokens`, and `:completion_tokens` from `response[:usage]`
+  and delegates to `record_usage/2`.
+
+  Used by LoopRunner and SubAgent after successful LLM calls.
+  """
+  @spec record_spending(map(), map() | nil) :: :ok
+  def record_spending(state, response) do
+    usage = if is_map(response), do: response[:usage] || %{}, else: %{}
+
+    record_usage(state[:user_id], %{
+      cost: usage[:cost] || 0.0,
+      prompt_tokens: usage[:prompt_tokens] || 0,
+      completion_tokens: usage[:completion_tokens] || 0
+    })
+  end
 end

@@ -1613,13 +1613,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   defp record_spending(engine_state, response) do
-    usage = if is_map(response), do: response[:usage] || %{}, else: %{}
-
-    SpendingLimits.Enforcer.record_usage(engine_state[:user_id], %{
-      cost: usage[:cost] || 0.0,
-      prompt_tokens: usage[:prompt_tokens] || 0,
-      completion_tokens: usage[:completion_tokens] || 0
-    })
+    SpendingLimits.Enforcer.record_spending(engine_state, response)
   end
 
   # --- Resume Helpers ---

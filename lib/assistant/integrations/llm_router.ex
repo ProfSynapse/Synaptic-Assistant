@@ -83,19 +83,24 @@ defmodule Assistant.Integrations.LLMRouter do
   @spec chat_completion([map()], keyword(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
   def chat_completion(messages, opts, user_id) when is_list(opts) do
-    unless Keyword.get(opts, :skip_spending_check, false) do
+    if Keyword.get(opts, :skip_spending_check, false) do
+      do_chat_completion(messages, opts, user_id)
+    else
       case SpendingLimits.Enforcer.check_budget(user_id) do
         :ok ->
-          :proceed
+          do_chat_completion(messages, opts, user_id)
 
         {:warning, pct} ->
           Logger.info("User #{user_id} at #{pct}% of spending budget")
+          do_chat_completion(messages, opts, user_id)
 
         {:error, :over_budget} ->
-          throw({:over_budget, user_id})
+          {:error, :over_budget}
       end
     end
+  end
 
+  defp do_chat_completion(messages, opts, user_id) do
     model = Keyword.get(opts, :model)
     routing = route(model, user_id)
 
@@ -107,8 +112,6 @@ defmodule Assistant.Integrations.LLMRouter do
       |> Keyword.put(:user_id, user_id)
 
     routing.client.chat_completion(messages, routed_opts)
-  catch
-    {:over_budget, _uid} -> {:error, :over_budget}
   end
 
   @spec image_generation(String.t(), keyword(), String.t() | nil) ::
