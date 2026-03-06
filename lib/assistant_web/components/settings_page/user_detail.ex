@@ -6,8 +6,12 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
   alias AssistantWeb.Components.SettingsPage.Helpers
 
   attr :allowlist_form, :any, required: true
+  attr :managed_scopes, :list, required: true
 
   def user_create_section(assigns) do
+    selected_scopes = List.wrap(assigns.allowlist_form[:scopes] && assigns.allowlist_form[:scopes].value)
+    assigns = assign(assigns, :selected_scopes, selected_scopes)
+
     ~H"""
     <section class="space-y-6">
       <div class="sa-card">
@@ -88,6 +92,28 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
                 aria-label="Toggle admin status"
               />
               <span class="sa-switch-slider"></span>
+            </label>
+          </div>
+
+          <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0 0 16px 0;">Scoped Privileges</h3>
+          <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 0 0 12px 0;">
+            Select which features this user can access.
+          </p>
+
+          <input type="hidden" name="allowlist_entry[scopes][]" value="" />
+          <div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 24px;">
+            <label :for={scope <- @managed_scopes} class="sa-switch" style="display: flex; align-items: center; gap: 0.5rem;">
+              <input
+                type="checkbox"
+                name="allowlist_entry[scopes][]"
+                value={scope}
+                class="sa-switch-input"
+                role="switch"
+                checked={scope in @selected_scopes}
+                aria-label={"Toggle #{scope} access"}
+              />
+              <span class="sa-switch-slider"></span>
+              <span style="font-size: 0.875rem; text-transform: capitalize;">{scope}</span>
             </label>
           </div>
 
