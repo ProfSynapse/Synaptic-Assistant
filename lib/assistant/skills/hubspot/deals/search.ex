@@ -45,7 +45,8 @@ defmodule Assistant.Skills.HubSpot.Deals.Search do
     query = Map.get(flags, "query")
 
     if is_nil(query) || query == "" do
-      {:ok, %Result{status: :error, content: "Missing required parameter: --query (search term)."}}
+      {:ok,
+       %Result{status: :error, content: "Missing required parameter: --query (search term)."}}
     else
       search_by = Map.get(flags, "search_by", "name")
       limit = Helpers.parse_limit(Map.get(flags, "limit"))
@@ -72,7 +73,13 @@ defmodule Assistant.Skills.HubSpot.Deals.Search do
 
     case Helpers.parse_filters_json(filters_json) do
       {:ok, filters} ->
-        case Client.crm_search_multi(api_key, "deals", filters, limit, ~w(dealname amount closedate dealstage pipeline description)) do
+        case Client.crm_search_multi(
+               api_key,
+               "deals",
+               filters,
+               limit,
+               ~w(dealname amount closedate dealstage pipeline description)
+             ) do
           {:ok, deals} ->
             formatted = Helpers.format_object_list(deals, Helpers.deal_fields(), "deals")
             {:ok, %Result{status: :ok, content: formatted}}

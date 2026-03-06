@@ -16,7 +16,8 @@ defmodule Assistant.Sync.Converter do
 
   Converts Drive files into local text formats for indexing and search.
   Each conversion returns `{:ok, {content_binary, local_format_string}}`
-  where `local_format_string` is one of: `"md"`, `"csv"`, `"txt"`, `"json"`.
+  where `local_format_string` is one of: `"md"`, `"csv"`, `"txt"`, `"json"`,
+  `"pdf"`, `"png"`, `"jpg"`, `"webp"`, `"gif"`, `"svg"`, or `"bin"`.
 
   ## Conversion Rules
 
@@ -137,7 +138,7 @@ defmodule Assistant.Sync.Converter do
 
     case download_file(conn, file_id) do
       {:ok, content} ->
-        format = format_from_mime(mime_type)
+        format = local_format_for_mime(mime_type)
         {:ok, {content, format}}
 
       {:error, _} = error ->
@@ -216,10 +217,26 @@ defmodule Assistant.Sync.Converter do
     "text/csv" => "csv",
     "text/html" => "txt",
     "application/json" => "json",
-    "application/pdf" => "txt"
+    "application/pdf" => "pdf",
+    "image/png" => "png",
+    "image/jpeg" => "jpg",
+    "image/jpg" => "jpg",
+    "image/webp" => "webp",
+    "image/gif" => "gif",
+    "image/svg+xml" => "svg"
   }
 
-  defp format_from_mime(mime_type) do
+  @doc """
+  Resolves the local synced-file format for a remote MIME type.
+
+  Text-like formats keep their text extension. PDFs and common image types keep
+  an asset-specific format so they can be treated as binary attachments later.
+  Unknown binaries fall back to `"bin"`.
+  """
+  @spec local_format_for_mime(String.t() | nil) :: String.t()
+  def local_format_for_mime(mime_type)
+
+  def local_format_for_mime(mime_type) when is_binary(mime_type) do
     case Map.get(@mime_to_format, mime_type) do
       nil ->
         if String.starts_with?(mime_type, "text/"), do: "txt", else: "bin"
@@ -228,4 +245,6 @@ defmodule Assistant.Sync.Converter do
         format
     end
   end
+
+  def local_format_for_mime(_mime_type), do: "bin"
 end

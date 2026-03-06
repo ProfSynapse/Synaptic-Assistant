@@ -602,6 +602,61 @@ defmodule Assistant.Sync.StateStoreTest do
       assert {:ok, _} = StateStore.delete_scope(scope)
       assert nil == StateStore.get_scope(user.id, nil, nil)
     end
+
+    test "upsert_scope creates file scope", %{user: user} do
+      assert {:ok, scope} =
+               StateStore.upsert_scope(%{
+                 user_id: user.id,
+                 drive_id: "shared-001",
+                 folder_id: "folder-abc",
+                 folder_name: "Reports",
+                 file_id: "file-123",
+                 file_name: "Plan",
+                 file_mime_type: "application/vnd.google-apps.document"
+               })
+
+      assert scope.scope_type == "file"
+      assert scope.file_id == "file-123"
+      assert scope.file_name == "Plan"
+    end
+
+    test "upsert_scope persists scope_effect", %{user: user} do
+      assert {:ok, scope} =
+               StateStore.upsert_scope(%{
+                 user_id: user.id,
+                 drive_id: nil,
+                 folder_id: "folder-a",
+                 folder_name: "Folder A",
+                 scope_effect: "exclude"
+               })
+
+      assert scope.scope_effect == "exclude"
+    end
+
+    test "delete_scopes_in_targets removes matching folders and files", %{user: user} do
+      {:ok, _folder_scope} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A"
+        })
+
+      {:ok, _file_scope} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A",
+          file_id: "file-a",
+          file_name: "Plan"
+        })
+
+      assert {2, nil} =
+               StateStore.delete_scopes_in_targets(user.id, nil, ["folder-a"], ["file-a"])
+
+      assert StateStore.list_scopes(user.id) == []
+    end
   end
 
   # ---------------------------------------------------------------
@@ -689,6 +744,105 @@ defmodule Assistant.Sync.StateStoreTest do
 
       assert StateStore.folder_in_scope?(user.id, nil, "f1") != nil
       assert StateStore.folder_in_scope?(user_b.id, nil, "f1") == nil
+    end
+
+    test "excluded folder scope blocks the folder", %{user: user} do
+      {:ok, _} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A",
+          scope_effect: "exclude"
+        })
+
+      assert nil == StateStore.folder_in_scope?(user.id, nil, "folder-a")
+    end
+  end
+
+  describe "file_in_scope?/4" do
+    test "returns nil when no scope matches", %{user: user} do
+      assert nil == StateStore.file_in_scope?(user.id, nil, "folder-x", "file-x")
+    end
+
+    test "returns exact file scope when file is allowed", %{user: user} do
+      {:ok, _} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A",
+          file_id: "file-a",
+          file_name: "Plan",
+          file_mime_type: "application/pdf"
+        })
+
+      scope = StateStore.file_in_scope?(user.id, nil, "folder-a", "file-a")
+      assert scope.scope_type == "file"
+      assert scope.file_name == "Plan"
+    end
+
+    test "falls back to folder scope when file scope absent", %{user: user} do
+      {:ok, _} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A"
+        })
+
+      scope = StateStore.file_in_scope?(user.id, nil, "folder-a", "file-a")
+      assert scope.scope_type == "folder"
+      assert scope.folder_name == "Folder A"
+    end
+
+    test "prefers exact file scope over folder scope", %{user: user} do
+      {:ok, _} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A"
+        })
+
+      {:ok, _} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A",
+          file_id: "file-a",
+          file_name: "Plan",
+          file_mime_type: "application/vnd.google-apps.document"
+        })
+
+      scope = StateStore.file_in_scope?(user.id, nil, "folder-a", "file-a")
+      assert scope.scope_type == "file"
+      assert scope.file_id == "file-a"
+    end
+
+    test "exact file exclusion overrides included folder scope", %{user: user} do
+      {:ok, _} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A",
+          scope_effect: "include"
+        })
+
+      {:ok, _} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-a",
+          folder_name: "Folder A",
+          file_id: "file-a",
+          file_name: "Plan",
+          scope_effect: "exclude"
+        })
+
+      assert nil == StateStore.file_in_scope?(user.id, nil, "folder-a", "file-a")
     end
   end
 end

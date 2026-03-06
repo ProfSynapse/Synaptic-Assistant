@@ -49,7 +49,8 @@ defmodule Assistant.Skills.HubSpot.Contacts.Delete do
             {:ok,
              %Result{
                status: :ok,
-               content: "Contact #{id} has been archived successfully.\n\nNote: Archived contacts can be restored from the HubSpot UI.",
+               content:
+                 "Contact #{id} has been archived successfully.\n\nNote: Archived contacts can be restored from the HubSpot UI.",
                side_effects: [:hubspot_contact_deleted],
                metadata: %{contact_id: id}
              }}

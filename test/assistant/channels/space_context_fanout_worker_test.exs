@@ -467,7 +467,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
     test "DM messages are NEVER fanned out even with space members present" do
       space_id = "spaces/DM_PRIV_#{System.unique_integer([:positive])}"
 
-      sender = chat_user_fixture(%{channel: "google_chat", external_id: "users/dm_priv_s_#{System.unique_integer([:positive])}"})
+      sender =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/dm_priv_s_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(sender, %{
         channel: "google_chat",
@@ -475,7 +479,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
         space_id: space_id
       })
 
-      bystander = chat_user_fixture(%{channel: "google_chat", external_id: "users/dm_priv_b_#{System.unique_integer([:positive])}"})
+      bystander =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/dm_priv_b_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(bystander, %{
         channel: "google_chat",

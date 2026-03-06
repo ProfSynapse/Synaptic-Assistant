@@ -336,6 +336,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       socket
       |> assign(:app_integration_settings, [])
       |> load_personal_skill_permissions()
+      |> maybe_load_google_workspace_app_detail(app)
 
     if app.id == "telegram" do
       load_telegram_app_detail(socket, Context.current_settings_user(socket))
@@ -409,6 +410,15 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     |> assign(:telegram_bot_configured, telegram_bot_configured)
     |> assign(:telegram_identity, telegram_identity)
   end
+
+  defp maybe_load_google_workspace_app_detail(socket, %{id: "google_workspace"}) do
+    socket
+    |> load_google_status()
+    |> load_connected_drives()
+    |> load_sync_scopes()
+  end
+
+  defp maybe_load_google_workspace_app_detail(socket, _app), do: socket
 
   def load_workspace_enabled_groups(socket) do
     enabled_by_group =

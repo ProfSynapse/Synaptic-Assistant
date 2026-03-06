@@ -1767,6 +1767,148 @@ a {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
 }
 
+.sa-google-drive-access {
+  display: grid;
+  gap: 1rem;
+}
+
+.sa-drive-table th:last-child,
+.sa-drive-table td:last-child {
+  width: 56px;
+  text-align: right;
+}
+
+.sa-drive-table-row-active td {
+  background: color-mix(in srgb, var(--sa-primary, #2563eb) 8%, white);
+}
+
+.sa-drive-row-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sa-drive-scope-summary {
+  color: var(--sa-text-muted, #6b7280);
+  font-size: 0.92rem;
+}
+
+.sa-drive-manager {
+  border-top: 1px solid var(--sa-border, #e5e7eb);
+  padding-top: 1rem;
+}
+
+.sa-drive-tree {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.sa-drive-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2rem;
+}
+
+.sa-drive-tree-check,
+.sa-drive-tree-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--sa-text-muted, #6b7280);
+}
+
+.sa-drive-tree-chevron {
+  width: 1rem;
+}
+
+.sa-drive-tree-chevron--empty {
+  display: inline-block;
+  width: 1rem;
+}
+
+.sa-drive-tree-check-box {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.28rem;
+  border: 1px solid var(--sa-border, #d1d5db);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: white;
+  color: transparent;
+}
+
+.sa-drive-tree-check-box.is-checked,
+.sa-drive-tree-check-box.is-partial {
+  border-color: var(--sa-primary, #2563eb);
+  background: color-mix(in srgb, var(--sa-primary, #2563eb) 14%, white);
+  color: var(--sa-primary, #2563eb);
+}
+
+.sa-drive-tree-node-icon {
+  color: #9a6700;
+}
+
+.sa-drive-tree-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sa-drive-tree-meta {
+  margin-left: auto;
+  color: var(--sa-text-muted, #6b7280);
+  font-size: 0.75rem;
+}
+
+.sa-drive-file-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.15rem;
+  height: 1.2rem;
+  border-radius: 999px;
+  padding: 0 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.sa-drive-file-badge.is-doc {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.sa-drive-file-badge.is-sheet {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.sa-drive-file-badge.is-slides {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.sa-drive-file-badge.is-pdf {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.sa-drive-file-badge.is-image {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
+.sa-drive-file-badge.is-file {
+  background: #e5e7eb;
+  color: #374151;
+}
+
 /* Detail grid */
 
 .sa-detail-grid {

@@ -54,7 +54,9 @@ defmodule Assistant.Skills.HubSpot.Contacts.Search do
         {:ok, property, operator} ->
           case hubspot.search_contacts(api_key, property, operator, query, limit) do
             {:ok, contacts} ->
-              formatted = Helpers.format_object_list(contacts, Helpers.contact_fields(), "contacts")
+              formatted =
+                Helpers.format_object_list(contacts, Helpers.contact_fields(), "contacts")
+
               {:ok, %Result{status: :ok, content: formatted}}
 
             error ->
@@ -72,7 +74,13 @@ defmodule Assistant.Skills.HubSpot.Contacts.Search do
 
     case Helpers.parse_filters_json(filters_json) do
       {:ok, filters} ->
-        case Client.crm_search_multi(api_key, "contacts", filters, limit, ~w(email firstname lastname phone company)) do
+        case Client.crm_search_multi(
+               api_key,
+               "contacts",
+               filters,
+               limit,
+               ~w(email firstname lastname phone company)
+             ) do
           {:ok, contacts} ->
             formatted = Helpers.format_object_list(contacts, Helpers.contact_fields(), "contacts")
             {:ok, %Result{status: :ok, content: formatted}}

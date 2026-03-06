@@ -24,6 +24,15 @@ defmodule Assistant.ConnectedDrives do
     |> Repo.all()
   end
 
+  @doc "Check whether a drive currently has full access enabled for a user."
+  @spec enabled?(String.t(), String.t() | nil) :: boolean()
+  def enabled?(user_id, drive_id) do
+    ConnectedDrive
+    |> where(user_id: ^user_id, enabled: true)
+    |> where_drive_id(drive_id)
+    |> Repo.exists?()
+  end
+
   @doc "Connect a drive for a user (upsert by user_id + drive_id)."
   @spec connect(String.t(), map()) :: {:ok, ConnectedDrive.t()} | {:error, Ecto.Changeset.t()}
   def connect(user_id, attrs) do
@@ -46,6 +55,10 @@ defmodule Assistant.ConnectedDrives do
     end
   end
 
+  @doc "Fetch a connected drive row by its primary key."
+  @spec get(String.t()) :: ConnectedDrive.t() | nil
+  def get(drive_row_id), do: Repo.get(ConnectedDrive, drive_row_id)
+
   @doc "Disconnect (delete) a drive."
   @spec disconnect(String.t()) :: {:ok, ConnectedDrive.t()} | {:error, term()}
   def disconnect(drive_row_id) do
@@ -67,4 +80,7 @@ defmodule Assistant.ConnectedDrives do
 
   defp conflict_target(_),
     do: {:unsafe_fragment, "(user_id, drive_id) WHERE drive_id IS NOT NULL"}
+
+  defp where_drive_id(query, nil), do: where(query, [d], is_nil(d.drive_id))
+  defp where_drive_id(query, drive_id), do: where(query, [d], d.drive_id == ^drive_id)
 end

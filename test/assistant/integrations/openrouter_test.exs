@@ -111,6 +111,35 @@ defmodule Assistant.Integrations.OpenRouterTest do
       names = Enum.map(body.tools, fn t -> t.function.name end)
       assert names == ["alpha_tool", "middle_tool", "zebra_tool"]
     end
+
+    test "preserves multimodal PDF file parts" do
+      messages = [
+        %{
+          role: "user",
+          content: [
+            %{type: "text", text: "Review this PDF."},
+            %{
+              type: "file",
+              file: %{
+                filename: "plan.pdf",
+                file_data: "data:application/pdf;base64,JVBERi0xLjc="
+              }
+            }
+          ]
+        }
+      ]
+
+      assert {:ok, body} =
+               OpenRouter.build_request_body(messages, model: "anthropic/claude-sonnet-4.6")
+
+      [message] = body.messages
+      [text_part, file_part] = message.content
+
+      assert text_part.type == "text"
+      assert file_part.type == "file"
+      assert file_part.file.filename == "plan.pdf"
+      assert file_part.file.file_data == "data:application/pdf;base64,JVBERi0xLjc="
+    end
   end
 
   # ---------------------------------------------------------------

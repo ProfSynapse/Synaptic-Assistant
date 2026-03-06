@@ -95,19 +95,23 @@ defmodule Assistant.Sync.ConverterTest do
   # ---------------------------------------------------------------
 
   describe "mime type to local format" do
-    # The format_from_mime function is private, but we can infer its
-    # behavior from the convert/4 return tuple. Since API calls fail,
-    # we document the expected mappings here for reference.
-
     test "known mime types map to expected formats" do
-      # Expected mappings (verified through convert/4 code inspection):
-      # text/plain → "txt"
-      # text/markdown → "md"
-      # text/csv → "csv"
-      # application/json → "json"
-      # application/pdf → "txt" (fallback)
-      # unknown → "txt" (default)
-      assert true
+      assert Converter.local_format_for_mime("text/plain") == "txt"
+      assert Converter.local_format_for_mime("text/markdown") == "md"
+      assert Converter.local_format_for_mime("text/csv") == "csv"
+      assert Converter.local_format_for_mime("application/json") == "json"
+      assert Converter.local_format_for_mime("application/pdf") == "pdf"
+      assert Converter.local_format_for_mime("image/png") == "png"
+      assert Converter.local_format_for_mime("image/jpeg") == "jpg"
+      assert Converter.local_format_for_mime("image/webp") == "webp"
+      assert Converter.local_format_for_mime("image/gif") == "gif"
+      assert Converter.local_format_for_mime("image/svg+xml") == "svg"
+    end
+
+    test "unknown mime types fall back safely" do
+      assert Converter.local_format_for_mime("text/x-log") == "txt"
+      assert Converter.local_format_for_mime("application/octet-stream") == "bin"
+      assert Converter.local_format_for_mime(nil) == "bin"
     end
   end
 end

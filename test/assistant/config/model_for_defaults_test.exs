@@ -23,6 +23,9 @@ defmodule Assistant.Config.ModelForDefaultsTest do
       description: "Default primary model"
       use_cases:
         - orchestrator
+      input_modalities:
+        - text
+        - document
       supports_tools: true
       max_context_tokens: 200000
       cost_tier: high
@@ -32,6 +35,8 @@ defmodule Assistant.Config.ModelForDefaultsTest do
       description: "Admin override model"
       use_cases:
         - orchestrator
+      input_modalities:
+        - text
       supports_tools: true
       max_context_tokens: 100000
       cost_tier: low
@@ -128,7 +133,9 @@ defmodule Assistant.Config.ModelForDefaultsTest do
 
     # Admin sets a global model default for orchestrator
     admin = admin_settings_user_fixture(%{email: unique_settings_user_email()})
-    assert :ok = ModelDefaults.save_defaults(admin, %{"orchestrator" => "test/admin-override-model"})
+
+    assert :ok =
+             ModelDefaults.save_defaults(admin, %{"orchestrator" => "test/admin-override-model"})
 
     # Allow PubSub invalidation, then re-warm cache
     Process.sleep(10)

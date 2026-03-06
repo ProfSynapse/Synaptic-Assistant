@@ -49,7 +49,8 @@ defmodule Assistant.Skills.HubSpot.Companies.Delete do
             {:ok,
              %Result{
                status: :ok,
-               content: "Company #{id} has been archived successfully.\n\nNote: Archived companies can be restored from the HubSpot UI.",
+               content:
+                 "Company #{id} has been archived successfully.\n\nNote: Archived companies can be restored from the HubSpot UI.",
                side_effects: [:hubspot_company_deleted],
                metadata: %{company_id: id}
              }}

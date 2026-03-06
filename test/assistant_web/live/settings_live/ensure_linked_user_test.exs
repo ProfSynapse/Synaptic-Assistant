@@ -44,6 +44,7 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
           channel: "telegram",
           external_id: "#{System.unique_integer([:positive])}"
         })
+
       settings_user = settings_user_fixture()
 
       settings_user =
@@ -131,10 +132,11 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       email = "conv-survive-#{System.unique_integer([:positive])}@example.com"
 
       # Create a pseudo-user with a conversation
-      pseudo_user = chat_user_fixture(%{
-        channel: "settings",
-        external_id: "settings:conv_#{System.unique_integer([:positive])}"
-      })
+      pseudo_user =
+        chat_user_fixture(%{
+          channel: "settings",
+          external_id: "settings:conv_#{System.unique_integer([:positive])}"
+        })
 
       now = DateTime.utc_now()
 
@@ -151,17 +153,19 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
         |> Repo.insert()
 
       # Add messages to the conversation
-      {:ok, _msgs} = Assistant.Memory.Store.batch_append_messages(conv.id, [
-        %{role: "user", content: "Hello before upgrade"},
-        %{role: "assistant", content: "Hi there before upgrade"}
-      ])
+      {:ok, _msgs} =
+        Assistant.Memory.Store.batch_append_messages(conv.id, [
+          %{role: "user", content: "Hello before upgrade"},
+          %{role: "assistant", content: "Hi there before upgrade"}
+        ])
 
       # Create a real user with matching email
-      real_user = chat_user_fixture(%{
-        channel: "google_chat",
-        external_id: "users/real_conv_#{System.unique_integer([:positive])}",
-        email: String.downcase(email)
-      })
+      real_user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/real_conv_#{System.unique_integer([:positive])}",
+          email: String.downcase(email)
+        })
 
       # Link settings_user to pseudo
       settings_user = settings_user_fixture(%{email: email})
@@ -194,11 +198,12 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       email = "nil-link-#{System.unique_integer([:positive])}@example.com"
 
       # Real chat user with this email
-      real_user = chat_user_fixture(%{
-        channel: "telegram",
-        external_id: "#{System.unique_integer([:positive])}",
-        email: String.downcase(email)
-      })
+      real_user =
+        chat_user_fixture(%{
+          channel: "telegram",
+          external_id: "#{System.unique_integer([:positive])}",
+          email: String.downcase(email)
+        })
 
       # Settings user with no user_id but matching email
       settings_user = settings_user_fixture(%{email: email})
@@ -213,9 +218,10 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
     end
 
     test "creates pseudo-user when no email match exists" do
-      settings_user = settings_user_fixture(%{
-        email: "new-pseudo-#{System.unique_integer([:positive])}@example.com"
-      })
+      settings_user =
+        settings_user_fixture(%{
+          email: "new-pseudo-#{System.unique_integer([:positive])}@example.com"
+        })
 
       assert is_nil(settings_user.user_id)
 
@@ -256,17 +262,19 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       email = "stale-#{System.unique_integer([:positive])}@example.com"
 
       # Create a real user with matching email
-      real_user = chat_user_fixture(%{
-        channel: "google_chat",
-        external_id: "users/stale_#{System.unique_integer([:positive])}",
-        email: String.downcase(email)
-      })
+      real_user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/stale_#{System.unique_integer([:positive])}",
+          email: String.downcase(email)
+        })
 
       # Create a temporary user that we'll delete to produce a stale reference
-      temp_user = chat_user_fixture(%{
-        channel: "telegram",
-        external_id: "#{System.unique_integer([:positive])}"
-      })
+      temp_user =
+        chat_user_fixture(%{
+          channel: "telegram",
+          external_id: "#{System.unique_integer([:positive])}"
+        })
 
       settings_user = settings_user_fixture(%{email: email})
 
@@ -287,15 +295,15 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       {:ok, temp_uid_bin} = Ecto.UUID.dump(temp_user.id)
       {:ok, su_id_bin} = Ecto.UUID.dump(settings_user.id)
 
-      Ecto.Adapters.SQL.query!(Repo,
-        "ALTER TABLE settings_users DISABLE TRIGGER ALL", [])
+      Ecto.Adapters.SQL.query!(Repo, "ALTER TABLE settings_users DISABLE TRIGGER ALL", [])
 
-      Ecto.Adapters.SQL.query!(Repo,
+      Ecto.Adapters.SQL.query!(
+        Repo,
         "UPDATE settings_users SET user_id = $1 WHERE id = $2",
-        [temp_uid_bin, su_id_bin])
+        [temp_uid_bin, su_id_bin]
+      )
 
-      Ecto.Adapters.SQL.query!(Repo,
-        "ALTER TABLE settings_users ENABLE TRIGGER ALL", [])
+      Ecto.Adapters.SQL.query!(Repo, "ALTER TABLE settings_users ENABLE TRIGGER ALL", [])
 
       # Reload settings_user with stale reference
       stale_su = Repo.get!(Assistant.Accounts.SettingsUser, settings_user.id)
@@ -309,10 +317,11 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       email = "archived-#{System.unique_integer([:positive])}@example.com"
 
       # Archived pseudo-user
-      archived_pseudo = chat_user_fixture(%{
-        channel: "settings:archived",
-        external_id: "settings:archived_#{System.unique_integer([:positive])}"
-      })
+      archived_pseudo =
+        chat_user_fixture(%{
+          channel: "settings:archived",
+          external_id: "settings:archived_#{System.unique_integer([:positive])}"
+        })
 
       settings_user = settings_user_fixture(%{email: email})
 
@@ -417,17 +426,19 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       email_a = "iso-a-#{System.unique_integer([:positive])}@example.com"
       email_b = "iso-b-#{System.unique_integer([:positive])}@example.com"
 
-      user_a = chat_user_fixture(%{
-        channel: "google_chat",
-        external_id: "users/iso_a_#{System.unique_integer([:positive])}",
-        email: String.downcase(email_a)
-      })
+      user_a =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/iso_a_#{System.unique_integer([:positive])}",
+          email: String.downcase(email_a)
+        })
 
-      user_b = chat_user_fixture(%{
-        channel: "google_chat",
-        external_id: "users/iso_b_#{System.unique_integer([:positive])}",
-        email: String.downcase(email_b)
-      })
+      user_b =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/iso_b_#{System.unique_integer([:positive])}",
+          email: String.downcase(email_b)
+        })
 
       su_a = settings_user_fixture(%{email: email_a})
       su_a = su_a |> Ecto.Changeset.change(%{user_id: nil}) |> Repo.update!()
@@ -447,17 +458,19 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       email = "multi-chan-#{System.unique_integer([:positive])}@example.com"
 
       # Create a Telegram user (no email)
-      _tg_user = chat_user_fixture(%{
-        channel: "telegram",
-        external_id: "#{System.unique_integer([:positive])}"
-      })
+      _tg_user =
+        chat_user_fixture(%{
+          channel: "telegram",
+          external_id: "#{System.unique_integer([:positive])}"
+        })
 
       # Create a GChat user WITH email
-      gchat_user = chat_user_fixture(%{
-        channel: "google_chat",
-        external_id: "users/multi_#{System.unique_integer([:positive])}",
-        email: String.downcase(email)
-      })
+      gchat_user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/multi_#{System.unique_integer([:positive])}",
+          email: String.downcase(email)
+        })
 
       # Settings user with the GChat user's email
       settings_user = settings_user_fixture(%{email: email})
@@ -478,11 +491,12 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
     test "matches email regardless of case" do
       lower_email = "case-test-#{System.unique_integer([:positive])}@example.com"
 
-      real_user = chat_user_fixture(%{
-        channel: "google_chat",
-        external_id: "users/case_#{System.unique_integer([:positive])}",
-        email: lower_email
-      })
+      real_user =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/case_#{System.unique_integer([:positive])}",
+          email: lower_email
+        })
 
       # Settings user with UPPER CASE email
       upper_email = String.upcase(lower_email)

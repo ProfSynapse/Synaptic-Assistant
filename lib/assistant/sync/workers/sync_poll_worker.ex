@@ -39,6 +39,7 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
 
   use Oban.Worker, queue: :sync, max_attempts: 3
 
+  alias Assistant.ConnectedDrives
   alias Assistant.Integrations.Google.Auth
   alias Assistant.Integrations.Google.Drive.Changes
   alias Assistant.Sync.StateStore
@@ -104,7 +105,7 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
       changes
       |> Enum.filter(fn change ->
         parent_folder = first_parent(change)
-        in_scope?(user_id, drive_id, parent_folder)
+        in_scope?(user_id, drive_id, parent_folder, change.file_id)
       end)
       |> Enum.map(fn change ->
         action =
@@ -137,8 +138,9 @@ defmodule Assistant.Sync.Workers.SyncPollWorker do
     |> Assistant.Repo.all()
   end
 
-  defp in_scope?(user_id, drive_id, parent_folder) do
-    StateStore.folder_in_scope?(user_id, drive_id, parent_folder) != nil
+  defp in_scope?(user_id, drive_id, parent_folder, file_id) do
+    ConnectedDrives.enabled?(user_id, drive_id) or
+      StateStore.file_in_scope?(user_id, drive_id, parent_folder, file_id) != nil
   end
 
   defp first_parent(change) do

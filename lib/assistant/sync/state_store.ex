@@ -100,6 +100,16 @@ defmodule Assistant.Sync.StateStore do
   end
 
   @doc """
+  Get a synced file by its workspace-local path.
+  """
+  @spec get_synced_file_by_local_path(binary(), String.t()) :: SyncedFile.t() | nil
+  def get_synced_file_by_local_path(user_id, local_path) do
+    SyncedFile
+    |> where([f], f.user_id == ^user_id and f.local_path == ^local_path)
+    |> Repo.one()
+  end
+
+  @doc """
   Create a new synced file record.
   """
   @spec create_synced_file(map()) :: {:ok, SyncedFile.t()} | {:error, Ecto.Changeset.t()}
@@ -332,8 +342,20 @@ defmodule Assistant.Sync.StateStore do
   def get_scope(user_id, drive_id, folder_id) do
     SyncScope
     |> where([s], s.user_id == ^user_id)
+    |> where([s], s.scope_type != "file")
     |> where_drive_id(drive_id)
     |> where_folder_id(folder_id)
+    |> Repo.one()
+  end
+
+  @doc """
+  Get a file scope by user, drive, and Drive file ID.
+  """
+  @spec get_file_scope(binary(), String.t() | nil, String.t()) :: SyncScope.t() | nil
+  def get_file_scope(user_id, drive_id, file_id) do
+    SyncScope
+    |> where([s], s.user_id == ^user_id and s.scope_type == "file" and s.file_id == ^file_id)
+    |> where_drive_id(drive_id)
     |> Repo.one()
   end
 
@@ -342,10 +364,14 @@ defmodule Assistant.Sync.StateStore do
   """
   @spec upsert_scope(map()) :: {:ok, SyncScope.t()} | {:error, Ecto.Changeset.t()}
   def upsert_scope(attrs) do
+    attrs = normalize_scope_attrs(attrs)
+
     %SyncScope{}
     |> SyncScope.changeset(attrs)
     |> Repo.insert(
-      on_conflict: {:replace, [:folder_name, :access_level, :updated_at]},
+      on_conflict:
+        {:replace,
+         [:folder_name, :file_name, :file_mime_type, :access_level, :scope_effect, :updated_at]},
       conflict_target: conflict_target_for_scope(attrs),
       returning: true
     )
@@ -368,7 +394,7 @@ defmodule Assistant.Sync.StateStore do
       end
 
     query
-    |> order_by([s], asc: s.folder_name)
+    |> order_by([s], asc: s.scope_type, asc: s.folder_name, asc: s.file_name)
     |> Repo.all()
   end
 
@@ -381,6 +407,23 @@ defmodule Assistant.Sync.StateStore do
   end
 
   @doc """
+  Delete any explicit scopes matching the provided folder/file IDs within a drive.
+  """
+  @spec delete_scopes_in_targets(binary(), String.t() | nil, [String.t()], [String.t()]) ::
+          {non_neg_integer(), nil}
+  def delete_scopes_in_targets(user_id, drive_id, folder_ids, file_ids) do
+    SyncScope
+    |> where([s], s.user_id == ^user_id)
+    |> where_drive_id(drive_id)
+    |> where(
+      [s],
+      (s.scope_type == "folder" and s.folder_id in ^List.wrap(folder_ids)) or
+        (s.scope_type == "file" and s.file_id in ^List.wrap(file_ids))
+    )
+    |> Repo.delete_all()
+  end
+
+  @doc """
   Check if a folder is within any of the user's sync scopes.
 
   Returns the matching scope if found, nil otherwise. Checks for both
@@ -389,17 +432,25 @@ defmodule Assistant.Sync.StateStore do
   """
   @spec folder_in_scope?(binary(), String.t() | nil, String.t()) :: SyncScope.t() | nil
   def folder_in_scope?(user_id, drive_id, folder_id) do
-    # Single query: match either folder-specific scope or entire-drive scope.
-    # Order by folder_id DESC NULLS LAST so folder-specific matches are preferred.
-    query =
-      SyncScope
-      |> where([s], s.user_id == ^user_id)
-      |> where_drive_id(drive_id)
-      |> where([s], s.folder_id == ^folder_id or is_nil(s.folder_id))
-      |> order_by([s], desc_nulls_last: s.folder_id)
-      |> limit(1)
+    case resolve_folder_scope(user_id, drive_id, folder_id) do
+      %SyncScope{scope_effect: "include"} = scope -> scope
+      _ -> nil
+    end
+  end
 
-    Repo.one(query)
+  @doc """
+  Check whether a file is within any of the user's sync scopes.
+
+  Prefers an exact file scope when present, otherwise falls back to
+  folder/drive scopes.
+  """
+  @spec file_in_scope?(binary(), String.t() | nil, String.t() | nil, String.t()) ::
+          SyncScope.t() | nil
+  def file_in_scope?(user_id, drive_id, folder_id, file_id) do
+    case resolve_file_scope(user_id, drive_id, folder_id, file_id) do
+      %SyncScope{scope_effect: "include"} = scope -> scope
+      _ -> nil
+    end
   end
 
   # -------------------------------------------------------------------
@@ -428,6 +479,37 @@ defmodule Assistant.Sync.StateStore do
       details["source"] in ["upstream_sync_worker", "write_coordinator"]
   end
 
+  defp resolve_file_scope(user_id, drive_id, folder_id, file_id) do
+    case get_file_scope(user_id, drive_id, file_id) do
+      nil -> resolve_folder_scope(user_id, drive_id, folder_id)
+      scope -> scope
+    end
+  end
+
+  defp resolve_folder_scope(user_id, drive_id, folder_id) do
+    query =
+      SyncScope
+      |> where([s], s.user_id == ^user_id)
+      |> where([s], s.scope_type in ["drive", "folder"])
+      |> where_drive_id(drive_id)
+
+    query =
+      case folder_id do
+        nil ->
+          where(query, [s], is_nil(s.folder_id))
+
+        value ->
+          where(query, [s], s.folder_id == ^value or is_nil(s.folder_id))
+      end
+
+    query =
+      query
+      |> order_by([s], desc_nulls_last: s.folder_id)
+      |> limit(1)
+
+    Repo.one(query)
+  end
+
   defp where_drive_id(query, nil) do
     where(query, [s], is_nil(s.drive_id))
   end
@@ -444,6 +526,23 @@ defmodule Assistant.Sync.StateStore do
     where(query, [s], s.folder_id == ^folder_id)
   end
 
+  defp normalize_scope_attrs(attrs) do
+    case Map.get(attrs, :scope_type) || Map.get(attrs, "scope_type") do
+      nil ->
+        inferred =
+          cond do
+            present_scope_value?(Map.get(attrs, :file_id) || Map.get(attrs, "file_id")) -> "file"
+            is_nil(Map.get(attrs, :folder_id) || Map.get(attrs, "folder_id")) -> "drive"
+            true -> "folder"
+          end
+
+        Map.put(attrs, :scope_type, inferred)
+
+      _ ->
+        attrs
+    end
+  end
+
   # Partial unique indexes require unsafe_fragment for conflict_target
   defp conflict_target_for_cursor(%{drive_id: nil}),
     do: {:unsafe_fragment, ~s|(user_id) WHERE drive_id IS NULL|}
@@ -454,25 +553,43 @@ defmodule Assistant.Sync.StateStore do
   defp conflict_target_for_cursor(_),
     do: {:unsafe_fragment, ~s|(user_id) WHERE drive_id IS NULL|}
 
-  # 4-way partial indexes for scope: drive_id x folder_id nullability
+  defp conflict_target_for_scope(%{scope_type: "file", drive_id: nil}),
+    do:
+      {:unsafe_fragment,
+       ~s|(user_id, file_id) WHERE drive_id IS NULL AND scope_type = 'file' AND file_id IS NOT NULL|}
+
+  defp conflict_target_for_scope(%{scope_type: "file", drive_id: _}),
+    do:
+      {:unsafe_fragment,
+       ~s|(user_id, drive_id, file_id) WHERE drive_id IS NOT NULL AND scope_type = 'file' AND file_id IS NOT NULL|}
+
+  # 4-way partial indexes for non-file scope: drive_id x folder_id nullability
   defp conflict_target_for_scope(%{drive_id: nil, folder_id: nil}),
-    do: {:unsafe_fragment, ~s|(user_id) WHERE drive_id IS NULL AND folder_id IS NULL|}
+    do:
+      {:unsafe_fragment,
+       ~s|(user_id) WHERE drive_id IS NULL AND folder_id IS NULL AND scope_type != 'file'|}
 
   defp conflict_target_for_scope(%{drive_id: nil, folder_id: _}),
     do:
       {:unsafe_fragment,
-       ~s|(user_id, folder_id) WHERE drive_id IS NULL AND folder_id IS NOT NULL|}
+       ~s|(user_id, folder_id) WHERE drive_id IS NULL AND folder_id IS NOT NULL AND scope_type != 'file'|}
 
   defp conflict_target_for_scope(%{drive_id: _, folder_id: nil}),
     do:
-      {:unsafe_fragment, ~s|(user_id, drive_id) WHERE drive_id IS NOT NULL AND folder_id IS NULL|}
+      {:unsafe_fragment,
+       ~s|(user_id, drive_id) WHERE drive_id IS NOT NULL AND folder_id IS NULL AND scope_type != 'file'|}
 
   defp conflict_target_for_scope(%{drive_id: _, folder_id: _}),
     do:
       {:unsafe_fragment,
-       ~s|(user_id, drive_id, folder_id) WHERE drive_id IS NOT NULL AND folder_id IS NOT NULL|}
+       ~s|(user_id, drive_id, folder_id) WHERE drive_id IS NOT NULL AND folder_id IS NOT NULL AND scope_type != 'file'|}
 
   # Default: personal drive, entire drive
   defp conflict_target_for_scope(_),
-    do: {:unsafe_fragment, ~s|(user_id) WHERE drive_id IS NULL AND folder_id IS NULL|}
+    do:
+      {:unsafe_fragment,
+       ~s|(user_id) WHERE drive_id IS NULL AND folder_id IS NULL AND scope_type != 'file'|}
+
+  defp present_scope_value?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present_scope_value?(value), do: not is_nil(value)
 end

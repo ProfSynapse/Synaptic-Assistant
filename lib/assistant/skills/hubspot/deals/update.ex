@@ -61,7 +61,8 @@ defmodule Assistant.Skills.HubSpot.Deals.Update do
               {:ok,
                %Result{
                  status: :error,
-                 content: "No properties to update. Provide at least one field (--dealname, --pipeline, --dealstage, --amount, --closedate, --description, or --properties)."
+                 content:
+                   "No properties to update. Provide at least one field (--dealname, --pipeline, --dealstage, --amount, --closedate, --description, or --properties)."
                }}
             else
               case hubspot.update_deal(api_key, id, properties) do

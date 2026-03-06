@@ -60,7 +60,8 @@ defmodule Assistant.Skills.HubSpot.Companies.Update do
               {:ok,
                %Result{
                  status: :error,
-                 content: "No properties to update. Provide at least one field (--name, --domain, --website, --industry, --description, or --properties)."
+                 content:
+                   "No properties to update. Provide at least one field (--name, --domain, --website, --industry, --description, or --properties)."
                }}
             else
               case hubspot.update_company(api_key, id, properties) do

@@ -11,11 +11,6 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
 
   use AssistantWeb, :html
 
-  alias Assistant.Integrations.Google.Auth, as: GoogleAuth
-
-  import AssistantWeb.Components.DriveSettings, only: [drive_settings: 1]
-  import AssistantWeb.Components.SyncTargetBrowser, only: [sync_target_browser: 1]
-
   def apps_section(assigns) do
     is_admin =
       case assigns[:current_scope] do
@@ -48,32 +43,6 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
           workspace_enabled_groups={@workspace_enabled_groups}
           is_admin={@is_admin}
         />
-      </div>
-
-      <.drive_settings
-        :if={@google_connected}
-        connected_drives={@connected_drives}
-        available_drives={@available_drives}
-        drives_loading={@drives_loading}
-        has_google_token={GoogleAuth.configured?()}
-        sync_scopes={@sync_scopes}
-      />
-
-      <.sync_target_browser
-        open={@sync_target_browser_open}
-        drives={@sync_target_drives}
-        selected_drive={@sync_target_selected_drive}
-        folders={@sync_target_folders}
-        loading={@sync_target_loading}
-        error={@sync_target_error}
-      />
-
-      <div :if={!@google_connected} class="sa-drive-settings">
-        <h3>Google Drive Access</h3>
-        <div class="sa-drive-notice sa-drive-notice--info">
-          <.icon name="hero-information-circle" class="h-5 w-5" />
-          <span>Connect your Google account above to manage Drive access.</span>
-        </div>
       </div>
     </section>
     """

@@ -66,7 +66,9 @@ defmodule Assistant.Skills.ApprovalGateTest do
 
   describe "Loader.load_skill_file/2 requires_approval parsing" do
     setup do
-      tmp_dir = Path.join(System.tmp_dir!(), "approval_test_#{System.unique_integer([:positive])}")
+      tmp_dir =
+        Path.join(System.tmp_dir!(), "approval_test_#{System.unique_integer([:positive])}")
+
       domain_dir = Path.join(tmp_dir, "testdomain")
       File.mkdir_p!(domain_dir)
 
@@ -75,7 +77,10 @@ defmodule Assistant.Skills.ApprovalGateTest do
       %{tmp_dir: tmp_dir, domain_dir: domain_dir}
     end
 
-    test "parses requires_approval: true from YAML frontmatter", %{tmp_dir: tmp_dir, domain_dir: domain_dir} do
+    test "parses requires_approval: true from YAML frontmatter", %{
+      tmp_dir: tmp_dir,
+      domain_dir: domain_dir
+    } do
       path = Path.join(domain_dir, "dangerous.md")
 
       File.write!(path, """
@@ -94,7 +99,10 @@ defmodule Assistant.Skills.ApprovalGateTest do
       assert skill.requires_approval == true
     end
 
-    test "parses requires_approval: false from YAML frontmatter", %{tmp_dir: tmp_dir, domain_dir: domain_dir} do
+    test "parses requires_approval: false from YAML frontmatter", %{
+      tmp_dir: tmp_dir,
+      domain_dir: domain_dir
+    } do
       path = Path.join(domain_dir, "safe.md")
 
       File.write!(path, """
@@ -112,7 +120,10 @@ defmodule Assistant.Skills.ApprovalGateTest do
       assert skill.requires_approval == false
     end
 
-    test "defaults to false when requires_approval is absent", %{tmp_dir: tmp_dir, domain_dir: domain_dir} do
+    test "defaults to false when requires_approval is absent", %{
+      tmp_dir: tmp_dir,
+      domain_dir: domain_dir
+    } do
       path = Path.join(domain_dir, "default.md")
 
       File.write!(path, """
@@ -129,7 +140,10 @@ defmodule Assistant.Skills.ApprovalGateTest do
       assert skill.requires_approval == false
     end
 
-    test "treats non-boolean requires_approval as false", %{tmp_dir: tmp_dir, domain_dir: domain_dir} do
+    test "treats non-boolean requires_approval as false", %{
+      tmp_dir: tmp_dir,
+      domain_dir: domain_dir
+    } do
       path = Path.join(domain_dir, "stringval.md")
 
       File.write!(path, """
@@ -320,20 +334,28 @@ defmodule Assistant.Skills.ApprovalGateTest do
     test "approved: true resumes execution" do
       test_pid = self()
 
-      child = spawn(fn ->
-        # Simulate the receive block from handle_approval_gate
-        result =
-          receive do
-            {:resume, %{approved: true}} -> :approved
-            {:resume, %{approved: false, message: feedback}} when is_binary(feedback) -> {:denied_with_feedback, feedback}
-            {:resume, %{approved: false}} -> :denied
-            {:resume, _update} -> :unclear
-          after
-            1_000 -> :timeout
-          end
+      child =
+        spawn(fn ->
+          # Simulate the receive block from handle_approval_gate
+          result =
+            receive do
+              {:resume, %{approved: true}} ->
+                :approved
 
-        send(test_pid, {:gate_result, result})
-      end)
+              {:resume, %{approved: false, message: feedback}} when is_binary(feedback) ->
+                {:denied_with_feedback, feedback}
+
+              {:resume, %{approved: false}} ->
+                :denied
+
+              {:resume, _update} ->
+                :unclear
+            after
+              1_000 -> :timeout
+            end
+
+          send(test_pid, {:gate_result, result})
+        end)
 
       send(child, {:resume, %{approved: true}})
 
@@ -343,19 +365,27 @@ defmodule Assistant.Skills.ApprovalGateTest do
     test "approved: false with feedback returns denial with feedback" do
       test_pid = self()
 
-      child = spawn(fn ->
-        result =
-          receive do
-            {:resume, %{approved: true}} -> :approved
-            {:resume, %{approved: false, message: feedback}} when is_binary(feedback) -> {:denied_with_feedback, feedback}
-            {:resume, %{approved: false}} -> :denied
-            {:resume, _update} -> :unclear
-          after
-            1_000 -> :timeout
-          end
+      child =
+        spawn(fn ->
+          result =
+            receive do
+              {:resume, %{approved: true}} ->
+                :approved
 
-        send(test_pid, {:gate_result, result})
-      end)
+              {:resume, %{approved: false, message: feedback}} when is_binary(feedback) ->
+                {:denied_with_feedback, feedback}
+
+              {:resume, %{approved: false}} ->
+                :denied
+
+              {:resume, _update} ->
+                :unclear
+            after
+              1_000 -> :timeout
+            end
+
+          send(test_pid, {:gate_result, result})
+        end)
 
       send(child, {:resume, %{approved: false, message: "Change the recipient"}})
 
@@ -365,19 +395,27 @@ defmodule Assistant.Skills.ApprovalGateTest do
     test "approved: false without message returns generic denial" do
       test_pid = self()
 
-      child = spawn(fn ->
-        result =
-          receive do
-            {:resume, %{approved: true}} -> :approved
-            {:resume, %{approved: false, message: feedback}} when is_binary(feedback) -> {:denied_with_feedback, feedback}
-            {:resume, %{approved: false}} -> :denied
-            {:resume, _update} -> :unclear
-          after
-            1_000 -> :timeout
-          end
+      child =
+        spawn(fn ->
+          result =
+            receive do
+              {:resume, %{approved: true}} ->
+                :approved
 
-        send(test_pid, {:gate_result, result})
-      end)
+              {:resume, %{approved: false, message: feedback}} when is_binary(feedback) ->
+                {:denied_with_feedback, feedback}
+
+              {:resume, %{approved: false}} ->
+                :denied
+
+              {:resume, _update} ->
+                :unclear
+            after
+              1_000 -> :timeout
+            end
+
+          send(test_pid, {:gate_result, result})
+        end)
 
       send(child, {:resume, %{approved: false}})
 
@@ -387,19 +425,27 @@ defmodule Assistant.Skills.ApprovalGateTest do
     test "resume without approved field returns unclear fallback" do
       test_pid = self()
 
-      child = spawn(fn ->
-        result =
-          receive do
-            {:resume, %{approved: true}} -> :approved
-            {:resume, %{approved: false, message: feedback}} when is_binary(feedback) -> {:denied_with_feedback, feedback}
-            {:resume, %{approved: false}} -> :denied
-            {:resume, _update} -> :unclear
-          after
-            1_000 -> :timeout
-          end
+      child =
+        spawn(fn ->
+          result =
+            receive do
+              {:resume, %{approved: true}} ->
+                :approved
 
-        send(test_pid, {:gate_result, result})
-      end)
+              {:resume, %{approved: false, message: feedback}} when is_binary(feedback) ->
+                {:denied_with_feedback, feedback}
+
+              {:resume, %{approved: false}} ->
+                :denied
+
+              {:resume, _update} ->
+                :unclear
+            after
+              1_000 -> :timeout
+            end
+
+          send(test_pid, {:gate_result, result})
+        end)
 
       # Resume with just a message, no approved field — fallback branch
       send(child, {:resume, %{message: "some instructions"}})
@@ -410,18 +456,19 @@ defmodule Assistant.Skills.ApprovalGateTest do
     test "timeout fires when no resume message received" do
       test_pid = self()
 
-      child = spawn(fn ->
-        result =
-          receive do
-            {:resume, %{approved: true}} -> :approved
-            {:resume, %{approved: false}} -> :denied
-          after
-            # Use short timeout for test speed
-            50 -> :timeout
-          end
+      child =
+        spawn(fn ->
+          result =
+            receive do
+              {:resume, %{approved: true}} -> :approved
+              {:resume, %{approved: false}} -> :denied
+            after
+              # Use short timeout for test speed
+              50 -> :timeout
+            end
 
-        send(test_pid, {:gate_result, result})
-      end)
+          send(test_pid, {:gate_result, result})
+        end)
 
       # Do NOT send any message — let it time out
       _ = child
@@ -441,6 +488,7 @@ defmodule Assistant.Skills.ApprovalGateTest do
     test "formats reason with [APPROVAL_REQUIRED] prefix and skill name" do
       skill_name = "email.send"
       skill_args = %{"to" => "bob@example.com", "subject" => "Hello"}
+
       skill_def = %SkillDefinition{
         name: "email.send",
         description: "Send email",
@@ -684,11 +732,11 @@ defmodule Assistant.Skills.ApprovalGateTest do
       # The Loader uses: frontmatter["requires_approval"] == true
       # This is strict equality, not truthiness
 
-      assert (true == true)
-      refute ("true" == true)
-      refute (1 == true)
-      refute ("yes" == true)
-      refute (nil == true)
+      assert true == true
+      refute "true" == true
+      refute 1 == true
+      refute "yes" == true
+      refute nil == true
     end
   end
 
@@ -731,52 +779,60 @@ defmodule Assistant.Skills.ApprovalGateTest do
 
       # The orchestrator MUST know how to handle [APPROVAL_REQUIRED] responses
       assert prompt =~ "APPROVAL_REQUIRED",
-        "System prompt missing [APPROVAL_REQUIRED] handling instructions"
+             "System prompt missing [APPROVAL_REQUIRED] handling instructions"
 
       # Must instruct the LLM on approved=true/false flow
       assert prompt =~ "approved=true",
-        "System prompt missing approved=true instruction"
+             "System prompt missing approved=true instruction"
+
       assert prompt =~ "approved=false",
-        "System prompt missing approved=false instruction"
+             "System prompt missing approved=false instruction"
 
       # Must instruct LLM to present action details to user
       assert prompt =~ "approval" or prompt =~ "Approval",
-        "System prompt missing general approval workflow"
+             "System prompt missing general approval workflow"
     end
 
     test "orchestrator tool definitions include all 4 tools with correct schemas" do
       tools = Assistant.Orchestrator.Context.tool_definitions()
       tool_names = Enum.map(tools, & &1.function.name) |> Enum.sort()
 
-      assert tool_names == ["dispatch_agent", "get_agent_results", "get_skill", "send_agent_update"],
-        "Expected 4 orchestrator tools, got: #{inspect(tool_names)}"
+      assert tool_names == [
+               "dispatch_agent",
+               "get_agent_results",
+               "get_skill",
+               "send_agent_update"
+             ],
+             "Expected 4 orchestrator tools, got: #{inspect(tool_names)}"
     end
 
     test "send_agent_update tool has approved boolean parameter" do
       tools = Assistant.Orchestrator.Context.tool_definitions()
-      sau = Enum.find(tools, & &1.function.name == "send_agent_update")
+      sau = Enum.find(tools, &(&1.function.name == "send_agent_update"))
       assert sau != nil
 
       props = sau.function.parameters["properties"]
+
       assert Map.has_key?(props, "approved"),
-        "send_agent_update missing 'approved' property. Properties: #{inspect(Map.keys(props))}"
+             "send_agent_update missing 'approved' property. Properties: #{inspect(Map.keys(props))}"
+
       assert props["approved"]["type"] == "boolean"
 
       # Verify the description mentions approval gate
       assert props["approved"]["description"] =~ "approv",
-        "approved param description should mention approval flow"
+             "approved param description should mention approval flow"
     end
 
     test "send_agent_update tool has agent_id as required parameter" do
       tools = Assistant.Orchestrator.Context.tool_definitions()
-      sau = Enum.find(tools, & &1.function.name == "send_agent_update")
+      sau = Enum.find(tools, &(&1.function.name == "send_agent_update"))
 
       assert sau.function.parameters["required"] == ["agent_id"]
     end
 
     test "dispatch_agent tool has expected parameters" do
       tools = Assistant.Orchestrator.Context.tool_definitions()
-      dispatch = Enum.find(tools, & &1.function.name == "dispatch_agent")
+      dispatch = Enum.find(tools, &(&1.function.name == "dispatch_agent"))
       assert dispatch != nil
 
       props = dispatch.function.parameters["properties"]
@@ -808,7 +864,7 @@ defmodule Assistant.Skills.ApprovalGateTest do
         case Assistant.Skills.Registry.lookup(skill_name) do
           {:ok, skill} ->
             assert skill.requires_approval == true,
-              "#{skill_name} should have requires_approval: true, got: #{skill.requires_approval}"
+                   "#{skill_name} should have requires_approval: true, got: #{skill.requires_approval}"
 
           {:error, :not_found} ->
             # Skill may not be loaded in test env — skip but don't fail
@@ -824,7 +880,7 @@ defmodule Assistant.Skills.ApprovalGateTest do
         case Assistant.Skills.Registry.lookup(skill_name) do
           {:ok, skill} ->
             refute skill.requires_approval,
-              "#{skill_name} should NOT have requires_approval: true (it's read-only)"
+                   "#{skill_name} should NOT have requires_approval: true (it's read-only)"
 
           {:error, :not_found} ->
             :ok
@@ -946,8 +1002,14 @@ defmodule Assistant.Skills.ApprovalGateTest do
 
     test "multiple awaiting_orchestrator agents all preserved" do
       dispatched_agents = %{
-        "email-gate" => %{status: :awaiting_orchestrator, reason: "[APPROVAL_REQUIRED] email.send"},
-        "calendar-gate" => %{status: :awaiting_orchestrator, reason: "[APPROVAL_REQUIRED] calendar.create"},
+        "email-gate" => %{
+          status: :awaiting_orchestrator,
+          reason: "[APPROVAL_REQUIRED] email.send"
+        },
+        "calendar-gate" => %{
+          status: :awaiting_orchestrator,
+          reason: "[APPROVAL_REQUIRED] calendar.create"
+        },
         "search-done" => %{status: :completed, result: "search results"}
       }
 

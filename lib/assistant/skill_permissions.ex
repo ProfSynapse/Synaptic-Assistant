@@ -82,9 +82,7 @@ defmodule Assistant.SkillPermissions do
     global_enabled = Map.get(read_overrides(), skill_name, true)
 
     user_enabled =
-      UserSkillOverrides.enabled_for_user?(user_id, skill_name,
-        default: true
-      )
+      UserSkillOverrides.enabled_for_user?(user_id, skill_name, default: true)
 
     connector_enabled = connector_enabled_for_skill?(user_id, skill_name)
 
@@ -101,7 +99,9 @@ defmodule Assistant.SkillPermissions do
   end
 
   @spec set_enabled_for_user(String.t(), String.t(), boolean()) ::
-          {:ok, Assistant.Schemas.UserSkillOverride.t()} | {:error, Ecto.Changeset.t()} | {:error, :invalid}
+          {:ok, Assistant.Schemas.UserSkillOverride.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :invalid}
   def set_enabled_for_user(user_id, skill_name, enabled)
       when is_binary(user_id) and is_binary(skill_name) and is_boolean(enabled) do
     UserSkillOverrides.set_enabled(user_id, skill_name, enabled)

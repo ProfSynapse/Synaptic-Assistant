@@ -32,9 +32,8 @@ defmodule AssistantWeb.SettingsLive.PersonalSkillToggleTest do
     reloaded = Assistant.Accounts.get_settings_user!(settings_user.id)
     assert is_binary(reloaded.user_id)
 
-    assert UserSkillOverrides.enabled_for_user?(reloaded.user_id, "email.send",
-             default: true
-           ) == false
+    assert UserSkillOverrides.enabled_for_user?(reloaded.user_id, "email.send", default: true) ==
+             false
   end
 
   test "toggle_personal_skill re-enables a previously disabled skill", %{conn: conn} do
@@ -61,8 +60,7 @@ defmodule AssistantWeb.SettingsLive.PersonalSkillToggleTest do
 
     reloaded = Assistant.Accounts.get_settings_user!(settings_user.id)
 
-    assert UserSkillOverrides.enabled_for_user?(reloaded.user_id, "email.send",
-             default: true
-           ) == true
+    assert UserSkillOverrides.enabled_for_user?(reloaded.user_id, "email.send", default: true) ==
+             true
   end
 end

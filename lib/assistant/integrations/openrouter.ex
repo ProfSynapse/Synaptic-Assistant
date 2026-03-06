@@ -213,7 +213,11 @@ defmodule Assistant.Integrations.OpenRouter do
 
         {:error, reason} ->
           Process.delete(:openrouter_stream_usage)
-          Logger.error("OpenRouter streaming request failed: #{inspect(reason)}", reason: inspect(reason))
+
+          Logger.error("OpenRouter streaming request failed: #{inspect(reason)}",
+            reason: inspect(reason)
+          )
+
           {:error, {:request_failed, reason}}
       end
     end
@@ -406,15 +410,26 @@ defmodule Assistant.Integrations.OpenRouter do
 
         {:ok, %{status: status, body: resp_body}} when status >= 400 ->
           error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
-          Logger.error("OpenRouter image API error: status=#{status} #{error_message}", status: status, error: error_message)
+
+          Logger.error("OpenRouter image API error: status=#{status} #{error_message}",
+            status: status,
+            error: error_message
+          )
+
           {:error, {:api_error, status, error_message}}
 
         {:error, %Req.TransportError{reason: reason}} ->
-          Logger.error("OpenRouter image connection error: #{inspect(reason)}", reason: inspect(reason))
+          Logger.error("OpenRouter image connection error: #{inspect(reason)}",
+            reason: inspect(reason)
+          )
+
           {:error, {:connection_error, reason}}
 
         {:error, reason} ->
-          Logger.error("OpenRouter image request failed: #{inspect(reason)}", reason: inspect(reason))
+          Logger.error("OpenRouter image request failed: #{inspect(reason)}",
+            reason: inspect(reason)
+          )
+
           {:error, {:request_failed, reason}}
       end
     end
@@ -574,7 +589,10 @@ defmodule Assistant.Integrations.OpenRouter do
        }}
     else
       _ ->
-        Logger.error("OpenRouter unexpected response format: #{inspect(body)}", body: inspect(body))
+        Logger.error("OpenRouter unexpected response format: #{inspect(body)}",
+          body: inspect(body)
+        )
+
         {:error, {:unexpected_response, body}}
     end
   end
@@ -597,7 +615,10 @@ defmodule Assistant.Integrations.OpenRouter do
        }}
     else
       _ ->
-        Logger.error("OpenRouter unexpected image response format: #{inspect(body)}", body: inspect(body))
+        Logger.error("OpenRouter unexpected image response format: #{inspect(body)}",
+          body: inspect(body)
+        )
+
         {:error, {:unexpected_response, body}}
     end
   end
@@ -637,7 +658,10 @@ defmodule Assistant.Integrations.OpenRouter do
        }}
     else
       _ ->
-        Logger.error("OpenRouter unexpected web search response format: #{inspect(body)}", body: inspect(body))
+        Logger.error("OpenRouter unexpected web search response format: #{inspect(body)}",
+          body: inspect(body)
+        )
+
         {:error, {:unexpected_response, body}}
     end
   end

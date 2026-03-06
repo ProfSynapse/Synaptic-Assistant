@@ -61,7 +61,8 @@ defmodule Assistant.Skills.HubSpot.Contacts.Update do
               {:ok,
                %Result{
                  status: :error,
-                 content: "No fields to update. Provide at least one field (--email, --first_name, --last_name, --phone, --company, or --properties)."
+                 content:
+                   "No fields to update. Provide at least one field (--email, --first_name, --last_name, --phone, --company, or --properties)."
                }}
             else
               case hubspot.update_contact(api_key, id, properties) do

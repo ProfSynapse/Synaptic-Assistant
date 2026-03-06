@@ -269,7 +269,9 @@ defmodule Assistant.Integrations.HubSpot.ClientTest do
         )
       end)
 
-      assert {:ok, %{results: contacts, next: "cursor123"}} = Client.list_recent_contacts(@api_key, 10)
+      assert {:ok, %{results: contacts, next: "cursor123"}} =
+               Client.list_recent_contacts(@api_key, 10)
+
       assert length(contacts) == 2
     end
 
@@ -293,7 +295,8 @@ defmodule Assistant.Integrations.HubSpot.ClientTest do
         |> Plug.Conn.resp(200, Jason.encode!(%{"results" => []}))
       end)
 
-      assert {:ok, %{results: [], next: nil}} = Client.list_recent_contacts(@api_key, 10, "cursor456")
+      assert {:ok, %{results: [], next: nil}} =
+               Client.list_recent_contacts(@api_key, 10, "cursor456")
     end
   end
 
