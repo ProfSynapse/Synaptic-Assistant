@@ -124,15 +124,17 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
           </div>
 
           <div style="margin-bottom: 1rem; max-width: 20rem;">
-            <.field
-              type="text"
-              name="admin_user_search"
-              value={@admin_user_search}
-              placeholder="Search users by email or name..."
-              phx-change="search_admin_users"
-              phx-debounce="300"
-              no_margin
-            />
+            <form phx-change="search_admin_users" phx-submit="search_admin_users">
+              <input
+                type="text"
+                name="query"
+                value={@admin_user_search}
+                placeholder="Search users by email or name..."
+                phx-debounce="300"
+                class="sa-search-input"
+                autocomplete="off"
+              />
+            </form>
           </div>
 
           <div class="sa-model-table-shell">
