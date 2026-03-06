@@ -32,3 +32,6 @@ erl_crash.dump
 # OS
 .DS_Store
 Thumbs.db
+
+.history/
+.claude/
