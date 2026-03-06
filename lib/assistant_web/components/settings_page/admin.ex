@@ -8,7 +8,6 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
 
   import AssistantWeb.Components.AdminIntegrations, only: [admin_integrations: 1]
   import AssistantWeb.Components.SettingsPage.Models, only: [models_section: 1]
-  import AssistantWeb.Components.SettingsPage.UserCards, only: [user_cards_section: 1]
   import AssistantWeb.Components.SettingsPage.UserDetail, only: [user_detail_section: 1]
 
   @managed_integration_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
@@ -66,26 +65,40 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
             :for={integration <- managed_integration_catalog(@admin_integration_catalog)}
             class="sa-card"
           >
-            <div class="sa-app-title" style="margin-bottom: 0.75rem;">
-              <img src={integration.icon_path} alt={integration.name} class="sa-app-icon" />
-              <h3>{integration.name}</h3>
+            <div class="sa-row">
+              <div class="sa-app-title" style="margin-bottom: 0; flex: 1;">
+                <img src={integration.icon_path} alt={integration.name} class="sa-app-icon" />
+                <h3>{integration.name}</h3>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 0.75rem;">
+                <label class="sa-switch">
+                  <input
+                    type="checkbox"
+                    checked={Map.get(@workspace_enabled_groups, integration.integration_group, true)}
+                    class="sa-switch-input"
+                    role="switch"
+                    aria-checked={to_string(Map.get(@workspace_enabled_groups, integration.integration_group, true))}
+                    aria-label={"Toggle #{integration.name} globally"}
+                    phx-click="toggle_integration"
+                    phx-value-group={integration.integration_group}
+                    phx-value-enabled={to_string(!Map.get(@workspace_enabled_groups, integration.integration_group, true))}
+                  />
+                  <span class="sa-switch-slider"></span>
+                </label>
+                <.link
+                  navigate={~p"/settings/admin/integrations/#{integration.integration_group}"}
+                  class="sa-icon-btn"
+                  title={"Open #{integration.name} settings"}
+                >
+                  <.icon name="hero-cog-6-tooth" class="h-4 w-4" />
+                </.link>
+              </div>
             </div>
 
-            <p style="margin: 0; font-size: 0.875rem; color: var(--sa-text-secondary);">
+            <p style="margin: 0.5rem 0 0; font-size: 0.875rem; color: var(--sa-text-secondary);">
               {integration.summary}
             </p>
-
-            <ul class="list-disc ml-5" style="margin: 0.75rem 0 1rem; font-size: 0.8125rem;">
-              <li :for={step <- integration_setup_preview(integration.setup_instructions)}>{step}</li>
-            </ul>
-
-            <.link
-              navigate={~p"/settings/admin/integrations/#{integration.integration_group}"}
-              class="sa-btn secondary"
-              style="display: inline-flex; text-decoration: none;"
-            >
-              <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Manage Integration
-            </.link>
           </article>
         </div>
       </div>
@@ -99,183 +112,106 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
       </div>
 
       <div :if={@admin_tab == "users"} class="space-y-6">
-        <div class="sa-card">
-          <div>
-            <h2>Allow List</h2>
-          <p>
-            When at least one active entry exists, only active allow-listed emails can authenticate.
-          </p>
-        </div>
+        <.user_detail_section
+          :if={@current_admin_user}
+          user={@current_admin_user}
+          current_user_id={@current_scope.settings_user.id}
+        />
 
-        <.form
-          for={@allowlist_form}
-          id="allowlist-entry-form"
-          phx-change="validate_allowlist_entry"
-          phx-submit="save_allowlist_entry"
-          class="space-y-4"
-          style="margin-top: 1rem;"
-        >
-          <div>
-            <label for="allowlist-email" class="block text-sm font-medium mb-1">Email</label>
-            <input
-              id="allowlist-email"
-              name={@allowlist_form[:email].name}
-              type="email"
-              value={@allowlist_form[:email].value}
-              class="w-full rounded-md border border-zinc-300 px-3 py-2"
-              required
+        <div :if={!@current_admin_user} class="sa-card">
+          <div class="sa-row" style="margin-bottom: 1rem;">
+            <h2>User Management</h2>
+          </div>
+
+          <div style="margin-bottom: 1rem; max-width: 20rem;">
+            <.field
+              type="text"
+              name="admin_user_search"
+              value={@admin_user_search}
+              placeholder="Search users by email or name..."
+              phx-change="search_admin_users"
+              phx-debounce="300"
+              no_margin
             />
-            <p
-              :for={msg <- (@allowlist_form[:email] && @allowlist_form[:email].errors) || []}
-              class="mt-1 text-xs text-red-600"
-            >
-              {translate_error(msg)}
-            </p>
           </div>
 
-          <div class="grid gap-3 sm:grid-cols-2">
-            <label class="inline-flex items-center gap-2 text-sm">
-              <input
-                id="allowlist-active"
-                type="checkbox"
-                name={@allowlist_form[:active] && @allowlist_form[:active].name}
-                value="true"
-                checked={checkbox_checked?(@allowlist_form[:active] && @allowlist_form[:active].value)}
-              /> Active
-            </label>
-
-            <label class="inline-flex items-center gap-2 text-sm">
-              <input
-                id="allowlist-admin"
-                type="checkbox"
-                name={@allowlist_form[:is_admin] && @allowlist_form[:is_admin].name}
-                value="true"
-                checked={checkbox_checked?(@allowlist_form[:is_admin] && @allowlist_form[:is_admin].value)}
-              /> Admin access
-            </label>
+          <div class="sa-model-table-shell">
+            <table class="sa-table sa-table-zebra">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Enabled</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :if={@filtered_admin_users == []}>
+                  <td colspan="6" style="text-align: center; color: var(--sa-text-secondary);">
+                    No users found.
+                  </td>
+                </tr>
+                <tr :for={user <- @filtered_admin_users} id={"user-row-#{user.id}"}>
+                  <td>{user.email}</td>
+                  <td>{user.display_name || "—"}</td>
+                  <td>
+                    <span :if={user.is_admin} class="sa-badge sa-badge-info">Admin</span>
+                    <span :if={!user.is_admin}>User</span>
+                  </td>
+                  <td>
+                    <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                      <span :if={user.has_linked_user} class="sa-badge sa-badge-success">Linked</span>
+                      <span :if={user.has_openrouter_key} class="sa-badge sa-badge-success">OR Key</span>
+                      <span :if={user.has_openai_key} class="sa-badge sa-badge-success">OAI Key</span>
+                    </div>
+                  </td>
+                  <td>
+                    <label class={["sa-switch", is_self?(user, @current_scope.settings_user.id) && "sa-switch-disabled"]}>
+                      <input
+                        type="checkbox"
+                        checked={!user.disabled_at}
+                        class="sa-switch-input"
+                        role="switch"
+                        aria-checked={to_string(!user.disabled_at)}
+                        aria-label={"Toggle #{user.email} enabled"}
+                        phx-click="toggle_user_disabled"
+                        phx-value-id={user.id}
+                        disabled={is_self?(user, @current_scope.settings_user.id)}
+                      />
+                      <span class="sa-switch-slider"></span>
+                    </label>
+                  </td>
+                  <td>
+                    <div style="display: flex; gap: 0.25rem;">
+                      <button
+                        type="button"
+                        class="sa-icon-btn"
+                        title="Edit User"
+                        phx-click="edit_admin_user"
+                        phx-value-id={user.id}
+                      >
+                        <.icon name="hero-pencil-square" class="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        class={["sa-icon-btn danger", is_self?(user, @current_scope.settings_user.id) && "sa-icon-btn-disabled"]}
+                        title="Delete User"
+                        phx-click="delete_admin_user"
+                        phx-value-id={user.id}
+                        data-confirm="Are you sure you want to delete this user? This action cannot be undone."
+                        disabled={is_self?(user, @current_scope.settings_user.id)}
+                      >
+                        <.icon name="hero-trash" class="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-
-          <div>
-            <p class="block text-sm font-medium mb-2">Scoped Privileges</p>
-            <input type="hidden" name="allowlist_entry[scopes][]" value="" />
-            <div class="grid gap-2 sm:grid-cols-2">
-              <label
-                :for={scope <- @managed_scopes}
-                class="inline-flex items-center gap-2 text-sm rounded border border-zinc-200 px-3 py-2"
-              >
-                <input
-                  type="checkbox"
-                  name="allowlist_entry[scopes][]"
-                  value={scope}
-                  checked={scope in form_scopes(@allowlist_form)}
-                />
-                <span>{scope}</span>
-              </label>
-            </div>
-          </div>
-
-          <div>
-            <label for="allowlist-notes" class="block text-sm font-medium mb-1">Notes</label>
-            <textarea
-              id="allowlist-notes"
-              name={@allowlist_form[:notes] && @allowlist_form[:notes].name}
-              rows="3"
-              class="w-full rounded-md border border-zinc-300 px-3 py-2"
-            ><%= (@allowlist_form[:notes] && @allowlist_form[:notes].value) || "" %></textarea>
-            <p
-              :for={msg <- (@allowlist_form[:notes] && @allowlist_form[:notes].errors) || []}
-              class="mt-1 text-xs text-red-600"
-            >
-              {translate_error(msg)}
-            </p>
-          </div>
-
-          <div class="flex flex-wrap gap-3">
-            <.button id="save-allowlist-entry-btn" phx-disable-with="Saving...">
-              Save Allow List Entry
-            </.button>
-            <button
-              id="reset-allowlist-entry-form-btn"
-              type="button"
-              phx-click="reset_allowlist_form"
-              class="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-            >
-              Clear Form
-            </button>
-          </div>
-        </.form>
-      </div>
-
-      <div class="sa-card">
-        <div>
-          <h2>Allow List Entries</h2>
-          <p>
-            Edit entries to grant/revoke access and keep current user privileges in sync.
-          </p>
         </div>
-
-        <div class="overflow-x-auto" style="margin-top: 1rem;">
-          <table class="min-w-full text-sm" id="allowlist-entries-table">
-            <thead>
-              <tr class="text-left border-b">
-                <th class="py-2 pr-4">Email</th>
-                <th class="py-2 pr-4">Status</th>
-                <th class="py-2 pr-4">Admin</th>
-                <th class="py-2 pr-4">Scopes</th>
-                <th class="py-2 pr-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :if={@allowlist_entries == []}>
-                <td class="py-3 text-zinc-500" colspan="5">No allow list entries yet.</td>
-              </tr>
-              <tr
-                :for={entry <- @allowlist_entries}
-                id={"allowlist-entry-#{entry.id}"}
-                class="border-b last:border-0"
-              >
-                <td class="py-2 pr-4">{entry.email}</td>
-                <td class="py-2 pr-4">{if entry.active, do: "Active", else: "Disabled"}</td>
-                <td class="py-2 pr-4">{if entry.is_admin, do: "Yes", else: "No"}</td>
-                <td class="py-2 pr-4">{Enum.join(entry.scopes || [], ", ")}</td>
-                <td class="py-2 pr-4">
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      phx-click="edit_allowlist_entry"
-                      phx-value-id={entry.id}
-                      class="rounded border border-zinc-300 px-2 py-1"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      phx-click="toggle_allowlist_entry"
-                      phx-value-id={entry.id}
-                      class="rounded border border-zinc-300 px-2 py-1"
-                    >
-                      {if entry.active, do: "Disable", else: "Enable"}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <.user_detail_section
-        :if={@current_admin_user}
-        user={@current_admin_user}
-        current_user_id={@current_scope.settings_user.id}
-      />
-
-      <.user_cards_section
-        :if={!@current_admin_user}
-        users={@filtered_admin_users}
-        search_value={@admin_user_search}
-        current_user_id={@current_scope.settings_user.id}
-      />
       </div>
     </section>
     """
@@ -570,36 +506,13 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
     end
   end
 
-  defp form_scopes(form) do
-    case form[:scopes] do
-      nil -> []
-      field -> field.value |> List.wrap() |> Enum.filter(&(&1 not in ["", nil]))
-    end
-  end
+  defp is_self?(user, current_user_id), do: user.id == current_user_id
 
   defp managed_integration_catalog(catalog) when is_list(catalog) do
     Enum.filter(catalog, &(&1.integration_group in @managed_integration_groups))
   end
 
   defp managed_integration_catalog(_), do: []
-
-  defp integration_setup_preview(steps) when is_list(steps) do
-    steps
-    |> Enum.take(2)
-    |> Enum.map(&truncate_step/1)
-  end
-
-  defp integration_setup_preview(_), do: []
-
-  defp truncate_step(step) when is_binary(step) do
-    if String.length(step) > 84 do
-      String.slice(step, 0, 81) <> "..."
-    else
-      step
-    end
-  end
-
-  defp truncate_step(step), do: to_string(step)
 
   defp google_chat_service_account_fields do
     [
@@ -610,5 +523,4 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
     ]
   end
 
-  defp checkbox_checked?(value), do: value in [true, "true", "on", 1]
 end
