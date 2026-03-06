@@ -65,6 +65,9 @@ defmodule Assistant.Orchestrator.SubAgentQuery do
       {:ok, %{content: nil}} ->
         {:error, :nil_content}
 
+      {:error, :over_budget} ->
+        {:error, :over_budget}
+
       {:error, reason} ->
         {:error, reason}
     end

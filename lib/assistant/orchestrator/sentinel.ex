@@ -163,7 +163,8 @@ defmodule Assistant.Orchestrator.Sentinel do
              model: model,
              temperature: 0.0,
              max_tokens: 4096,
-             response_format: @sentinel_response_format
+             response_format: @sentinel_response_format,
+             skip_spending_check: true
            ],
            user_id
          ) do

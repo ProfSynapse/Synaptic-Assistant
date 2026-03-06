@@ -419,6 +419,17 @@ defmodule Assistant.Memory.Agent do
 
         handle_response(response, context, agent_state, executor_session, gen_state, parent)
 
+      {:error, :over_budget} ->
+        Logger.warning("MemoryAgent skipped — user over spending budget",
+          user_id: gen_state.user_id
+        )
+
+        %{
+          status: :failed,
+          result: "Memory agent skipped: usage limit reached.",
+          tool_calls_used: agent_state.skill_calls
+        }
+
       {:error, reason} ->
         record_llm_analytics(gen_state, nil, model, :error, reason)
 

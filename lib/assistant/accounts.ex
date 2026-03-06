@@ -195,6 +195,86 @@ defmodule Assistant.Accounts do
   end
 
   @doc """
+  Creates a new settings_user from the admin panel.
+
+  Wraps allowlist upsert + settings_user insert in a single transaction.
+  The settings_user is created with `hashed_password: nil` (magic-link-only
+  until the user sets a password). Optionally sends an invite email.
+
+  ## Options
+
+    * `:send_invite` — When `true` and a `magic_link_url_fun` is provided,
+      delivers login instructions after creation.
+    * `:magic_link_url_fun` — A 1-arity function that builds the magic link URL.
+  """
+  def create_settings_user_from_admin(attrs, opts \\ []) do
+    Repo.transact(fn ->
+      email = normalize_email_param(Map.get(attrs, :email) || Map.get(attrs, "email"))
+
+      if is_nil(email) or email == "" do
+        {:error, :missing_email}
+      else
+        allowlist_attrs = %{
+          email: email,
+          full_name: Map.get(attrs, :full_name) || Map.get(attrs, "full_name"),
+          active: true,
+          is_admin: Map.get(attrs, :is_admin, false),
+          scopes: Map.get(attrs, :access_scopes) || Map.get(attrs, "access_scopes") || [],
+          notes: "Created by admin"
+        }
+
+        with {:ok, _entry} <- upsert_settings_user_allowlist_entry(allowlist_attrs, nil, transaction?: false) do
+          case get_settings_user_by_email(email) do
+            %SettingsUser{} = existing ->
+              {:ok, existing}
+
+            nil ->
+              full_name = Map.get(attrs, :full_name) || Map.get(attrs, "full_name")
+
+              %SettingsUser{}
+              |> SettingsUser.email_changeset(%{email: email}, validate_changed: false)
+              |> Ecto.Changeset.change(
+                hashed_password: nil,
+                full_name: full_name,
+                confirmed_at: nil
+              )
+              |> Repo.insert()
+              |> case do
+                {:ok, settings_user} ->
+                  # Sync admin/scopes from allowlist
+                  case sync_settings_user_access_from_allowlist(settings_user) do
+                    {:ok, synced_user} ->
+                      maybe_send_invite(synced_user, opts)
+                      {:ok, synced_user}
+
+                    error ->
+                      error
+                  end
+
+                error ->
+                  error
+              end
+          end
+        end
+      end
+    end)
+  end
+
+  defp maybe_send_invite(settings_user, opts) do
+    if Keyword.get(opts, :send_invite, false) do
+      case Keyword.get(opts, :magic_link_url_fun) do
+        fun when is_function(fun, 1) ->
+          deliver_login_instructions(settings_user, fun)
+
+        _ ->
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  @doc """
   Sends a recovery magic link to the given settings user.
   """
   def admin_send_recovery_link(%SettingsUser{} = settings_user, magic_link_url_fun)
@@ -667,22 +747,32 @@ defmodule Assistant.Accounts do
       desired =
         case active_allowlist_entry_for_email(settings_user.email) do
           %SettingsUserAllowlistEntry{} = entry ->
-            %{
+            base = %{
               is_admin: entry.is_admin,
               access_scopes: entry.scopes |> List.wrap() |> Enum.uniq()
             }
+
+            if is_binary(entry.full_name) and entry.full_name != "" do
+              Map.put(base, :full_name, entry.full_name)
+            else
+              base
+            end
 
           nil ->
             %{is_admin: false, access_scopes: []}
         end
 
-      if settings_user.is_admin == desired.is_admin and
-           Enum.sort(List.wrap(settings_user.access_scopes)) == Enum.sort(desired.access_scopes) do
-        {:ok, settings_user}
-      else
+      needs_update =
+        settings_user.is_admin != desired.is_admin or
+          Enum.sort(List.wrap(settings_user.access_scopes)) != Enum.sort(desired[:access_scopes] || []) or
+          (Map.has_key?(desired, :full_name) and settings_user.full_name != desired.full_name)
+
+      if needs_update do
         settings_user
         |> Ecto.Changeset.change(desired)
         |> Repo.update()
+      else
+        {:ok, settings_user}
       end
     else
       {:ok, settings_user}
@@ -909,6 +999,7 @@ defmodule Assistant.Accounts do
          %{
            id: su.id,
            email: su.email,
+           full_name: su.full_name,
            display_name: su.display_name,
            is_admin: su.is_admin,
            disabled_at: su.disabled_at,

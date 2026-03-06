@@ -297,6 +297,13 @@ defmodule Assistant.Memory.Compaction do
             {:ok, content}
         end
 
+      {:error, :over_budget} ->
+        Logger.warning("Compaction skipped — user over spending budget",
+          user_id: user_id
+        )
+
+        {:error, :over_budget}
+
       {:error, reason} ->
         Logger.error("Compaction LLM call failed",
           model: model.id,

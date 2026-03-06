@@ -59,6 +59,8 @@ defmodule Assistant.SettingsUserConnectorStates do
           | {:error, Ecto.Changeset.t()}
           | {:error, :invalid}
   def set_enabled_for_user(user_id, integration_group, enabled, metadata \\ %{})
+
+  def set_enabled_for_user(user_id, integration_group, enabled, metadata)
       when is_binary(user_id) and is_binary(integration_group) and is_boolean(enabled) and is_map(metadata) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
