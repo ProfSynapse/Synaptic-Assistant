@@ -19,6 +19,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.Integrations.Telegram.AccountLink
   alias Assistant.MemoryExplorer
   alias Assistant.SettingsUserConnectorStates
+  alias Assistant.SpendingLimits
   alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
   alias Assistant.ModelDefaults
@@ -297,7 +298,14 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   def admin_user_detail(user_id) when is_binary(user_id) do
     with {:ok, user} <- Accounts.get_user_for_admin(user_id),
          %SettingsUser{} = settings_user <- Accounts.get_settings_user(user_id) do
-      {:ok, Map.merge(user, admin_user_model_defaults(settings_user))}
+      spending_data = SpendingLimits.current_usage(user_id)
+      spending_limit = SpendingLimits.get_spending_limit(user_id)
+
+      {:ok,
+       user
+       |> Map.merge(admin_user_model_defaults(settings_user))
+       |> Map.put(:spending_usage, spending_data)
+       |> Map.put(:spending_limit, spending_limit)}
     else
       _ -> {:error, :not_found}
     end

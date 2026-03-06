@@ -22,7 +22,12 @@ defmodule AssistantWeb.Components.SettingsPage do
         _ -> false
       end
 
-    assigns = assign(assigns, :is_admin, is_admin)
+    current_scope = assigns[:current_scope]
+
+    assigns =
+      assigns
+      |> assign(:is_admin, is_admin)
+      |> assign(:nav_current_scope, current_scope)
 
     ~H"""
     <div class="sa-settings-shell">
@@ -44,7 +49,7 @@ defmodule AssistantWeb.Components.SettingsPage do
 
         <nav class="sa-sidebar-nav">
           <.link
-            :for={{section, label} <- Helpers.nav_items_for(@is_admin)}
+            :for={{section, label} <- Helpers.nav_items_for(@nav_current_scope || @is_admin)}
             navigate={
               cond do
                 section == "profile" -> ~p"/settings"

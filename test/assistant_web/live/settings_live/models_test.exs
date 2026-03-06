@@ -33,7 +33,8 @@ defmodule AssistantWeb.SettingsLive.ModelsTest do
     admin = admin_settings_user()
     conn = log_in_settings_user(conn, admin)
 
-    {:ok, lv, _html} = live(conn, ~p"/settings/models")
+    {:ok, lv, _html} = live(conn, ~p"/settings/admin")
+    render_click(lv, "switch_admin_tab", %{"tab" => "models"})
 
     html = render(lv)
     assert html =~ "app-wide default model"
@@ -46,7 +47,8 @@ defmodule AssistantWeb.SettingsLive.ModelsTest do
     settle_cache()
     assert IntegrationSettings.get(:model_default_orchestrator) == "openai/gpt-5.2"
 
-    {:ok, lv, _html} = live(conn, ~p"/settings/models")
+    {:ok, lv, _html} = live(conn, ~p"/settings/admin")
+    render_click(lv, "switch_admin_tab", %{"tab" => "models"})
 
     select_html =
       lv
@@ -57,10 +59,7 @@ defmodule AssistantWeb.SettingsLive.ModelsTest do
              ~r/<option[^>]*(selected[^>]*value="openai\/gpt-5\.2"|value="openai\/gpt-5\.2"[^>]*selected)/
   end
 
-  test "permitted user auto-saves personal overrides without copying untouched global defaults",
-       %{
-         conn: conn
-       } do
+  test "admin can save per-user model defaults for a permitted user", %{conn: conn} do
     admin = admin_settings_user()
     {:ok, _} = IntegrationSettings.put(:model_default_orchestrator, "openai/gpt-5-mini", admin.id)
     {:ok, _} = IntegrationSettings.put(:model_default_sub_agent, "openai/gpt-5-mini", admin.id)
@@ -69,78 +68,44 @@ defmodule AssistantWeb.SettingsLive.ModelsTest do
     user = allowlisted_settings_user(%{email: "models-user@example.com"})
     {:ok, _user} = Accounts.toggle_user_model_defaults_access(user.id, true)
 
-    conn = log_in_settings_user(conn, user)
-    {:ok, lv, _html} = live(conn, ~p"/settings/models")
+    conn = log_in_settings_user(conn, admin)
+    {:ok, lv, _html} = live(conn, ~p"/settings/admin")
+    render_click(lv, "switch_admin_tab", %{"tab" => "users"})
 
-    html = render(lv)
-    assert html =~ "personal model overrides"
+    lv
+    |> element("button[phx-click='edit_admin_user'][phx-value-id='#{user.id}']")
+    |> render_click()
 
-    render_change(lv, "change_model_defaults", %{
-      "defaults" => %{"orchestrator" => "openai/gpt-5.2", "sub_agent" => "openai/gpt-5-mini"}
+    lv
+    |> form("#admin-user-model-defaults-form-#{user.id}", %{
+      "user_id" => user.id,
+      "defaults" => %{"orchestrator" => "openai/gpt-5.2"}
     })
+    |> render_change()
 
     reloaded_user = Accounts.get_settings_user!(user.id)
-
-    assert reloaded_user.model_defaults == %{"orchestrator" => "openai/gpt-5.2"}
+    # Form submits all role fields; verify the changed one took effect
+    assert reloaded_user.model_defaults["orchestrator"] == "openai/gpt-5.2"
 
     assert Assistant.ModelDefaults.default_model_id(:orchestrator, settings_user: reloaded_user) ==
              "openai/gpt-5.2"
-
-    {:ok, lv, _html} = live(conn, ~p"/settings/models")
-
-    select_html =
-      lv
-      |> element(~s(select[name="defaults[orchestrator]"]))
-      |> render()
-
-    assert select_html =~
-             ~r/<option[^>]*(selected[^>]*value="openai\/gpt-5\.2"|value="openai\/gpt-5\.2"[^>]*selected)/
   end
 
-  test "user without permission sees admin-managed overrides as read-only and cannot save overrides",
-       %{
-         conn: conn
-       } do
+  test "non-admin user cannot save global model defaults", %{conn: conn} do
     admin = admin_settings_user()
     {:ok, _} = IntegrationSettings.put(:model_default_orchestrator, "openai/gpt-5-mini", admin.id)
     settle_cache()
 
-    user =
-      allowlisted_settings_user(%{
-        email: "readonly-models@example.com",
-        model_defaults: %{"orchestrator" => "openai/gpt-5.2"}
-      })
-
+    user = allowlisted_settings_user(%{email: "readonly-models@example.com"})
     conn = log_in_settings_user(conn, user)
-    {:ok, lv, _html} = live(conn, ~p"/settings/models")
 
-    html = render(lv)
-    assert html =~ "Managed by your admin."
-    assert html =~ "Admin override"
+    # Non-admin cannot access admin section (redirected)
+    {:error, {:live_redirect, %{to: path, flash: flash}}} = live(conn, ~p"/settings/admin")
+    assert path == "/settings"
+    assert flash["error"] == "You do not have permission to access admin."
 
-    select_html =
-      lv
-      |> element(~s(select[name="defaults[orchestrator]"]))
-      |> render()
-
-    assert select_html =~ "disabled"
-
-    html =
-      render_change(lv, "change_model_defaults", %{
-        "defaults" => %{"orchestrator" => "openai/gpt-5.2"}
-      })
-
-    assert html =~ "do not have permission to update model defaults"
+    # Global defaults remain unchanged
     assert IntegrationSettings.get(:model_default_orchestrator) == "openai/gpt-5-mini"
-
-    assert Accounts.get_settings_user!(user.id).model_defaults == %{
-             "orchestrator" => "openai/gpt-5.2"
-           }
-
-    assert Assistant.ModelDefaults.default_model_id(
-             :orchestrator,
-             settings_user: Accounts.get_settings_user!(user.id)
-           ) == "openai/gpt-5.2"
   end
 
   defp admin_settings_user(attrs \\ %{}) do
