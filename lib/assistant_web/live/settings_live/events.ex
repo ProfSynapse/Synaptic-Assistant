@@ -818,6 +818,7 @@ defmodule AssistantWeb.SettingsLive.Events do
       {:ok, _entry} ->
         {:noreply,
          socket
+         |> assign(:add_user_modal_open, false)
          |> put_flash(:info, "Allow list entry saved.")
          |> reload_current_user_scope()
          |> Loaders.load_admin()}
