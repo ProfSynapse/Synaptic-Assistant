@@ -15,8 +15,8 @@ defmodule Assistant.Repo.Migrations.AddEmailToUsers do
     end
 
     create unique_index(:users, [:email],
-      name: :users_email_unique,
-      where: "email IS NOT NULL"
-    )
+             name: :users_email_unique,
+             where: "email IS NOT NULL"
+           )
   end
 end

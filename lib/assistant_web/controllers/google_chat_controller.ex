@@ -93,7 +93,11 @@ defmodule AssistantWeb.GoogleChatController do
   end
 
   # REMOVED_FROM_SPACE: soft-delete the user identity by setting left_at.
-  defp handle_normalized(conn, %{metadata: %{"event_type" => "REMOVED_FROM_SPACE"}} = message, _params) do
+  defp handle_normalized(
+         conn,
+         %{metadata: %{"event_type" => "REMOVED_FROM_SPACE"}} = message,
+         _params
+       ) do
     Logger.info("User removed from space",
       space_id: message.space_id,
       user_id: message.user_id

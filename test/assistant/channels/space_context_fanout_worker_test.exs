@@ -103,7 +103,8 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
       })
 
       # Create recipient (another member of the same space)
-      recipient = chat_user_fixture(%{channel: "google_chat", external_id: "users/fanout_recipient"})
+      recipient =
+        chat_user_fixture(%{channel: "google_chat", external_id: "users/fanout_recipient"})
 
       user_identity_fixture(recipient, %{
         channel: "google_chat",
@@ -212,7 +213,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
     test "fans out to multiple recipients in same space" do
       space_id = "spaces/MULTI_#{System.unique_integer([:positive])}"
 
-      sender = chat_user_fixture(%{channel: "google_chat", external_id: "users/multi_sender_#{System.unique_integer([:positive])}"})
+      sender =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/multi_sender_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(sender, %{
         channel: "google_chat",
@@ -281,7 +286,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
     test "does not inject into sender's own conversation (sender exclusion)" do
       space_id = "spaces/SENDER_EXCL_#{System.unique_integer([:positive])}"
 
-      sender = chat_user_fixture(%{channel: "google_chat", external_id: "users/se_#{System.unique_integer([:positive])}"})
+      sender =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/se_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(sender, %{
         channel: "google_chat",
@@ -320,7 +329,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
     test "handles nil space_type gracefully (does not skip)" do
       space_id = "spaces/NIL_TYPE_#{System.unique_integer([:positive])}"
 
-      sender = chat_user_fixture(%{channel: "google_chat", external_id: "users/nil_type_#{System.unique_integer([:positive])}"})
+      sender =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/nil_type_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(sender, %{
         channel: "google_chat",
@@ -328,7 +341,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
         space_id: space_id
       })
 
-      recipient = chat_user_fixture(%{channel: "google_chat", external_id: "users/nil_type_r_#{System.unique_integer([:positive])}"})
+      recipient =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/nil_type_r_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(recipient, %{
         channel: "google_chat",
@@ -368,7 +385,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
     test "different users in same space get own conversations (space scoping)" do
       space_id = "spaces/SCOPED_#{System.unique_integer([:positive])}"
 
-      sender = chat_user_fixture(%{channel: "google_chat", external_id: "users/scoped_s_#{System.unique_integer([:positive])}"})
+      sender =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/scoped_s_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(sender, %{
         channel: "google_chat",
@@ -376,7 +397,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
         space_id: space_id
       })
 
-      user_a = chat_user_fixture(%{channel: "google_chat", external_id: "users/scoped_a_#{System.unique_integer([:positive])}"})
+      user_a =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/scoped_a_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(user_a, %{
         channel: "google_chat",
@@ -384,7 +409,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
         space_id: space_id
       })
 
-      user_b = chat_user_fixture(%{channel: "google_chat", external_id: "users/scoped_b_#{System.unique_integer([:positive])}"})
+      user_b =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/scoped_b_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(user_b, %{
         channel: "google_chat",
@@ -438,7 +467,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
     test "DM messages are NEVER fanned out even with space members present" do
       space_id = "spaces/DM_PRIV_#{System.unique_integer([:positive])}"
 
-      sender = chat_user_fixture(%{channel: "google_chat", external_id: "users/dm_priv_s_#{System.unique_integer([:positive])}"})
+      sender =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/dm_priv_s_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(sender, %{
         channel: "google_chat",
@@ -446,7 +479,11 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
         space_id: space_id
       })
 
-      bystander = chat_user_fixture(%{channel: "google_chat", external_id: "users/dm_priv_b_#{System.unique_integer([:positive])}"})
+      bystander =
+        chat_user_fixture(%{
+          channel: "google_chat",
+          external_id: "users/dm_priv_b_#{System.unique_integer([:positive])}"
+        })
 
       user_identity_fixture(bystander, %{
         channel: "google_chat",

@@ -10,7 +10,6 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       {"memory", "Memory"},
       {"apps", "Apps & Connections"},
       {"workflows", "Workflows"},
-      {"skills", "Skill Permissions"},
       {"help", "Help"},
       {"admin", "Admin"}
     ]
@@ -36,7 +35,6 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "memory" -> "hero-circle-stack"
       "apps" -> "hero-puzzle-piece"
       "workflows" -> "hero-command-line"
-      "skills" -> "hero-wrench-screwdriver"
       "admin" -> "hero-cog-6-tooth"
       "help" -> "hero-question-mark-circle"
       _ -> "hero-question-mark-circle"
@@ -52,7 +50,6 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "memory" -> "Memory"
       "apps" -> "Apps & Connections"
       "workflows" -> "Workflows"
-      "skills" -> "Skill Permissions"
       "admin" -> "Admin"
       "help" -> "Help & Setup"
       _ -> "Settings"

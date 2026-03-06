@@ -65,6 +65,7 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:graph_data, %{nodes: [], links: []})
     |> assign(:apps_modal_open, false)
     |> assign(:app_catalog, Data.app_catalog())
+    |> assign(:admin_integration_catalog, Data.admin_integration_catalog())
     |> assign(:connected_drives, [])
     |> assign(:available_drives, [])
     |> assign(:drives_loading, false)
@@ -83,7 +84,9 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:openai_key_form_open, false)
     |> assign(:openrouter_key_form, to_form(%{"api_key" => ""}, as: :openrouter_key))
     |> assign(:openai_key_form, to_form(%{"api_key" => ""}, as: :openai_key))
-    |> assign(:skills_permissions, [])
+    |> assign(:workspace_enabled_groups, %{})
+    |> assign(:connector_states, %{})
+    |> assign(:personal_skill_permissions, [])
     |> assign(:help_articles, Data.help_articles())
     |> assign(:help_topic, nil)
     |> assign(:help_query, "")
@@ -99,6 +102,7 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:integration_settings, [])
     |> assign(:connection_status, %{})
     |> assign(:current_app, nil)
+    |> assign(:current_admin_integration, nil)
     |> assign(:app_integration_settings, [])
     |> assign(:telegram_bot_configured, false)
     |> assign(:telegram_enabled, false)
@@ -112,6 +116,9 @@ defmodule AssistantWeb.SettingsLive.State do
 
   def handle_params(socket, params) do
     cond do
+      Map.has_key?(params, "integration_group") ->
+        handle_admin_integration(socket, params)
+
       Map.has_key?(params, "app_id") ->
         handle_app_detail(socket, params)
 
@@ -139,6 +146,7 @@ defmodule AssistantWeb.SettingsLive.State do
       socket
       |> assign(:section, section)
       |> assign(:current_app, nil)
+      |> assign(:current_admin_integration, nil)
       |> assign(:telegram_connect_url, nil)
       |> assign(:telegram_bot_username, nil)
       |> assign(:telegram_connect_expires_at, nil)
@@ -160,7 +168,41 @@ defmodule AssistantWeb.SettingsLive.State do
         socket
         |> assign(:section, "apps")
         |> assign(:current_app, app)
+        |> assign(:current_admin_integration, nil)
         |> Loaders.load_app_detail_settings(app)
+    end
+  end
+
+  defp handle_admin_integration(socket, params) do
+    integration_group = Map.get(params, "integration_group")
+
+    is_admin =
+      case socket.assigns[:current_scope] do
+        %{settings_user: %{is_admin: true}} -> true
+        _ -> false
+      end
+
+    cond do
+      not is_admin ->
+        socket
+        |> put_flash(:error, "You do not have permission to access admin.")
+        |> push_navigate(to: "/settings")
+
+      true ->
+        case Data.find_admin_integration(integration_group) do
+          nil ->
+            socket
+            |> put_flash(:error, "Integration not found.")
+            |> push_navigate(to: "/settings/admin")
+
+          integration ->
+            socket
+            |> assign(:section, "admin")
+            |> assign(:current_app, nil)
+            |> assign(:current_admin_integration, integration)
+            |> assign(:help_topic, nil)
+            |> Loaders.load_admin_integration_settings(integration.integration_group)
+        end
     end
   end
 end

@@ -68,7 +68,10 @@ defmodule AssistantWeb.SettingsLive.Context do
     case find_real_user_by_email(settings_user.email) do
       {:ok, real_user_id} ->
         # Found a real user with matching email — upgrade
-        case Assistant.Channels.UserResolver.upgrade_pseudo_user(settings_user.user_id, real_user_id) do
+        case Assistant.Channels.UserResolver.upgrade_pseudo_user(
+               settings_user.user_id,
+               real_user_id
+             ) do
           {:ok, _} ->
             # Also update the settings_user link (upgrade_pseudo_user handles this,
             # but be explicit for the in-memory value)

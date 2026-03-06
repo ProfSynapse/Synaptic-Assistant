@@ -208,7 +208,14 @@ defmodule Assistant.Channels.UserResolver do
           user_id: linked_user_id
         )
 
-        link_identity_and_resolve(linked_user_id, channel_str, external_id, space_id, display_name, channel)
+        link_identity_and_resolve(
+          linked_user_id,
+          channel_str,
+          external_id,
+          space_id,
+          display_name,
+          channel
+        )
 
       {:pseudo, pseudo_user_id, settings_user_id} ->
         # Found a pseudo-user whose settings_user has this email — upgrade
@@ -219,16 +226,36 @@ defmodule Assistant.Channels.UserResolver do
         )
 
         create_user_upgrade_pseudo_and_resolve(
-          channel, channel_str, external_id, space_id, display_name,
-          user_email, pseudo_user_id, settings_user_id
+          channel,
+          channel_str,
+          external_id,
+          space_id,
+          display_name,
+          user_email,
+          pseudo_user_id,
+          settings_user_id
         )
 
       :not_found ->
-        create_new_user_and_resolve(channel, channel_str, external_id, space_id, display_name, user_email)
+        create_new_user_and_resolve(
+          channel,
+          channel_str,
+          external_id,
+          space_id,
+          display_name,
+          user_email
+        )
     end
   end
 
-  defp link_identity_and_resolve(user_id, channel_str, external_id, space_id, display_name, channel) do
+  defp link_identity_and_resolve(
+         user_id,
+         channel_str,
+         external_id,
+         space_id,
+         display_name,
+         channel
+       ) do
     identity_attrs = %{
       user_id: user_id,
       channel: channel_str,
@@ -248,46 +275,52 @@ defmodule Assistant.Channels.UserResolver do
 
   # Create a real user, migrate pseudo-user's data, then link identity
   defp create_user_upgrade_pseudo_and_resolve(
-         channel, channel_str, external_id, space_id, display_name,
-         user_email, pseudo_user_id, settings_user_id
+         channel,
+         channel_str,
+         external_id,
+         space_id,
+         display_name,
+         user_email,
+         pseudo_user_id,
+         settings_user_id
        ) do
     case Repo.transaction(fn ->
-      # Create the real user
-      user_attrs = %{
-        external_id: external_id,
-        channel: channel_str,
-        display_name: display_name,
-        email: user_email
-      }
+           # Create the real user
+           user_attrs = %{
+             external_id: external_id,
+             channel: channel_str,
+             display_name: display_name,
+             email: user_email
+           }
 
-      case %User{} |> User.changeset(user_attrs) |> Repo.insert() do
-        {:ok, user} ->
-          Logger.info("Created real user for pseudo-user upgrade",
-            user_id: user.id,
-            pseudo_user_id: pseudo_user_id
-          )
+           case %User{} |> User.changeset(user_attrs) |> Repo.insert() do
+             {:ok, user} ->
+               Logger.info("Created real user for pseudo-user upgrade",
+                 user_id: user.id,
+                 pseudo_user_id: pseudo_user_id
+               )
 
-          # Upgrade: re-link settings_user, migrate conversations
-          do_upgrade_pseudo_user(pseudo_user_id, user.id, settings_user_id)
+               # Upgrade: re-link settings_user, migrate conversations
+               do_upgrade_pseudo_user(pseudo_user_id, user.id, settings_user_id)
 
-          # Create the identity row
-          identity_attrs = %{
-            user_id: user.id,
-            channel: channel_str,
-            external_id: external_id,
-            space_id: space_id,
-            display_name: display_name
-          }
+               # Create the identity row
+               identity_attrs = %{
+                 user_id: user.id,
+                 channel: channel_str,
+                 external_id: external_id,
+                 space_id: space_id,
+                 display_name: display_name
+               }
 
-          case %UserIdentity{} |> UserIdentity.changeset(identity_attrs) |> Repo.insert() do
-            {:ok, _identity} -> user.id
-            {:error, changeset} -> Repo.rollback(changeset)
-          end
+               case %UserIdentity{} |> UserIdentity.changeset(identity_attrs) |> Repo.insert() do
+                 {:ok, _identity} -> user.id
+                 {:error, changeset} -> Repo.rollback(changeset)
+               end
 
-        {:error, changeset} ->
-          Repo.rollback(changeset)
-      end
-    end) do
+             {:error, changeset} ->
+               Repo.rollback(changeset)
+           end
+         end) do
       {:ok, user_id} ->
         ensure_perpetual_conversation(user_id)
 
@@ -296,7 +329,14 @@ defmodule Assistant.Channels.UserResolver do
     end
   end
 
-  defp create_new_user_and_resolve(channel, channel_str, external_id, space_id, display_name, user_email) do
+  defp create_new_user_and_resolve(
+         channel,
+         channel_str,
+         external_id,
+         space_id,
+         display_name,
+         user_email
+       ) do
     Repo.transaction(fn ->
       # Create user with primary identity fields + email
       user_attrs =
@@ -347,6 +387,7 @@ defmodule Assistant.Channels.UserResolver do
   end
 
   defp maybe_put_email(attrs, nil), do: attrs
+
   defp maybe_put_email(attrs, email) when is_binary(email) do
     normalized = normalize_email(email)
     if normalized, do: Map.put(attrs, :email, normalized), else: attrs
@@ -388,7 +429,8 @@ defmodule Assistant.Channels.UserResolver do
           # Second: check settings_users for a linked pseudo-user
           pseudo_query =
             from su in SettingsUser,
-              join: u in User, on: u.id == su.user_id,
+              join: u in User,
+              on: u.id == su.user_id,
               where: fragment("lower(?)", su.email) == ^normalized_email,
               where: not is_nil(su.user_id),
               where: u.channel == "settings",
@@ -404,7 +446,8 @@ defmodule Assistant.Channels.UserResolver do
               # (handles case where settings_user email matches but user.email wasn't set yet)
               settings_real_query =
                 from su in SettingsUser,
-                  join: u in User, on: u.id == su.user_id,
+                  join: u in User,
+                  on: u.id == su.user_id,
                   where: fragment("lower(?)", su.email) == ^normalized_email,
                   where: not is_nil(su.user_id),
                   where: u.channel != "settings" or is_nil(u.channel),

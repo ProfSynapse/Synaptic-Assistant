@@ -5,8 +5,11 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
 
   use AssistantWeb, :html
 
+  import AssistantWeb.Components.AdminIntegrations, only: [admin_integrations: 1]
   import AssistantWeb.Components.SettingsPage.UserCards, only: [user_cards_section: 1]
   import AssistantWeb.Components.SettingsPage.UserDetail, only: [user_detail_section: 1]
+
+  @managed_integration_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
   def admin_section(assigns) do
     ~H"""
@@ -28,6 +31,43 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
     </section>
 
     <section :if={@current_scope.settings_user.is_admin} class="space-y-6">
+      <div class="sa-card">
+        <div>
+          <h2>Integrations</h2>
+          <p>
+            Workspace credentials are managed per integration with dedicated setup guides.
+          </p>
+        </div>
+
+        <div class="sa-card-grid" style="margin-top: 1rem;">
+          <article
+            :for={integration <- managed_integration_catalog(@admin_integration_catalog)}
+            class="sa-card"
+          >
+            <div class="sa-app-title" style="margin-bottom: 0.75rem;">
+              <img src={integration.icon_path} alt={integration.name} class="sa-app-icon" />
+              <h3>{integration.name}</h3>
+            </div>
+
+            <p style="margin: 0; font-size: 0.875rem; color: var(--sa-text-secondary);">
+              {integration.summary}
+            </p>
+
+            <ul class="list-disc ml-5" style="margin: 0.75rem 0 1rem; font-size: 0.8125rem;">
+              <li :for={step <- integration_setup_preview(integration.setup_instructions)}>{step}</li>
+            </ul>
+
+            <.link
+              navigate={~p"/settings/admin/integrations/#{integration.integration_group}"}
+              class="sa-btn secondary"
+              style="display: inline-flex; text-decoration: none;"
+            >
+              <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Manage Integration
+            </.link>
+          </article>
+        </div>
+      </div>
+
       <div class="sa-card">
         <div>
           <h2>Allow List</h2>
@@ -209,11 +249,143 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
     """
   end
 
+  def admin_integration_detail_section(assigns) do
+    ~H"""
+    <div>
+      <header class="sa-page-header">
+        <div style="display: flex; align-items: center; gap: 1rem;">
+          <.link navigate={~p"/settings/admin"} class="sa-icon-btn" title="Back to Admin">
+            <.icon name="hero-arrow-left" class="h-5 w-5" />
+          </.link>
+          <img
+            src={@current_admin_integration.icon_path}
+            alt={@current_admin_integration.name}
+            class="sa-app-icon"
+            style="width: 2rem; height: 2rem;"
+          />
+          <div>
+            <h1 style="margin: 0;">{@current_admin_integration.name} Integration</h1>
+            <p class="sa-page-subtitle" style="margin: 0;">{@current_admin_integration.summary}</p>
+          </div>
+        </div>
+      </header>
+
+      <section class="sa-card" style="margin-top: 1.5rem;">
+        <h2>Setup Instructions</h2>
+        <div
+          :if={@current_admin_integration.integration_group == "google_chat"}
+          class="overflow-x-auto"
+          style="margin-top: 0.75rem;"
+        >
+          <p class="sa-page-subtitle" style="margin: 0 0 0.5rem;">
+            Recommended values for the Google Chat service account:
+          </p>
+          <table class="sa-table">
+            <thead>
+              <tr>
+                <th>Field</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={{field, value} <- google_chat_service_account_fields()}>
+                <td>{field}</td>
+                <td>{value}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <ol class="sa-setup-steps" style="margin-top: 0.75rem;">
+          <li :for={{step, idx} <- Enum.with_index(@current_admin_integration.setup_instructions, 1)}>
+            <span class="sa-step-number">{idx}</span>
+            <span>{step}</span>
+          </li>
+        </ol>
+
+        <div
+          :if={@current_admin_integration[:portal_url] || @current_admin_integration[:docs_url]}
+          class="sa-docs-links"
+          style="margin-top: 1rem;"
+        >
+          <a
+            :if={@current_admin_integration[:portal_url]}
+            href={@current_admin_integration.portal_url}
+            target="_blank"
+            rel="noopener"
+            class="sa-docs-link"
+          >
+            <.icon name="hero-arrow-top-right-on-square" class="h-4 w-4" />
+            Open developer console
+          </a>
+          <a
+            :if={@current_admin_integration[:docs_url]}
+            href={@current_admin_integration.docs_url}
+            target="_blank"
+            rel="noopener"
+            class="sa-docs-link"
+          >
+            <.icon name="hero-book-open" class="h-4 w-4" />
+            View setup guide
+          </a>
+        </div>
+      </section>
+
+      <section class="sa-card" style="margin-top: 1.5rem;">
+        <h2>Workspace Credentials</h2>
+        <p style="margin-top: 0.25rem;" class="sa-page-subtitle">
+          Saved values apply to all users in this workspace.
+        </p>
+
+        <div style="margin-top: 1rem;">
+          <.admin_integrations
+            settings={@integration_settings}
+            group_filter={@current_admin_integration.integration_group}
+          />
+        </div>
+      </section>
+    </div>
+    """
+  end
+
   defp form_scopes(form) do
     case form[:scopes] do
       nil -> []
       field -> field.value |> List.wrap() |> Enum.filter(&(&1 not in ["", nil]))
     end
+  end
+
+  defp managed_integration_catalog(catalog) when is_list(catalog) do
+    Enum.filter(catalog, &(&1.integration_group in @managed_integration_groups))
+  end
+
+  defp managed_integration_catalog(_), do: []
+
+  defp integration_setup_preview(steps) when is_list(steps) do
+    steps
+    |> Enum.take(2)
+    |> Enum.map(&truncate_step/1)
+  end
+
+  defp integration_setup_preview(_), do: []
+
+  defp truncate_step(step) when is_binary(step) do
+    if String.length(step) > 84 do
+      String.slice(step, 0, 81) <> "..."
+    else
+      step
+    end
+  end
+
+  defp truncate_step(step), do: to_string(step)
+
+  defp google_chat_service_account_fields do
+    [
+      {"Service account name", "Synaptic Assistant Chat Bot"},
+      {"Service account ID", "synaptic-chat-bot (auto-fills from name)"},
+      {"Description",
+       "Service account for Synaptic Assistant to send messages in Google Chat spaces"}
+    ]
   end
 
   defp checkbox_checked?(value), do: value in [true, "true", "on", 1]

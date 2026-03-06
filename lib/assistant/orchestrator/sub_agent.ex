@@ -759,7 +759,7 @@ defmodule Assistant.Orchestrator.SubAgent do
       is_nil(skill_name) ->
         {tc, "Error: Missing required \"skill\" parameter in use_skill call."}
 
-      not SkillPermissions.enabled?(skill_name) ->
+      not SkillPermissions.enabled_for_user?(dispatch_params.user_id, skill_name) ->
         {tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}
 
       skill_name not in dispatch_params.skills ->
@@ -949,7 +949,7 @@ defmodule Assistant.Orchestrator.SubAgent do
         error
 
       {:ok, system_prompt} ->
-        tools = build_scoped_tools(dispatch_params.skills)
+        tools = build_scoped_tools(dispatch_params.skills, dispatch_params.user_id)
         mission_msg = %{role: "user", content: dispatch_params.mission}
 
         {:ok,
@@ -1178,10 +1178,10 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   # --- Tool Definitions ---
 
-  defp build_scoped_tools(skill_names) do
+  defp build_scoped_tools(skill_names, user_id) do
     allowed_skill_names =
       skill_names
-      |> Enum.filter(&SkillPermissions.enabled?/1)
+      |> Enum.filter(&SkillPermissions.enabled_for_user?(user_id, &1))
       |> Enum.uniq()
 
     # Look up each skill definition to build the scoped use_skill tool
@@ -1452,7 +1452,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   defp update_context_with_new_tools(context, new_messages, updated_dispatch) do
-    new_tools = build_scoped_tools(updated_dispatch.skills)
+    new_tools = build_scoped_tools(updated_dispatch.skills, updated_dispatch.user_id)
 
     %{
       context

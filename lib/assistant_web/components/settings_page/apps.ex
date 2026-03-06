@@ -12,7 +12,6 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
   use AssistantWeb, :html
 
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
-  alias Assistant.IntegrationSettings.Registry
 
   import AssistantWeb.Components.DriveSettings, only: [drive_settings: 1]
   import AssistantWeb.Components.SyncTargetBrowser, only: [sync_target_browser: 1]
@@ -24,24 +23,16 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         _ -> false
       end
 
-    all_settings = assigns[:integration_settings] || []
     connection_status = assigns[:connection_status] || %{}
-
-    # Groups where the _enabled key has been explicitly set to "false".
-    # When no _enabled key exists in DB (source :none), the group defaults to enabled.
-    disabled_groups =
-      all_settings
-      |> Enum.filter(fn s ->
-        Registry.enabled_key?(s.key) and s.source != :none and s.masked_value == "false"
-      end)
-      |> Enum.map(& &1.group)
-      |> MapSet.new()
+    connector_states = assigns[:connector_states] || %{}
+    workspace_enabled_groups = assigns[:workspace_enabled_groups] || %{}
 
     assigns =
       assigns
       |> assign(:is_admin, is_admin)
       |> assign(:connection_status, connection_status)
-      |> assign(:disabled_groups, disabled_groups)
+      |> assign(:connector_states, connector_states)
+      |> assign(:workspace_enabled_groups, workspace_enabled_groups)
 
     ~H"""
     <section class="sa-card">
@@ -53,7 +44,8 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
           :for={app <- @app_catalog}
           app={app}
           connection_status={@connection_status}
-          disabled_groups={@disabled_groups}
+          connector_states={@connector_states}
+          workspace_enabled_groups={@workspace_enabled_groups}
           is_admin={@is_admin}
         />
       </div>
@@ -89,36 +81,47 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
 
   attr :app, :map, required: true
   attr :connection_status, :map, required: true
-  attr :disabled_groups, :any, required: true
+  attr :connector_states, :map, required: true
+  attr :workspace_enabled_groups, :map, required: true
   attr :is_admin, :boolean, required: true
 
   defp app_card(assigns) do
     app = assigns.app
     group = app.integration_group
-    conn_status = Map.get(assigns.connection_status, group, :not_configured)
-    explicitly_disabled = MapSet.member?(assigns.disabled_groups, group)
+    connection_status = Map.get(assigns.connection_status, group, :not_configured)
+    workspace_enabled = Map.get(assigns.workspace_enabled_groups, group, true)
+    user_enabled = Map.get(assigns.connector_states, group, false)
+    inline_toggle = app.connect_type != :oauth
+    setup_required = app.id == "telegram"
 
-    # Four-state status derived from ConnectionValidator + toggle state:
-    # :connected — API handshake succeeded and integration enabled
-    # :disabled — API handshake succeeded but explicitly toggled off
-    # :not_connected — keys exist but API handshake failed
-    # :not_configured — no keys configured at all
+    toggle_enabled =
+      inline_toggle and workspace_enabled and connection_status in [:connected, :not_connected]
+
     status =
       cond do
-        conn_status == :connected and not explicitly_disabled -> :connected
-        conn_status == :connected and explicitly_disabled -> :disabled
-        conn_status == :not_connected -> :not_connected
-        true -> :not_configured
-      end
+        not workspace_enabled ->
+          :workspace_disabled
 
-    # Show toggle when keys exist (connected or not_connected) regardless of handshake result
-    has_keys = conn_status in [:connected, :not_connected]
-    enabled = status == :connected
+        connection_status == :not_configured ->
+          :not_configured
+
+        inline_toggle and not user_enabled ->
+          :disabled
+
+        connection_status == :connected ->
+          :connected
+
+        true ->
+          :not_connected
+      end
 
     assigns =
       assigns
-      |> assign(:has_keys, has_keys)
-      |> assign(:enabled, enabled)
+      |> assign(:workspace_enabled, workspace_enabled)
+      |> assign(:user_enabled, user_enabled)
+      |> assign(:inline_toggle, inline_toggle)
+      |> assign(:setup_required, setup_required)
+      |> assign(:toggle_enabled, toggle_enabled)
       |> assign(:status, status)
 
     ~H"""
@@ -130,20 +133,29 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         </div>
 
         <div style="display: flex; align-items: center; gap: 0.75rem;">
-          <label :if={@is_admin and @has_keys and @app.connect_type != :oauth} class="sa-switch">
+          <label :if={@inline_toggle} class={["sa-switch", !@toggle_enabled && "opacity-50"]}>
             <input
               type="checkbox"
-              checked={@enabled}
+              checked={@user_enabled}
               class="sa-switch-input"
               role="switch"
-              aria-checked={to_string(@enabled)}
+              aria-checked={to_string(@user_enabled)}
               aria-label={"Toggle #{@app.name}"}
-              phx-click="toggle_integration"
+              disabled={!@toggle_enabled}
+              phx-click="toggle_connector"
+              phx-value-app_id={@app.id}
               phx-value-group={@app.integration_group}
-              phx-value-enabled={to_string(!@enabled)}
+              phx-value-enabled={to_string(!@user_enabled)}
             />
             <span class="sa-switch-slider"></span>
           </label>
+          <.link
+            navigate={~p"/settings/apps/#{@app.id}"}
+            class="sa-icon-btn"
+            title={"Open #{@app.name} settings"}
+          >
+            <.icon name="hero-cog-6-tooth" class="h-4 w-4" />
+          </.link>
           <.status_icon status={@status} />
         </div>
       </div>
@@ -152,7 +164,12 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
         {@app.summary}
       </p>
 
-      <.card_actions app={@app} status={@status} is_admin={@is_admin} />
+      <.card_status_copy
+        status={@status}
+        is_admin={@is_admin}
+        inline_toggle={@inline_toggle}
+        setup_required={@setup_required}
+      />
     </article>
     """
   end
@@ -169,6 +186,12 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
     """
   end
 
+  defp status_icon(%{status: :workspace_disabled} = assigns) do
+    ~H"""
+    <span aria-label="Disabled by admin"><.icon name="hero-no-symbol" class="h-5 w-5 text-amber-500" /></span>
+    """
+  end
+
   defp status_icon(%{status: :not_connected} = assigns) do
     ~H"""
     <span aria-label="Connection failed"><.icon name="hero-x-circle" class="h-5 w-5 text-red-400" /></span>
@@ -181,40 +204,50 @@ defmodule AssistantWeb.Components.SettingsPage.Apps do
     """
   end
 
-  # --- Card action buttons ---
-
-  # Connected, disabled, or not_connected — full-width "Settings" button
-  defp card_actions(%{status: status} = assigns)
-       when status in [:connected, :disabled, :not_connected] do
-    ~H"""
-    <.link
-      navigate={~p"/settings/apps/#{@app.id}"}
-      class="sa-btn secondary"
-      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none; box-sizing: border-box;"
-    >
-      <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Settings
-    </.link>
-    """
-  end
-
-  # Not configured — admin gets "Set Up" button
-  defp card_actions(%{status: :not_configured, is_admin: true} = assigns) do
-    ~H"""
-    <.link
-      navigate={~p"/settings/apps/#{@app.id}"}
-      class="sa-btn"
-      style="width: 100%; justify-content: center; display: inline-flex; text-decoration: none; box-sizing: border-box;"
-    >
-      <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Set Up
-    </.link>
-    """
-  end
-
-  # Not configured — non-admin gets informational text
-  defp card_actions(assigns) do
+  defp card_status_copy(%{status: :connected, inline_toggle: true} = assigns) do
     ~H"""
     <p style="font-size: 0.8125rem; color: var(--sa-text-secondary); text-align: center;">
-      Contact your admin to configure this integration.
+      Enabled for your account.
+    </p>
+    """
+  end
+
+  defp card_status_copy(%{status: :disabled, inline_toggle: true} = assigns) do
+    ~H"""
+    <p style="font-size: 0.8125rem; color: var(--sa-text-secondary); text-align: center;">
+      Disabled for your account.
+    </p>
+    """
+  end
+
+  defp card_status_copy(%{status: :workspace_disabled} = assigns) do
+    ~H"""
+    <p style="font-size: 0.8125rem; color: var(--sa-text-secondary); text-align: center;">
+      Disabled by workspace admin.
+    </p>
+    """
+  end
+
+  defp card_status_copy(%{status: :not_configured, is_admin: true} = assigns) do
+    ~H"""
+    <p style="font-size: 0.8125rem; color: var(--sa-text-secondary); text-align: center;">
+      Configure this integration in Admin settings.
+    </p>
+    """
+  end
+
+  defp card_status_copy(%{status: :not_configured, setup_required: true} = assigns) do
+    ~H"""
+    <p style="font-size: 0.8125rem; color: var(--sa-text-secondary); text-align: center;">
+      Requires workspace setup plus personal account link.
+    </p>
+    """
+  end
+
+  defp card_status_copy(assigns) do
+    ~H"""
+    <p style="font-size: 0.8125rem; color: var(--sa-text-secondary); text-align: center;">
+      Use settings to complete connection details.
     </p>
     """
   end
