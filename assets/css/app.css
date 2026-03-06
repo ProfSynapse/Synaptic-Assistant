@@ -1975,12 +1975,16 @@ a {
   padding: 0;
   flex: 1 1 auto;
   overflow: hidden;
+  min-height: 0;
 }
 
 .sa-drive-manager {
   display: flex;
   flex-direction: column;
   min-height: min(72vh, 780px);
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   background: #fbfdfd;
 }
 
@@ -2004,6 +2008,7 @@ a {
 .sa-drive-manager-body {
   flex: 1 1 auto;
   overflow: auto;
+  min-height: 0;
   padding: 1rem 1.35rem 1.25rem;
 }
 
@@ -2047,9 +2052,10 @@ a {
 .sa-drive-tree-row {
   --sa-drive-indent: calc(var(--sa-drive-depth, 0) * 1.1rem);
   position: relative;
-  display: flex;
-  align-items: stretch;
-  gap: 0.7rem;
+  display: grid;
+  grid-template-columns: 1.4rem minmax(0, 1fr);
+  align-items: start;
+  column-gap: 0.45rem;
   min-height: 2.75rem;
   padding-left: var(--sa-drive-indent);
 }
@@ -2072,10 +2078,12 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  align-self: center;
+  align-self: start;
+  justify-self: center;
   border: 0;
   background: transparent;
   padding: 0;
+  margin-top: 0.82rem;
   color: var(--sa-text-muted, #6b7280);
   flex-shrink: 0;
 }
