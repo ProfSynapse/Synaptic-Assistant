@@ -33,7 +33,27 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
     </section>
 
     <section :if={@current_scope.settings_user.is_admin} class="space-y-6">
-      <div class="sa-card">
+      <nav class="sa-admin-tabs" role="tablist">
+        <button
+          :for={
+            {tab_id, tab_label} <- [
+              {"integrations", "Integrations"},
+              {"models", "Models"},
+              {"users", "Users"}
+            ]
+          }
+          type="button"
+          role="tab"
+          class={"sa-admin-tab #{if @admin_tab == tab_id, do: "active"}"}
+          aria-selected={to_string(@admin_tab == tab_id)}
+          phx-click="switch_admin_tab"
+          phx-value-tab={tab_id}
+        >
+          {tab_label}
+        </button>
+      </nav>
+
+      <div :if={@admin_tab == "integrations"} class="sa-card">
         <div>
           <h2>Integrations</h2>
           <p>
@@ -70,13 +90,18 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
         </div>
       </div>
 
-      <.admin_model_providers {assigns} />
-      <.admin_role_defaults {assigns} />
-      <.models_section {assigns} />
+      <div :if={@admin_tab == "models"}>
+        <div class="space-y-6">
+          <.admin_model_providers {assigns} />
+          <.admin_role_defaults {assigns} />
+          <.models_section {assigns} />
+        </div>
+      </div>
 
-      <div class="sa-card">
-        <div>
-          <h2>Allow List</h2>
+      <div :if={@admin_tab == "users"} class="space-y-6">
+        <div class="sa-card">
+          <div>
+            <h2>Allow List</h2>
           <p>
             When at least one active entry exists, only active allow-listed emails can authenticate.
           </p>
@@ -251,6 +276,7 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
         search_value={@admin_user_search}
         current_user_id={@current_scope.settings_user.id}
       />
+      </div>
     </section>
     """
   end

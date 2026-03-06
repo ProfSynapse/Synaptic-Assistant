@@ -1541,6 +1541,37 @@ a {
   text-decoration: underline;
 }
 
+/* Admin tabs */
+
+.sa-admin-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--sa-border, #e4e4e7);
+  margin-bottom: 0.5rem;
+}
+
+.sa-admin-tab {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--sa-text-secondary, #71717a);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+
+.sa-admin-tab:hover {
+  color: var(--sa-text-primary, #18181b);
+}
+
+.sa-admin-tab.active {
+  color: var(--sa-text-primary, #18181b);
+  border-bottom-color: var(--sa-accent, #6366f1);
+}
+
 /* App connection */
 
 .sa-app-title {

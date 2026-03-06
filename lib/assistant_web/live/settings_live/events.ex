@@ -41,6 +41,11 @@ defmodule AssistantWeb.SettingsLive.Events do
     {:noreply, assign(socket, :sidebar_collapsed, !socket.assigns.sidebar_collapsed)}
   end
 
+  def handle_event("switch_admin_tab", %{"tab" => tab}, socket)
+      when tab in ~w(integrations models users) do
+    {:noreply, assign(socket, :admin_tab, tab)}
+  end
+
   def handle_event("toggle_workflow_enabled", %{"name" => name, "enabled" => enabled}, socket) do
     enabled? = enabled == "true"
 
