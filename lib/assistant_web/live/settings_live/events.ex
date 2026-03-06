@@ -43,6 +43,27 @@ defmodule AssistantWeb.SettingsLive.Events do
     {:noreply, assign(socket, :sidebar_collapsed, !socket.assigns.sidebar_collapsed)}
   end
 
+  def handle_event("switch_admin_tab", %{"tab" => tab}, socket)
+      when tab in ~w(integrations models users) do
+    {:noreply, assign(socket, :admin_tab, tab)}
+  end
+
+  def handle_event("start_add_user", _params, socket) do
+    blank_form =
+      %SettingsUserAllowlistEntry{}
+      |> Accounts.change_settings_user_allowlist_entry(%{
+        active: true,
+        is_admin: false,
+        scopes: []
+      })
+      |> to_form(as: "allowlist_entry")
+
+    {:noreply,
+     socket
+     |> assign(:creating_new_user, true)
+     |> assign(:allowlist_form, blank_form)}
+  end
+
   def handle_event("toggle_workflow_enabled", %{"name" => name, "enabled" => enabled}, socket) do
     enabled? = enabled == "true"
 
@@ -951,7 +972,8 @@ defmodule AssistantWeb.SettingsLive.Events do
       {:ok, _entry} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Allow list entry saved.")
+         |> assign(:creating_new_user, false)
+         |> put_flash(:info, "User added successfully.")
          |> reload_current_user_scope()
          |> Loaders.load_admin()}
 
@@ -1115,7 +1137,10 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("back_to_admin_users", _params, socket) do
-    {:noreply, assign(socket, :current_admin_user, nil)}
+    {:noreply,
+     socket
+     |> assign(:current_admin_user, nil)
+     |> assign(:creating_new_user, false)}
   end
 
   def handle_event("toggle_user_disabled", %{"id" => user_id}, socket) do

@@ -5,6 +5,136 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
 
   alias AssistantWeb.Components.SettingsPage.Helpers
 
+  attr :allowlist_form, :any, required: true
+  attr :managed_scopes, :list, required: true
+
+  def user_create_section(assigns) do
+    selected_scopes = List.wrap(assigns.allowlist_form[:scopes] && assigns.allowlist_form[:scopes].value)
+    assigns = assign(assigns, :selected_scopes, selected_scopes)
+
+    ~H"""
+    <section class="space-y-6">
+      <div class="sa-card">
+        <div class="sa-row" style="justify-content: space-between; margin-bottom: 16px;">
+          <div>
+            <button
+              type="button"
+              phx-click="back_to_admin_users"
+              class="sa-icon-btn"
+              title="Back to Users"
+              style="margin-right: 8px;"
+            >
+              <.icon name="hero-arrow-left" class="h-4 w-4" />
+            </button>
+            <span style="font-size: 1.25rem; font-weight: 600; color: var(--sa-text-main);">
+              Add User
+            </span>
+          </div>
+        </div>
+
+        <.form
+          for={@allowlist_form}
+          id="create-user-form"
+          phx-change="validate_allowlist_entry"
+          phx-submit="save_allowlist_entry"
+        >
+          <div class="sa-detail-grid" style="margin-bottom: 24px;">
+            <div class="sa-detail-item">
+              <.field
+                type="email"
+                field={@allowlist_form[:email]}
+                label="Email"
+                placeholder="user@example.com"
+                required
+                no_margin
+              />
+            </div>
+          </div>
+
+          <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0 0 16px 0;">Account Controls</h3>
+
+          <div class="sa-row" style="margin-bottom: 16px;">
+            <div>
+              <span style="font-weight: 500;">Active</span>
+              <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 2px 0 0 0;">
+                Inactive users cannot log in.
+              </p>
+            </div>
+            <label class="sa-switch">
+              <input
+                type="checkbox"
+                name={@allowlist_form[:active] && @allowlist_form[:active].name}
+                value="true"
+                class="sa-switch-input"
+                role="switch"
+                checked={checkbox_checked?(@allowlist_form[:active] && @allowlist_form[:active].value)}
+                aria-label="Toggle active status"
+              />
+              <span class="sa-switch-slider"></span>
+            </label>
+          </div>
+
+          <div class="sa-row" style="margin-bottom: 24px;">
+            <div>
+              <span style="font-weight: 500;">Admin</span>
+              <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 2px 0 0 0;">
+                Grant admin privileges to manage workspace settings.
+              </p>
+            </div>
+            <label class="sa-switch">
+              <input
+                type="checkbox"
+                name={@allowlist_form[:is_admin] && @allowlist_form[:is_admin].name}
+                value="true"
+                class="sa-switch-input"
+                role="switch"
+                checked={checkbox_checked?(@allowlist_form[:is_admin] && @allowlist_form[:is_admin].value)}
+                aria-label="Toggle admin status"
+              />
+              <span class="sa-switch-slider"></span>
+            </label>
+          </div>
+
+          <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0 0 16px 0;">Scoped Privileges</h3>
+          <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 0 0 12px 0;">
+            Select which features this user can access.
+          </p>
+
+          <input type="hidden" name="allowlist_entry[scopes][]" value="" />
+          <div style="display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 24px;">
+            <label :for={scope <- @managed_scopes} class="sa-switch" style="display: flex; align-items: center; gap: 0.5rem;">
+              <input
+                type="checkbox"
+                name="allowlist_entry[scopes][]"
+                value={scope}
+                class="sa-switch-input"
+                role="switch"
+                checked={scope in @selected_scopes}
+                aria-label={"Toggle #{scope} access"}
+              />
+              <span class="sa-switch-slider"></span>
+              <span style="font-size: 0.875rem; text-transform: capitalize;">{scope}</span>
+            </label>
+          </div>
+
+          <div style="display: flex; gap: 0.75rem;">
+            <.button id="save-new-user-btn" phx-disable-with="Saving...">
+              Create User
+            </.button>
+            <button
+              type="button"
+              phx-click="back_to_admin_users"
+              class="sa-btn secondary"
+            >
+              Cancel
+            </button>
+          </div>
+        </.form>
+      </div>
+    </section>
+    """
+  end
+
   attr :user, :map, required: true
   attr :current_user_id, :string, required: true
 
@@ -304,6 +434,8 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
   end
 
   defp model_defaults_scope_label(_), do: "Global only"
+
+  defp checkbox_checked?(value), do: value in [true, "true", "on", 1]
 
   defp admin_model_default_source_label(source_map, role_key) do
     case Map.get(source_map || %{}, Atom.to_string(role_key), :system) do

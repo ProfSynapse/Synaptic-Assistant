@@ -61,7 +61,7 @@ defmodule Assistant.Config.Loader do
   Raises if config has not been loaded (GenServer not started).
   """
   @spec http_config() :: %{
-          max_retries: pos_integer(),
+          max_retries: non_neg_integer(),
           base_backoff_ms: pos_integer(),
           max_backoff_ms: pos_integer(),
           request_timeout_ms: pos_integer(),
@@ -410,7 +410,7 @@ defmodule Assistant.Config.Loader do
   defp parse_http(nil), do: {:error, :missing_http_section}
 
   defp parse_http(http) when is_map(http) do
-    with {:ok, max_retries} <- require_pos_integer(http, "max_retries"),
+    with {:ok, max_retries} <- require_nonneg_integer(http, "max_retries"),
          {:ok, base_backoff_ms} <- require_pos_integer(http, "base_backoff_ms"),
          {:ok, max_backoff_ms} <- require_pos_integer(http, "max_backoff_ms"),
          {:ok, request_timeout_ms} <- require_pos_integer(http, "request_timeout_ms"),
@@ -460,6 +460,14 @@ defmodule Assistant.Config.Loader do
   defp require_pos_integer(map, key) do
     case map[key] do
       value when is_integer(value) and value > 0 -> {:ok, value}
+      nil -> {:error, {:missing_field, key}}
+      other -> {:error, {:invalid_field, key, other}}
+    end
+  end
+
+  defp require_nonneg_integer(map, key) do
+    case map[key] do
+      value when is_integer(value) and value >= 0 -> {:ok, value}
       nil -> {:error, {:missing_field, key}}
       other -> {:error, {:invalid_field, key, other}}
     end

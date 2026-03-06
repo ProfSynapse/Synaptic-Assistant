@@ -91,6 +91,7 @@ defmodule Assistant.Orchestrator.SubAgentTest do
       case SubAgent.get_status(agent_id) do
         {:ok, status} ->
           assert status.status in [:running, :completed, :failed]
+          assert Map.has_key?(status, :transcript_tail)
 
         {:error, :not_found} ->
           # Agent may have already finished and exited
@@ -103,6 +104,12 @@ defmodule Assistant.Orchestrator.SubAgentTest do
 
     test "returns {:error, :not_found} for unregistered agent" do
       assert {:error, :not_found} = SubAgent.get_status("nonexistent-agent-xyz")
+    end
+  end
+
+  describe "get_snapshot/1" do
+    test "returns {:error, :not_found} for unregistered agent" do
+      assert {:error, :not_found} = SubAgent.get_snapshot("nonexistent-agent-xyz")
     end
   end
 
@@ -148,6 +155,13 @@ defmodule Assistant.Orchestrator.SubAgentTest do
     end
   end
 
+  describe "cancel/2" do
+    test "returns {:error, :not_found} for unregistered agent" do
+      assert {:error, :not_found} =
+               SubAgent.cancel("nonexistent-agent-xyz", "user cancelled")
+    end
+  end
+
   # ---------------------------------------------------------------
   # execute/3 — synchronous wrapper (backward compatibility)
   # ---------------------------------------------------------------
@@ -174,7 +188,7 @@ defmodule Assistant.Orchestrator.SubAgentTest do
       assert Map.has_key?(result, :status)
       assert Map.has_key?(result, :result)
       assert Map.has_key?(result, :tool_calls_used)
-      assert result.status in [:completed, :failed, :timeout, :awaiting_orchestrator]
+      assert result.status in [:completed, :failed, :timeout, :awaiting_orchestrator, :cancelled]
     end
   end
 

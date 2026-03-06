@@ -164,6 +164,8 @@ defmodule Assistant.Orchestrator.Engine do
       messages: hydrated_messages,
       dispatched_agents: %{},
       agent_tasks: %{},
+      agent_task_refs: %{},
+      dispatch_batches: %{},
       turn_state: CircuitBreaker.new_turn_state(),
       conversation_state: CircuitBreaker.new_conversation_state(),
       iteration_count: 0,
@@ -217,6 +219,8 @@ defmodule Assistant.Orchestrator.Engine do
       |> Map.put(:iteration_count, 0)
       |> Map.put(:dispatched_agents, preserved_agents)
       |> Map.put(:agent_tasks, %{})
+      |> Map.put(:agent_task_refs, %{})
+      |> Map.put(:dispatch_batches, %{})
       |> Map.put(:skipped, [])
 
     # Append user message to history
@@ -286,6 +290,16 @@ defmodule Assistant.Orchestrator.Engine do
     :ok
   end
 
+  @impl true
+  def handle_info({ref, _result}, state) when is_reference(ref) do
+    {:noreply, refresh_dispatch_state(state)}
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) when is_reference(ref) do
+    {:noreply, refresh_dispatch_state(state)}
+  end
+
   # --- Orchestration Loop ---
 
   defp run_loop(state) do
@@ -319,6 +333,8 @@ defmodule Assistant.Orchestrator.Engine do
   end
 
   defp run_loop_iteration(state) do
+    state = refresh_dispatch_state(state)
+
     # Build context and run one LLM iteration
     loop_state = build_loop_state(state)
     context = Context.build(loop_state, state.messages)
@@ -381,64 +397,17 @@ defmodule Assistant.Orchestrator.Engine do
       {:ok, new_turn_state} ->
         state = Map.put(state, :turn_state, new_turn_state)
 
-        # Build dispatches map for the scheduler
-        dispatches =
-          Enum.into(pending_dispatches, %{}, fn {_tc, params} ->
-            {params.agent_id, params}
-          end)
-
-        # Execute via scheduler (handles DAG, waves, parallelism)
-        execute_fn = fn dispatch_params, dep_results ->
-          execute_sub_agent(dispatch_params, dep_results, state)
-        end
-
-        case AgentScheduler.execute(dispatches, state.agent_supervisor, execute_fn) do
-          {:ok, results} ->
-            # Store results in dispatched_agents
-            new_dispatched =
-              Map.merge(state.dispatched_agents, results)
-
-            # Add tool result messages for each dispatch_agent tool call
-            dispatch_result_messages =
-              Enum.map(pending_dispatches, fn {tc, params} ->
-                agent_result = Map.get(results, params.agent_id, %{status: :pending})
-                status = agent_result[:status] || :completed
-                result_text = agent_result[:result] || "Agent completed."
-
-                # Surface the approval reason directly so the orchestrator can
-                # present it to the user without an extra get_agent_results call.
-                approval_section =
-                  if status == :awaiting_orchestrator and is_binary(agent_result[:reason]) do
-                    "\n\n#{agent_result[:reason]}"
-                  else
-                    ""
-                  end
-
-                %{
-                  role: "tool",
-                  tool_call_id: tc.id,
-                  content:
-                    "Agent \"#{params.agent_id}\" finished with status: #{status}. " <>
-                      "The task is complete — do NOT dispatch another agent for the same task. " <>
-                      "Summarize the following result for the user.\n\n" <>
-                      "Result: #{result_text}" <>
-                      approval_section
-                }
-              end)
-
-            # Enqueue async memory saves for completed agents (non-blocking)
-            enqueue_memory_saves(state, pending_dispatches, results)
-
-            state
-            |> Map.put(:dispatched_agents, new_dispatched)
+        case queue_dispatch_batch(state, pending_dispatches) do
+          {:ok, next_state, dispatch_result_messages} ->
+            next_state
             |> Map.update!(:messages, &(&1 ++ dispatch_result_messages))
+            |> refresh_dispatch_state()
 
           {:error, reason} ->
             Logger.error("Agent scheduler failed: #{inspect(reason)}",
               conversation_id: state.conversation_id
             )
 
-            # Add error messages for each dispatch, with nudge hint if available
             error_messages =
               Enum.map(pending_dispatches, fn {tc, _params} ->
                 base = "Failed to dispatch agents: #{inspect(reason)}"
@@ -486,24 +455,13 @@ defmodule Assistant.Orchestrator.Engine do
   # --- Wait Handling ---
 
   defp handle_wait(state, mode, timeout_ms, agent_ids, tool_call_id) do
-    # Wait for agents using the scheduler
-    completed =
-      AgentScheduler.wait_for_agents(
-        state.agent_tasks,
-        agent_ids,
-        mode,
-        timeout_ms
-      )
-
-    # Merge completed results into dispatched_agents
-    new_dispatched = Map.merge(state.dispatched_agents, completed)
-    state = Map.put(state, :dispatched_agents, new_dispatched)
+    state = refresh_dispatch_state(state, {mode, timeout_ms, agent_ids})
 
     # Format post-wait results
     {:ok, wait_result} =
       GetAgentResults.format_after_wait(
         %{"agent_ids" => agent_ids},
-        new_dispatched,
+        state.dispatched_agents,
         false
       )
 
@@ -572,6 +530,400 @@ defmodule Assistant.Orchestrator.Engine do
     end
   end
 
+  defp queue_dispatch_batch(state, pending_dispatches) do
+    dispatches =
+      Enum.into(pending_dispatches, %{}, fn {_tc, params} ->
+        {params.agent_id, params}
+      end)
+
+    case AgentScheduler.plan_waves(dispatches) do
+      {:ok, waves} ->
+        batch_id = Ecto.UUID.generate()
+        dispatches = add_peer_rosters(dispatches, waves)
+
+        dispatched_agents =
+          Enum.reduce(dispatches, state.dispatched_agents, fn {agent_id, params}, acc ->
+            Map.put_new(acc, agent_id, %{
+              status: :pending,
+              result: "Agent queued.",
+              tool_calls_used: 0,
+              duration_ms: nil,
+              mission: params.mission,
+              skills: params.skills,
+              peer_agents: params[:peer_agents] || [],
+              depends_on: params[:depends_on] || []
+            })
+          end)
+
+        batch = %{
+          id: batch_id,
+          dispatches: dispatches,
+          active_wave: [],
+          remaining_waves: waves
+        }
+
+        state =
+          state
+          |> Map.put(:dispatched_agents, dispatched_agents)
+          |> put_in([:dispatch_batches, batch_id], batch)
+          |> launch_ready_waves([batch_id])
+
+        tool_messages =
+          Enum.map(pending_dispatches, fn {tc, params} ->
+            agent_state = Map.get(state.dispatched_agents, params.agent_id, %{status: :pending})
+            status = agent_state[:status] || :pending
+
+            content =
+              case status do
+                :running ->
+                  "Agent \"#{params.agent_id}\" launched and is now running. " <>
+                    "Use get_agent_results to monitor progress or wait for results."
+
+                :pending ->
+                  "Agent \"#{params.agent_id}\" queued and will start automatically " <>
+                    "after its dependencies complete. Use get_agent_results to monitor progress."
+
+                other ->
+                  "Agent \"#{params.agent_id}\" entered status #{other}. " <>
+                    "Use get_agent_results to inspect details."
+              end
+
+            %{
+              role: "tool",
+              tool_call_id: tc.id,
+              content: content
+            }
+          end)
+
+        {:ok, state, tool_messages}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp refresh_dispatch_state(state, wait_request \\ nil) do
+    state
+    |> collect_task_results(wait_request)
+    |> refresh_running_agent_statuses()
+    |> launch_ready_waves()
+  end
+
+  defp collect_task_results(state, nil) do
+    collect_task_results_from_ids(state, Map.keys(state.agent_tasks), :wait_any, 0)
+  end
+
+  defp collect_task_results(state, {mode, timeout_ms, agent_ids}) do
+    state = collect_task_results_from_ids(state, agent_ids, mode, timeout_ms)
+
+    remaining_ids =
+      Map.keys(state.agent_tasks)
+      |> Enum.reject(&(&1 in agent_ids))
+
+    collect_task_results_from_ids(state, remaining_ids, :wait_any, 0)
+  end
+
+  defp collect_task_results_from_ids(state, [], _mode, _timeout_ms), do: state
+
+  defp collect_task_results_from_ids(state, agent_ids, mode, timeout_ms) do
+    completed =
+      AgentScheduler.wait_for_agents(
+        state.agent_tasks,
+        agent_ids,
+        mode,
+        timeout_ms
+      )
+
+    if map_size(completed) == 0 do
+      state
+    else
+      completed_ids = Map.keys(completed)
+      completed_pairs = completed_pairs(state, completed_ids)
+
+      new_dispatched =
+        Enum.reduce(completed, state.dispatched_agents, fn {agent_id, result}, acc ->
+          current = Map.get(acc, agent_id, %{})
+          Map.put(acc, agent_id, Map.merge(current, result))
+        end)
+
+      state =
+        state
+        |> Map.put(:dispatched_agents, new_dispatched)
+        |> Map.put(:agent_tasks, Map.drop(state.agent_tasks, completed_ids))
+        |> Map.put(:agent_task_refs, drop_task_refs(state.agent_task_refs, completed_pairs))
+
+      enqueue_memory_saves_for_results(state, completed)
+    end
+  end
+
+  defp completed_pairs(state, completed_ids) do
+    Enum.flat_map(completed_ids, fn agent_id ->
+      case Map.get(state.agent_tasks, agent_id) do
+        %Task{ref: ref} -> [{agent_id, ref}]
+        _ -> []
+      end
+    end)
+  end
+
+  defp drop_task_refs(task_refs, completed_pairs) do
+    Enum.reduce(completed_pairs, task_refs, fn {_agent_id, ref}, acc ->
+      Process.demonitor(ref, [:flush])
+      Map.delete(acc, ref)
+    end)
+  end
+
+  defp refresh_running_agent_statuses(state) do
+    running_ids = Map.keys(state.agent_tasks)
+
+    new_dispatched =
+      Enum.reduce(running_ids, state.dispatched_agents, fn agent_id, acc ->
+        case SubAgent.get_status(agent_id) do
+          {:ok, status} ->
+            current = Map.get(acc, agent_id, %{})
+
+            Map.put(acc, agent_id, %{
+              current
+              | status: status.status,
+                result: status.result,
+                tool_calls_used: status.tool_calls_used,
+                duration_ms: status.duration_ms,
+                transcript_tail: status[:transcript_tail]
+            })
+
+          {:error, :not_found} ->
+            acc
+        end
+      end)
+
+    Map.put(state, :dispatched_agents, new_dispatched)
+  end
+
+  defp launch_ready_waves(state, batch_ids \\ nil) do
+    target_batch_ids =
+      case batch_ids do
+        nil -> Map.keys(state.dispatch_batches)
+        ids -> ids
+      end
+
+    Enum.reduce(target_batch_ids, state, fn batch_id, acc ->
+      case Map.get(acc.dispatch_batches, batch_id) do
+        nil ->
+          acc
+
+        batch ->
+          maybe_launch_batch(acc, batch)
+      end
+    end)
+  end
+
+  defp maybe_launch_batch(state, batch) do
+    active_done? =
+      batch.active_wave == [] or wave_terminal?(batch.active_wave, state.dispatched_agents)
+
+    cond do
+      not active_done? ->
+        state
+
+      batch.remaining_waves == [] ->
+        Map.update!(state, :dispatch_batches, &Map.delete(&1, batch.id))
+
+      true ->
+        failed_ids = failed_ids(batch.active_wave, state.dispatched_agents)
+
+        {skipped, updated_rest_waves} =
+          AgentScheduler.mark_blocked_dependents(
+            failed_ids,
+            batch.remaining_waves,
+            batch.dispatches
+          )
+
+        state =
+          if skipped == %{} do
+            state
+          else
+            Map.update!(state, :dispatched_agents, &Map.merge(&1, skipped))
+          end
+
+        {next_wave, _rest_waves} =
+          case updated_rest_waves do
+            [wave | rest] -> {wave, rest}
+            [] -> {[], []}
+          end
+
+        launch? = next_wave != []
+
+        {state, active_wave} =
+          if launch? do
+            launch_wave(state, batch.dispatches, next_wave)
+          else
+            {state, []}
+          end
+
+        updated_batch = %{
+          batch
+          | active_wave: active_wave,
+            remaining_waves: updated_rest_waves
+        }
+
+        put_in(state, [:dispatch_batches, batch.id], updated_batch)
+    end
+  end
+
+  defp launch_wave(state, dispatches, wave_ids) do
+    {agent_tasks, agent_task_refs, dispatched_agents} =
+      Enum.reduce(
+        wave_ids,
+        {state.agent_tasks, state.agent_task_refs, state.dispatched_agents},
+        fn agent_id, {tasks, refs, agents} ->
+          dispatch = Map.fetch!(dispatches, agent_id)
+          dep_results = dependency_results(dispatch, agents)
+
+          task =
+            Task.Supervisor.async_nolink(
+              state.agent_supervisor,
+              fn -> execute_sub_agent(dispatch, dep_results, state) end,
+              timeout: dispatch[:timeout_ms] || :timer.seconds(120)
+            )
+
+          agents =
+            Map.put(agents, agent_id, %{
+              status: :running,
+              result: "Agent running.",
+              tool_calls_used: 0,
+              duration_ms: nil,
+              mission: dispatch.mission,
+              skills: dispatch.skills,
+              peer_agents: dispatch[:peer_agents] || [],
+              depends_on: dispatch[:depends_on] || []
+            })
+
+          {Map.put(tasks, agent_id, task), Map.put(refs, task.ref, agent_id), agents}
+        end
+      )
+
+    state = %{
+      state
+      | agent_tasks: agent_tasks,
+        agent_task_refs: agent_task_refs,
+        dispatched_agents: dispatched_agents
+    }
+
+    {state, wave_ids}
+  end
+
+  defp dependency_results(dispatch, dispatched_agents) do
+    deps = dispatch[:depends_on] || []
+
+    Enum.reduce(deps, %{}, fn dep_id, acc ->
+      case Map.get(dispatched_agents, dep_id) do
+        nil -> acc
+        result -> Map.put(acc, dep_id, result)
+      end
+    end)
+  end
+
+  defp wave_terminal?(agent_ids, dispatched_agents) do
+    Enum.all?(agent_ids, fn id ->
+      case Map.get(dispatched_agents, id) do
+        %{status: status} -> status in [:completed, :failed, :timeout, :cancelled, :skipped]
+        _ -> false
+      end
+    end)
+  end
+
+  defp failed_ids(agent_ids, dispatched_agents) do
+    Enum.filter(agent_ids, fn id ->
+      case Map.get(dispatched_agents, id) do
+        %{status: status} -> status in [:failed, :timeout, :cancelled]
+        _ -> false
+      end
+    end)
+  end
+
+  defp add_peer_rosters(dispatches, waves) do
+    wave_by_agent =
+      Enum.reduce(waves, %{}, fn wave, acc ->
+        Enum.reduce(wave, acc, fn agent_id, inner ->
+          Map.put(inner, agent_id, wave)
+        end)
+      end)
+
+    Map.new(dispatches, fn {agent_id, params} ->
+      peer_ids = Map.get(wave_by_agent, agent_id, []) |> Enum.reject(&(&1 == agent_id))
+
+      peer_agents =
+        Enum.map(peer_ids, fn peer_id ->
+          peer = Map.fetch!(dispatches, peer_id)
+
+          %{
+            agent_id: peer.agent_id,
+            mission: peer.mission,
+            skills: peer.skills,
+            depends_on: peer[:depends_on] || []
+          }
+        end)
+
+      {agent_id, Map.put(params, :peer_agents, peer_agents)}
+    end)
+  end
+
+  defp enqueue_memory_saves_for_results(state, results) do
+    Enum.each(results, fn {agent_id, agent_result} ->
+      status = agent_result[:status]
+
+      if status in [:completed, :failed, :cancelled] do
+        case find_dispatch_for_agent(state, agent_id) do
+          nil ->
+            :ok
+
+          dispatch ->
+            enqueue_memory_save(state, dispatch, agent_result)
+        end
+      end
+    end)
+
+    state
+  end
+
+  defp find_dispatch_for_agent(state, agent_id) do
+    Enum.find_value(state.dispatch_batches, fn {_batch_id, batch} ->
+      Map.get(batch.dispatches, agent_id)
+    end)
+  end
+
+  defp enqueue_memory_save(state, dispatch_params, agent_result) do
+    transcript = serialize_transcript(agent_result[:messages])
+    status = to_string(agent_result[:status] || "unknown")
+
+    if is_binary(transcript) and transcript != "" do
+      args = %{
+        user_id: state.user_id,
+        parent_conversation_id: state.conversation_id,
+        sub_conversation_id: nil,
+        agent_id: dispatch_params.agent_id,
+        mission: dispatch_params.mission,
+        transcript: transcript,
+        status: status,
+        summary: truncate_for_export(agent_result[:result]),
+        metadata: %{
+          skills: dispatch_params.skills || [],
+          tool_calls_used: agent_result[:tool_calls_used] || 0,
+          duration_ms: agent_result[:duration_ms] || 0
+        }
+      }
+
+      case MemorySaveWorker.new(args) |> Oban.insert() do
+        {:ok, _job} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "Failed to enqueue memory save for agent #{dispatch_params.agent_id}: #{inspect(reason)}"
+          )
+      end
+    end
+  end
+
   # --- Helpers ---
 
   defp build_loop_state(state) do
@@ -605,43 +957,6 @@ defmodule Assistant.Orchestrator.Engine do
   end
 
   defp accumulate_usage(state, _usage), do: state
-
-  # --- Async Memory Save ---
-
-  # Enqueues a background Oban job for each completed sub-agent to persist the
-  # full agent transcript into the memory store. Fire-and-forget: failures are
-  # logged but never affect the user response.
-  defp enqueue_memory_saves(state, pending_dispatches, results) do
-    Enum.each(pending_dispatches, fn {_tc, params} ->
-      agent_result = Map.get(results, params.agent_id, %{})
-      status = agent_result[:status]
-
-      # Only save transcripts for agents that actually completed or failed
-      if status in [:completed, :failed] do
-        transcript = serialize_transcript(agent_result[:messages])
-
-        job_args = %{
-          user_id: state.user_id,
-          conversation_id: state.conversation_id,
-          agent_id: params.agent_id,
-          mission: params.mission,
-          transcript: transcript,
-          status: to_string(status)
-        }
-
-        case MemorySaveWorker.new(job_args) |> Oban.insert() do
-          {:ok, _job} ->
-            :ok
-
-          {:error, reason} ->
-            Logger.warning(
-              "Failed to enqueue memory save for agent #{params.agent_id}: #{inspect(reason)}",
-              conversation_id: state.conversation_id
-            )
-        end
-      end
-    end)
-  end
 
   # Serializes the sub-agent's message list into a compact text representation
   # suitable for memory storage. Strips system prompts (large, static) and
@@ -746,7 +1061,14 @@ defmodule Assistant.Orchestrator.Engine do
 
       # Skip awaiting_orchestrator agents — they're paused for approval and
       # need to survive across turns so the orchestrator can resume them.
-      if status not in [:completed, :failed, :timeout, :skipped, :awaiting_orchestrator] do
+      if status not in [
+           :completed,
+           :failed,
+           :timeout,
+           :skipped,
+           :awaiting_orchestrator,
+           :cancelled
+         ] do
         case SubAgent.interrupt(agent_id) do
           :ok ->
             Logger.debug("Interrupted sub-agent",

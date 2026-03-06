@@ -297,8 +297,7 @@
     },
 
     resetView() {
-      if (typeof this.graph.centerAt === "function") this.graph.centerAt(0, 0, 300)
-      if (typeof this.graph.zoom === "function") this.graph.zoom(1, 300)
+      if (typeof this.graph.zoomToFit === "function") this.graph.zoomToFit(300, 40)
     },
 
     replaceData(payload) {
@@ -309,6 +308,9 @@
       this.graphData.nodes.forEach((n) => { n._opacity = 1 })
       this.graph.graphData(this.graphData)
       this.resize()
+      setTimeout(() => {
+        if (this.graph) this.graph.zoomToFit(400, 40)
+      }, 600)
     },
 
     appendData(payload) {

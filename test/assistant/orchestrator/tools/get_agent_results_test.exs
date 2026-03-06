@@ -66,6 +66,24 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResultsTest do
       assert result.metadata.failed == 1
     end
 
+    test "returns results for cancelled agent" do
+      dispatched = %{
+        "agent_1" => %{
+          status: :cancelled,
+          result: "Agent cancelled: user changed their mind.",
+          tool_calls_used: 1,
+          duration_ms: 42
+        }
+      }
+
+      {:ok, result} = GetAgentResults.execute(%{"agent_ids" => ["agent_1"]}, dispatched)
+
+      assert result.status == :ok
+      assert result.content =~ "cancelled"
+      assert result.metadata.cancelled == 1
+      assert result.metadata.done == true
+    end
+
     test "returns 'not found' for unknown agent_id" do
       dispatched = %{}
 
@@ -307,15 +325,17 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResultsTest do
         "a" => %{status: :completed, result: "OK"},
         "b" => %{status: :failed, result: "Error"},
         "c" => %{status: :running, result: nil},
-        "d" => %{status: :timeout, result: "Timed out"}
+        "d" => %{status: :timeout, result: "Timed out"},
+        "e" => %{status: :cancelled, result: "Cancelled"}
       }
 
       {:ok, result} = GetAgentResults.execute(%{}, dispatched)
 
-      assert result.metadata.total == 4
+      assert result.metadata.total == 5
       assert result.metadata.completed == 1
       # failed + timeout
       assert result.metadata.failed == 2
+      assert result.metadata.cancelled == 1
       # "c" is still running
       assert result.metadata.done == false
     end

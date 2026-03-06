@@ -793,17 +793,19 @@ defmodule Assistant.Skills.ApprovalGateTest do
              "System prompt missing general approval workflow"
     end
 
-    test "orchestrator tool definitions include all 4 tools with correct schemas" do
+    test "orchestrator tool definitions include all 6 tools with correct schemas" do
       tools = Assistant.Orchestrator.Context.tool_definitions()
       tool_names = Enum.map(tools, & &1.function.name) |> Enum.sort()
 
       assert tool_names == [
+               "cancel_agent",
                "dispatch_agent",
                "get_agent_results",
                "get_skill",
+               "query_subagent",
                "send_agent_update"
              ],
-             "Expected 4 orchestrator tools, got: #{inspect(tool_names)}"
+             "Expected 6 orchestrator tools, got: #{inspect(tool_names)}"
     end
 
     test "send_agent_update tool has approved boolean parameter" do
@@ -1025,7 +1027,14 @@ defmodule Assistant.Skills.ApprovalGateTest do
 
     test "interrupt_active_agents skips awaiting_orchestrator status" do
       # Replicate the skip condition from engine.ex:748
-      statuses_to_skip = [:completed, :failed, :timeout, :skipped, :awaiting_orchestrator]
+      statuses_to_skip = [
+        :completed,
+        :failed,
+        :timeout,
+        :skipped,
+        :awaiting_orchestrator,
+        :cancelled
+      ]
 
       # awaiting_orchestrator should NOT be interrupted
       assert :awaiting_orchestrator in statuses_to_skip

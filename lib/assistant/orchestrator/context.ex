@@ -3,13 +3,14 @@
 # Builds cache-friendly message payloads for the orchestrator. The message
 # structure is ordered for prompt caching: static prefix first (system prompt
 # + tool defs) → cache breakpoint → dynamic messages (memory, history, user
-# message). The orchestrator tools (get_skill, dispatch_agent, get_agent_results,
-# send_agent_update) are compiled once as module attributes and never change at
+# message). The orchestrator tools (cancel_agent, get_skill, dispatch_agent,
+# get_agent_results, send_agent_update) are compiled once as module attributes and never change at
 # runtime.
 #
 # Related files:
 #   - lib/assistant/integrations/openrouter.ex (cached_content helper)
 #   - lib/assistant/orchestrator/tools/get_skill.ex (tool definition)
+#   - lib/assistant/orchestrator/tools/cancel_agent.ex (tool definition)
 #   - lib/assistant/orchestrator/tools/dispatch_agent.ex (tool definition)
 #   - lib/assistant/orchestrator/tools/get_agent_results.ex (tool definition)
 #   - lib/assistant/orchestrator/tools/send_agent_update.ex (tool definition)
@@ -42,7 +43,16 @@ defmodule Assistant.Orchestrator.Context do
   alias Assistant.Integrations.OpenRouter
   alias Assistant.Memory.ContextBuilder
   alias Assistant.OrchestratorSystemPrompt
-  alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
+
+  alias Assistant.Orchestrator.Tools.{
+    CancelAgent,
+    DispatchAgent,
+    GetAgentResults,
+    GetSkill,
+    QuerySubagent,
+    SendAgentUpdate
+  }
+
   alias Assistant.Skills.Registry
 
   require Logger
@@ -62,9 +72,11 @@ defmodule Assistant.Orchestrator.Context do
   @spec tool_definitions() :: [map()]
   def tool_definitions do
     [
+      wrap_function_tool(CancelAgent.tool_definition()),
       wrap_function_tool(DispatchAgent.tool_definition()),
       wrap_function_tool(GetAgentResults.tool_definition()),
       wrap_function_tool(GetSkill.tool_definition()),
+      wrap_function_tool(QuerySubagent.tool_definition()),
       wrap_function_tool(SendAgentUpdate.tool_definition())
     ]
     |> OpenRouter.sort_tools()
