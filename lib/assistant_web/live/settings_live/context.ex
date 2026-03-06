@@ -33,14 +33,14 @@ defmodule AssistantWeb.SettingsLive.Context do
 
   # Identity Resolution State Machine (email-based matching):
   #
-  # settings_user logs in → ensure_linked_user:
-  #   ├── user_id → real user (channel != "settings") → DONE
-  #   ├── user_id → pseudo-user (channel = "settings") → email match?
-  #   │   ├── YES: upgrade (re-link to real user, migrate conversations) → DONE
-  #   │   └── NO:  keep pseudo-user (no chat user with this email yet)
-  #   └── user_id is nil → email match?
-  #       ├── YES: link to matched user → DONE
-  #       └── NO:  create pseudo-user (first-time, no chat user yet)
+  # settings_user logs in -> ensure_linked_user:
+  #   +-- user_id -> real user (channel != "settings") -> DONE
+  #   +-- user_id -> pseudo-user (channel = "settings") -> email match?
+  #   |   +-- YES: upgrade (re-link to real user, migrate conversations) -> DONE
+  #   |   +-- NO:  keep pseudo-user (no chat user with this email yet)
+  #   +-- user_id is nil -> email match?
+  #       +-- YES: link to matched user -> DONE
+  #       +-- NO:  create pseudo-user (first-time, no chat user yet)
   def ensure_linked_user(%{user_id: user_id} = settings_user) when not is_nil(user_id) do
     case Repo.get(User, user_id) do
       %User{channel: "settings"} ->
@@ -68,7 +68,10 @@ defmodule AssistantWeb.SettingsLive.Context do
     case find_real_user_by_email(settings_user.email) do
       {:ok, real_user_id} ->
         # Found a real user with matching email — upgrade
-        case Assistant.Channels.UserResolver.upgrade_pseudo_user(settings_user.user_id, real_user_id) do
+        case Assistant.Channels.UserResolver.upgrade_pseudo_user(
+               settings_user.user_id,
+               real_user_id
+             ) do
           {:ok, _} ->
             # Also update the settings_user link (upgrade_pseudo_user handles this,
             # but be explicit for the in-memory value)

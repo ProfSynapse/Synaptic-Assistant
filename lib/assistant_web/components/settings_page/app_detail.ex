@@ -10,8 +10,6 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
 
   use AssistantWeb, :html
 
-  import AssistantWeb.Components.AdminIntegrations, only: [admin_integrations: 1]
-
   def app_detail_section(assigns) do
     is_admin =
       case assigns[:current_scope] do
@@ -103,7 +101,7 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
         <div :if={!@telegram_bot_configured} class="sa-drive-notice sa-drive-notice--info">
           <.icon name="hero-information-circle" class="h-5 w-5" />
           <span :if={@is_admin}>
-            Save your Telegram bot token below to generate a connect link.
+            Configure Telegram credentials in Admin, then generate a connect link here.
           </span>
           <span :if={!@is_admin}>
             Your workspace admin must configure the Telegram bot before you can link your account.
@@ -197,24 +195,70 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
         </div>
       </section>
 
-      <section :if={@is_admin and @app_integration_settings != []} class="sa-card" style="margin-top: 1.5rem;">
-        <h2>Configuration</h2>
-        <p style="margin-top: 0.25rem; margin-bottom: 1rem;" class="sa-page-subtitle">
-          API keys and tokens for this integration. Values saved here override environment variables.
-        </p>
-        <.admin_integrations settings={@app_integration_settings} />
-      </section>
-
-      <div
-        :if={!@is_admin and @current_app.connect_type == :api_key and @current_app.id != "telegram"}
+      <section
+        :if={@current_app.connect_type == :api_key and @current_app.id != "telegram"}
         class="sa-card"
         style="margin-top: 1.5rem;"
       >
-        <div style="display: flex; align-items: center; gap: 0.75rem;">
-          <.icon name="hero-information-circle" class="h-5 w-5 text-zinc-400" />
-          <span>Contact your workspace admin to configure this integration.</span>
+        <h2>Workspace Configuration</h2>
+        <p style="margin-top: 0.25rem; margin-bottom: 1rem;" class="sa-page-subtitle">
+          API keys and secrets are managed in Admin and applied workspace-wide.
+        </p>
+        <.link
+          :if={@is_admin}
+          navigate={~p"/settings/admin/integrations/#{@current_app.integration_group}"}
+          class="sa-btn secondary"
+          style="display: inline-flex; text-decoration: none;"
+        >
+          <.icon name="hero-cog-6-tooth" class="h-4 w-4" /> Manage in Admin
+        </.link>
+        <p :if={!@is_admin} style="margin: 0;">
+          Contact your workspace admin to update credentials.
+        </p>
+      </section>
+
+      <section class="sa-card" style="margin-top: 1.5rem;">
+        <h2>Personal Tool Access</h2>
+        <p style="margin-top: 0.25rem; margin-bottom: 1rem;" class="sa-page-subtitle">
+          Control which tools the model can use for your account.
+        </p>
+
+        <div :if={@personal_skill_permissions == []} class="sa-empty">
+          No registered skills were found.
         </div>
-      </div>
+
+        <table :if={@personal_skill_permissions != []} class="sa-table">
+          <thead>
+            <tr>
+              <th>Domain</th>
+              <th>Skill</th>
+              <th>Enabled</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={perm <- @personal_skill_permissions}>
+              <td>{perm.domain_label}</td>
+              <td>{perm.skill_label}</td>
+              <td>
+                <label class="sa-switch">
+                  <input
+                    type="checkbox"
+                    checked={perm.enabled}
+                    class="sa-switch-input"
+                    role="switch"
+                    aria-checked={to_string(perm.enabled)}
+                    aria-label={"Toggle #{perm.skill_label}"}
+                    phx-click="toggle_personal_skill"
+                    phx-value-skill={perm.id}
+                    phx-value-enabled={to_string(!perm.enabled)}
+                  />
+                  <span class="sa-switch-slider"></span>
+                </label>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
     </div>
     """
   end

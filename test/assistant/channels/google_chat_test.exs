@@ -428,7 +428,10 @@ defmodule Assistant.Channels.GoogleChatTest do
 
     test "prefers chat.user email over JWT email when both present" do
       event =
-        build_v2_message_event(%{}, user_email: "user@example.com", id_token_email: "jwt@example.com")
+        build_v2_message_event(%{},
+          user_email: "user@example.com",
+          id_token_email: "jwt@example.com"
+        )
 
       {:ok, msg} = GoogleChat.normalize(event)
 

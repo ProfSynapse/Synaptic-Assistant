@@ -10,10 +10,14 @@ defmodule AssistantWeb.Components.AdminIntegrations do
   @group_order ~w(ai_providers google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
   attr :settings, :list, required: true, doc: "Output of IntegrationSettings.list_all/0"
+  attr :group_filter, :string, default: nil, doc: "Optional group id to render only one group"
 
   def admin_integrations(assigns) do
     # Filter out _enabled toggle keys — they are managed via app card toggles, not admin forms
-    settings = Enum.reject(assigns.settings, fn s -> Registry.enabled_key?(s.key) end)
+    settings =
+      assigns.settings
+      |> maybe_filter_group(assigns.group_filter)
+      |> Enum.reject(fn s -> Registry.enabled_key?(s.key) end)
 
     grouped =
       settings
@@ -28,12 +32,15 @@ defmodule AssistantWeb.Components.AdminIntegrations do
         {group_id, label, keys}
       end)
 
-    assigns = assign(assigns, :ordered_groups, ordered_groups)
+    assigns =
+      assigns
+      |> assign(:ordered_groups, ordered_groups)
+      |> assign(:single_group_view, is_binary(assigns.group_filter))
 
     ~H"""
     <div class="space-y-6">
       <div :for={{group_id, label, keys} <- @ordered_groups} class="rounded-lg border border-zinc-200 bg-white p-4 space-y-4">
-        <h3 class="font-semibold text-lg">{label}</h3>
+        <h3 :if={!@single_group_view} class="font-semibold text-lg">{label}</h3>
 
         <div class="space-y-4">
           <.setting_row :for={setting <- keys} setting={setting} group_id={group_id} />
@@ -156,6 +163,9 @@ defmodule AssistantWeb.Components.AdminIntegrations do
   defp placeholder_for(%{is_secret: true}), do: "Enter new value to replace..."
   defp placeholder_for(%{source: :none}), do: "Enter value..."
   defp placeholder_for(_), do: "Enter new value to replace..."
+
+  defp maybe_filter_group(settings, nil), do: settings
+  defp maybe_filter_group(settings, group), do: Enum.filter(settings, &(&1.group == group))
 
   defp group_label("ai_providers"), do: "AI Providers"
   defp group_label("google_workspace"), do: "Google Workspace"

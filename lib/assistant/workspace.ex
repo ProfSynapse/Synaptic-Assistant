@@ -69,8 +69,8 @@ defmodule Assistant.Workspace do
 
     {items, tool_index, sub_agent_index, _channel} =
       Enum.reduce(messages, {[], %{}, %{}, nil}, fn message,
-                                                     {items, tool_index, sub_agent_index,
-                                                      current_channel} ->
+                                                    {items, tool_index, sub_agent_index,
+                                                     current_channel} ->
         {message_item, updated_channel} = build_message_item(message, current_channel)
 
         {activity_item, activity_tool_index, activity_sub_agent_index} =

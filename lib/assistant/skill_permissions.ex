@@ -128,7 +128,7 @@ defmodule Assistant.SkillPermissions do
   end
 
   defp connector_enabled_for_skill?(user_id, "hubspot." <> _rest) do
-    SettingsUserConnectorStates.enabled_for_user?(user_id, "hubspot", default: true)
+    SettingsUserConnectorStates.enabled_for_user?(user_id, "hubspot", default: false)
   end
 
   defp connector_enabled_for_skill?(_user_id, _skill_name), do: true

@@ -5,12 +5,10 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
     [
       {"workspace", "Chat"},
       {"profile", "Profile"},
-      {"models", "Models"},
       {"analytics", "Analytics"},
       {"memory", "Memory"},
       {"apps", "Apps & Connections"},
       {"workflows", "Workflows"},
-      {"skills", "Skill Permissions"},
       {"help", "Help"},
       {"admin", "Admin"}
     ]
@@ -31,12 +29,10 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
     case section do
       "profile" -> "hero-user-circle"
       "workspace" -> "hero-chat-bubble-left-right"
-      "models" -> "hero-cube"
       "analytics" -> "hero-chart-bar"
       "memory" -> "hero-circle-stack"
       "apps" -> "hero-puzzle-piece"
       "workflows" -> "hero-command-line"
-      "skills" -> "hero-wrench-screwdriver"
       "admin" -> "hero-cog-6-tooth"
       "help" -> "hero-question-mark-circle"
       _ -> "hero-question-mark-circle"
@@ -47,12 +43,10 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
     case section do
       "profile" -> "Profile"
       "workspace" -> "Chat"
-      "models" -> "Models"
       "analytics" -> "Analytics"
       "memory" -> "Memory"
       "apps" -> "Apps & Connections"
       "workflows" -> "Workflows"
-      "skills" -> "Skill Permissions"
       "admin" -> "Admin"
       "help" -> "Help & Setup"
       _ -> "Settings"

@@ -40,13 +40,13 @@ defmodule AssistantWeb.SettingsLive.TelegramConnectorTest do
     %{bypass: bypass}
   end
 
-  test "saving a Telegram bot token generates a one-time connect link", %{
+  test "configured Telegram credentials allow generating a one-time connect link", %{
     conn: conn,
     bypass: bypass
   } do
     settings_user = admin_settings_user_fixture(%{email: unique_settings_user_email()})
 
-    Bypass.expect_once(bypass, "GET", "/bot#{@bot_token}/getMe", fn conn ->
+    Bypass.expect(bypass, "GET", "/bot#{@bot_token}/getMe", fn conn ->
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
       |> Plug.Conn.resp(
@@ -64,12 +64,11 @@ defmodule AssistantWeb.SettingsLive.TelegramConnectorTest do
     end)
 
     conn = log_in_settings_user(conn, settings_user)
+    Cache.invalidate(:telegram_bot_token)
+    Application.put_env(:assistant, :telegram_bot_token, @bot_token)
+
     {:ok, lv, _html} = live(conn, ~p"/settings/apps/telegram")
-
-    lv
-    |> form("#form-telegram_bot_token", %{"key" => "telegram_bot_token", "value" => @bot_token})
-    |> render_submit()
-
+    _ = render_click(element(lv, "button[phx-click=\"generate_telegram_connect_link\"]"))
     html = render(lv)
 
     assert has_element?(lv, "a[href^=\"https://t.me/synaptic_test_bot?start=\"]")
@@ -77,5 +76,42 @@ defmodule AssistantWeb.SettingsLive.TelegramConnectorTest do
 
     reloaded = Accounts.get_settings_user!(settings_user.id)
     assert is_binary(reloaded.user_id)
+  end
+
+  test "apps card toggle redirects to telegram settings when user is not linked", %{
+    conn: conn,
+    bypass: bypass
+  } do
+    settings_user = settings_user_fixture(%{email: unique_settings_user_email()})
+
+    Cache.invalidate(:telegram_bot_token)
+    Application.put_env(:assistant, :telegram_bot_token, @bot_token)
+
+    Bypass.expect(bypass, "GET", "/bot#{@bot_token}/getMe", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        Jason.encode!(%{
+          "ok" => true,
+          "result" => %{
+            "id" => 123,
+            "is_bot" => true,
+            "username" => "synaptic_test_bot",
+            "first_name" => "Synaptic"
+          }
+        })
+      )
+    end)
+
+    conn = log_in_settings_user(conn, settings_user)
+    {:ok, lv, _html} = live(conn, ~p"/settings/apps")
+
+    _ =
+      lv
+      |> element("input[phx-click=\"toggle_connector\"][phx-value-app_id=\"telegram\"]")
+      |> render_click()
+
+    assert_redirect(lv, ~p"/settings/apps/telegram")
   end
 end

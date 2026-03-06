@@ -13,10 +13,12 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.ConnectedDrives
   alias Assistant.IntegrationSettings
   alias Assistant.IntegrationSettings.ConnectionValidator
+  alias Assistant.IntegrationSettings.Registry
   alias Assistant.Integrations.OpenAI
   alias Assistant.Integrations.OpenRouter
   alias Assistant.Integrations.Telegram.AccountLink
   alias Assistant.MemoryExplorer
+  alias Assistant.SettingsUserConnectorStates
   alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
   alias Assistant.ModelDefaults
@@ -32,7 +34,6 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     do: socket |> load_profile() |> load_orchestrator_prompt()
 
   def load_section_data(socket, "workflows"), do: reload_workflows(socket)
-  def load_section_data(socket, "models"), do: load_models(socket)
   def load_section_data(socket, "analytics"), do: load_analytics(socket)
   def load_section_data(socket, "memory"), do: load_memory_dashboard(socket)
 
@@ -44,9 +45,10 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       |> load_connected_drives()
       |> load_sync_scopes()
       |> load_apps_integration_settings()
+      |> load_workspace_enabled_groups()
+      |> load_connector_states()
       |> load_connection_status()
 
-  def load_section_data(socket, "skills"), do: load_skill_permissions(socket)
   def load_section_data(socket, "admin"), do: load_admin(socket)
   def load_section_data(socket, _section), do: socket
 
@@ -210,10 +212,6 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       |> assign(:loaded_node_ids, MapSet.new())
   end
 
-  def load_skill_permissions(socket) do
-    assign(socket, :skills_permissions, SkillPermissions.list_permissions())
-  end
-
   def load_admin(socket) do
     settings_user = Context.current_settings_user(socket)
     can_bootstrap = Accounts.admin_bootstrap_available?()
@@ -243,6 +241,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         integration_settings: IntegrationSettings.list_all()
       )
       |> load_admin_model_data()
+      |> load_models()
       |> maybe_refresh_current_admin_user()
     else
       assign(socket,
@@ -333,24 +332,13 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   @non_ai_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
   def load_app_detail_settings(socket, app) do
-    settings_user = Context.current_settings_user(socket)
-
     socket =
-      if settings_user && settings_user.is_admin do
-        all_settings = IntegrationSettings.list_all()
-
-        filtered =
-          all_settings
-          |> Enum.filter(fn setting -> setting.group == app.integration_group end)
-          |> maybe_filter_hidden_settings(app)
-
-        assign(socket, :app_integration_settings, filtered)
-      else
-        assign(socket, :app_integration_settings, [])
-      end
+      socket
+      |> assign(:app_integration_settings, [])
+      |> load_personal_skill_permissions()
 
     if app.id == "telegram" do
-      load_telegram_app_detail(socket, settings_user)
+      load_telegram_app_detail(socket, Context.current_settings_user(socket))
     else
       socket
     end
@@ -360,12 +348,17 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     settings_user = Context.current_settings_user(socket)
 
     if settings_user && settings_user.is_admin do
-      all_settings = IntegrationSettings.list_all()
+      assign(socket, :integration_settings, integration_settings_for_group(nil))
+    else
+      assign(socket, :integration_settings, [])
+    end
+  end
 
-      filtered =
-        Enum.filter(all_settings, fn setting -> setting.group in @non_ai_groups end)
+  def load_admin_integration_settings(socket, integration_group) do
+    settings_user = Context.current_settings_user(socket)
 
-      assign(socket, :integration_settings, filtered)
+    if settings_user && settings_user.is_admin do
+      assign(socket, :integration_settings, integration_settings_for_group(integration_group))
     else
       assign(socket, :integration_settings, [])
     end
@@ -374,18 +367,14 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   def load_connection_status(socket) do
     settings_user = Context.current_settings_user(socket)
 
-    if settings_user && settings_user.is_admin do
-      user_id =
-        case settings_user do
-          %{user_id: uid} when not is_nil(uid) -> uid
-          _ -> nil
-        end
+    user_id =
+      case settings_user do
+        %{user_id: uid} when not is_nil(uid) -> uid
+        _ -> nil
+      end
 
-      results = ConnectionValidator.validate_all(user_id)
-      assign(socket, :connection_status, results)
-    else
-      assign(socket, :connection_status, %{})
-    end
+    results = ConnectionValidator.validate_all(user_id)
+    assign(socket, :connection_status, results)
   rescue
     e ->
       Logger.warning("Connection validation failed: #{Exception.message(e)}")
@@ -414,11 +403,59 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     |> assign(:telegram_identity, telegram_identity)
   end
 
-  defp maybe_filter_hidden_settings(settings, %{id: "telegram"}) do
-    Enum.reject(settings, &(&1.key == :telegram_webhook_secret))
+  def load_workspace_enabled_groups(socket) do
+    enabled_by_group =
+      Registry.groups()
+      |> Map.keys()
+      |> Map.new(fn group ->
+        enabled =
+          case Registry.enabled_key_for_group(group) do
+            nil ->
+              true
+
+            key ->
+              IntegrationSettings.get(key) != "false"
+          end
+
+        {group, enabled}
+      end)
+
+    assign(socket, :workspace_enabled_groups, enabled_by_group)
+  rescue
+    _ -> assign(socket, :workspace_enabled_groups, %{})
   end
 
-  defp maybe_filter_hidden_settings(settings, _app), do: settings
+  def load_connector_states(socket) do
+    states =
+      case Context.current_user_id(socket) do
+        nil ->
+          %{}
+
+        user_id ->
+          user_id
+          |> SettingsUserConnectorStates.list_for_user()
+          |> Map.new(fn state -> {state.integration_group, state.enabled} end)
+      end
+
+    assign(socket, :connector_states, states)
+  rescue
+    _ -> assign(socket, :connector_states, %{})
+  end
+
+  def load_personal_skill_permissions(socket) do
+    permissions =
+      case Context.current_user_id(socket) do
+        user_id when is_binary(user_id) ->
+          SkillPermissions.list_permissions_for_user(user_id)
+
+        _ ->
+          SkillPermissions.list_permissions()
+      end
+
+    assign(socket, :personal_skill_permissions, permissions)
+  rescue
+    _ -> assign(socket, :personal_skill_permissions, [])
+  end
 
   def load_google_status(socket) do
     case Context.current_settings_user(socket) do
@@ -670,6 +707,16 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       _ ->
         {nil, nil, nil}
     end
+  end
+
+  defp integration_settings_for_group(nil) do
+    IntegrationSettings.list_all()
+    |> Enum.filter(fn setting -> setting.group in @non_ai_groups end)
+  end
+
+  defp integration_settings_for_group(group) do
+    IntegrationSettings.list_all()
+    |> Enum.filter(fn setting -> setting.group == group and setting.group in @non_ai_groups end)
   end
 
   defp present?(value) when is_binary(value), do: String.trim(value) != ""
