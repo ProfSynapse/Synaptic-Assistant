@@ -133,7 +133,7 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
                   phx-value-drive_name={row.drive_name}
                   phx-value-drive_type={row.drive_type}
                 >
-                  <.icon name="hero-adjustments-horizontal" class="h-4 w-4" />
+                  <.icon name="hero-cog-6-tooth" class="h-4 w-4" />
                 </button>
               </td>
             </tr>
