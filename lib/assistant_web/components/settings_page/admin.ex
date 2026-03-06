@@ -6,11 +6,10 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
 
   use AssistantWeb, :html
 
-  alias Phoenix.LiveView.JS
-
   import AssistantWeb.Components.AdminIntegrations, only: [admin_integrations: 1]
   import AssistantWeb.Components.SettingsPage.Models, only: [models_section: 1]
-  import AssistantWeb.Components.SettingsPage.UserDetail, only: [user_detail_section: 1]
+  import AssistantWeb.Components.SettingsPage.UserDetail,
+    only: [user_detail_section: 1, user_create_section: 1]
 
   @managed_integration_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
@@ -120,92 +119,19 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
           current_user_id={@current_scope.settings_user.id}
         />
 
-        <div :if={!@current_admin_user} class="sa-card">
+        <.user_create_section
+          :if={@creating_new_user && !@current_admin_user}
+          allowlist_form={@allowlist_form}
+          managed_scopes={@managed_scopes}
+        />
+
+        <div :if={!@current_admin_user && !@creating_new_user} class="sa-card">
           <div class="sa-row" style="margin-bottom: 1rem;">
             <h2>User Management</h2>
-            <button type="button" class="sa-btn secondary" phx-click="open_add_user_modal">
+            <button type="button" class="sa-btn secondary" phx-click="start_add_user">
               <.icon name="hero-plus" class="h-4 w-4" /> Add User
             </button>
           </div>
-
-          <.modal
-            :if={@add_user_modal_open}
-            id="add-user-modal"
-            title="Add User"
-            on_cancel={JS.push("close_add_user_modal")}
-          >
-            <.form
-              for={@allowlist_form}
-              id="allowlist-entry-form"
-              phx-change="validate_allowlist_entry"
-              phx-submit="save_allowlist_entry"
-              class="space-y-4"
-            >
-              <div>
-                <label for="allowlist-email" class="block text-sm font-medium mb-1">Email</label>
-                <input
-                  id="allowlist-email"
-                  name={@allowlist_form[:email].name}
-                  type="email"
-                  value={@allowlist_form[:email].value}
-                  class="w-full rounded-md border border-zinc-300 px-3 py-2"
-                  required
-                />
-                <p
-                  :for={msg <- (@allowlist_form[:email] && @allowlist_form[:email].errors) || []}
-                  class="mt-1 text-xs text-red-600"
-                >
-                  {translate_error(msg)}
-                </p>
-              </div>
-
-              <div style="display: flex; gap: 2rem;">
-                <div class="sa-row" style="gap: 0.5rem;">
-                  <span class="text-sm">Active</span>
-                  <label class="sa-switch">
-                    <input
-                      id="allowlist-active"
-                      type="checkbox"
-                      name={@allowlist_form[:active] && @allowlist_form[:active].name}
-                      value="true"
-                      class="sa-switch-input"
-                      role="switch"
-                      checked={checkbox_checked?(@allowlist_form[:active] && @allowlist_form[:active].value)}
-                    />
-                    <span class="sa-switch-slider"></span>
-                  </label>
-                </div>
-                <div class="sa-row" style="gap: 0.5rem;">
-                  <span class="text-sm">Admin</span>
-                  <label class="sa-switch">
-                    <input
-                      id="allowlist-admin"
-                      type="checkbox"
-                      name={@allowlist_form[:is_admin] && @allowlist_form[:is_admin].name}
-                      value="true"
-                      class="sa-switch-input"
-                      role="switch"
-                      checked={checkbox_checked?(@allowlist_form[:is_admin] && @allowlist_form[:is_admin].value)}
-                    />
-                    <span class="sa-switch-slider"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="flex flex-wrap gap-3">
-                <.button id="save-allowlist-entry-btn" phx-disable-with="Saving...">
-                  Save
-                </.button>
-                <button
-                  type="button"
-                  phx-click="close_add_user_modal"
-                  class="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                >
-                  Cancel
-                </button>
-              </div>
-            </.form>
-          </.modal>
 
           <div style="margin-bottom: 1rem; max-width: 20rem;">
             <form phx-change="search_admin_users" phx-submit="search_admin_users">
@@ -599,8 +525,6 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
   end
 
   defp managed_integration_catalog(_), do: []
-
-  defp checkbox_checked?(value), do: value in [true, "true", "on", 1]
 
   defp google_chat_service_account_fields do
     [

@@ -92,7 +92,7 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:help_query, "")
     |> assign(:managed_scopes, [])
     |> assign(:admin_tab, "integrations")
-    |> assign(:add_user_modal_open, false)
+    |> assign(:creating_new_user, false)
     |> assign(:can_bootstrap_admin, false)
     |> assign(:allowlist_form, to_form(%{}, as: "allowlist_entry"))
     |> assign(:allowlist_entries, [])
