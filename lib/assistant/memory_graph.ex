@@ -1,6 +1,6 @@
 defmodule Assistant.MemoryGraph do
   @moduledoc """
-  Builds graph-ready memory/entity/transcript data for the settings UI.
+  Builds graph-ready memory/entity data for the settings UI.
   """
 
   import Ecto.Query
@@ -9,7 +9,6 @@ defmodule Assistant.MemoryGraph do
   alias Assistant.Repo
 
   alias Assistant.Schemas.{
-    Conversation,
     MemoryEntity,
     MemoryEntityMention,
     MemoryEntityRelation,
@@ -18,7 +17,6 @@ defmodule Assistant.MemoryGraph do
 
   @default_entity_limit 28
   @default_memory_limit 28
-  @default_transcript_limit 18
   @default_expand_limit 42
 
   @type graph_data :: %{nodes: [map()], links: [map()]}
@@ -43,14 +41,7 @@ defmodule Assistant.MemoryGraph do
         []
       end
 
-    transcripts =
-      if flags.transcripts do
-        fetch_transcripts(user_id, memories, opts, @default_transcript_limit)
-      else
-        []
-      end
-
-    to_graph(entities, memories, transcripts, opts, flags)
+    to_graph(entities, memories, opts, flags)
   end
 
   def get_initial_graph(_, _), do: empty_graph()
@@ -64,7 +55,6 @@ defmodule Assistant.MemoryGraph do
     case parse_node_id(node_id) do
       {:entity, entity_id} -> expand_from_entity(user_id, entity_id, opts, flags)
       {:memory, memory_id} -> expand_from_memory(user_id, memory_id, opts, flags)
-      {:transcript, transcript_id} -> expand_from_transcript(user_id, transcript_id, opts, flags)
       :error -> empty_graph()
     end
   end
@@ -104,18 +94,7 @@ defmodule Assistant.MemoryGraph do
         []
       end
 
-    transcripts =
-      if flags.transcripts do
-        memories
-        |> Enum.map(& &1.source_conversation_id)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.uniq()
-        |> fetch_transcripts_by_ids(user_id)
-      else
-        []
-      end
-
-    to_graph(entities, memories, transcripts, opts, flags, relation_rows, mention_rows)
+    to_graph(entities, memories, opts, flags, relation_rows, mention_rows)
   end
 
   defp expand_from_memory(user_id, memory_id, opts, flags) do
@@ -149,72 +128,12 @@ defmodule Assistant.MemoryGraph do
         []
       end
 
-    transcripts =
-      if flags.transcripts do
-        memories
-        |> Enum.map(& &1.source_conversation_id)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.uniq()
-        |> fetch_transcripts_by_ids(user_id)
-      else
-        []
-      end
-
-    to_graph(entities, memories, transcripts, opts, flags, relation_rows, mention_rows)
-  end
-
-  defp expand_from_transcript(user_id, transcript_id, opts, flags) do
-    transcripts =
-      if flags.transcripts do
-        fetch_transcripts_by_ids(user_id, [transcript_id])
-      else
-        []
-      end
-
-    memory_ids =
-      if flags.memories do
-        fetch_memory_ids_for_transcript(user_id, transcript_id, opts.since, @default_expand_limit)
-      else
-        []
-      end
-
-    memories =
-      if flags.memories do
-        fetch_memories_by_ids(user_id, memory_ids, opts.since)
-      else
-        []
-      end
-
-    mention_rows =
-      if flags.entities and flags.memories do
-        fetch_mentions_for_memories(user_id, memory_ids, opts.since, @default_expand_limit)
-      else
-        []
-      end
-
-    entity_ids = mention_rows |> Enum.map(& &1.entity_id) |> Enum.uniq()
-
-    entities =
-      if flags.entities do
-        fetch_entities_by_ids(user_id, entity_ids)
-      else
-        []
-      end
-
-    relation_rows =
-      if flags.entities do
-        fetch_relations_between_entities(user_id, entity_ids, opts.since, @default_expand_limit)
-      else
-        []
-      end
-
-    to_graph(entities, memories, transcripts, opts, flags, relation_rows, mention_rows)
+    to_graph(entities, memories, opts, flags, relation_rows, mention_rows)
   end
 
   defp to_graph(
          entities,
          memories,
-         transcripts,
          opts,
          flags,
          relation_rows \\ nil,
@@ -254,17 +173,30 @@ defmodule Assistant.MemoryGraph do
       entities
       |> Enum.map(&entity_node/1)
       |> Kernel.++(Enum.map(memories, &memory_node/1))
-      |> Kernel.++(Enum.map(transcripts, &transcript_node/1))
       |> unique_by_id()
 
     links =
       relation_rows
       |> Enum.map(&relation_link/1)
       |> Kernel.++(Enum.map(mention_rows, &mention_link/1))
-      |> Kernel.++(source_links(memories, transcripts))
       |> unique_by_id()
 
-    %{nodes: nodes, links: links}
+    degree_counts = compute_degree_counts(links)
+
+    nodes_with_counts =
+      Enum.map(nodes, fn node ->
+        Map.put(node, :connection_count, Map.get(degree_counts, node.id, 0))
+      end)
+
+    %{nodes: nodes_with_counts, links: links}
+  end
+
+  defp compute_degree_counts(links) do
+    Enum.reduce(links, %{}, fn link, acc ->
+      acc
+      |> Map.update(link.source, 1, &(&1 + 1))
+      |> Map.update(link.target, 1, &(&1 + 1))
+    end)
   end
 
   defp user_id_for_entities([entity | _]), do: entity.user_id
@@ -312,51 +244,6 @@ defmodule Assistant.MemoryGraph do
       order_by: [desc: m.inserted_at]
     )
     |> maybe_filter_memory_since(since)
-    |> Repo.all()
-  end
-
-  defp fetch_transcripts(user_id, memories, opts, limit) do
-    memory_conversation_ids =
-      memories
-      |> Enum.map(& &1.source_conversation_id)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
-
-    primary =
-      from(c in Conversation,
-        where: c.user_id == ^user_id,
-        order_by: [desc: fragment("COALESCE(?, ?)", c.last_active_at, c.inserted_at)],
-        limit: ^limit
-      )
-      |> maybe_filter_transcript_query(opts.query)
-      |> maybe_filter_transcript_since(opts.since)
-      |> Repo.all()
-
-    if memory_conversation_ids == [] do
-      primary
-    else
-      extra = fetch_transcripts_by_ids(user_id, memory_conversation_ids)
-      unique_by_id(primary ++ extra)
-    end
-  end
-
-  defp fetch_transcripts_by_ids(_user_id, []), do: []
-
-  defp fetch_transcripts_by_ids(user_id, ids) do
-    from(c in Conversation,
-      where: c.user_id == ^user_id and c.id in ^ids
-    )
-    |> Repo.all()
-  end
-
-  defp fetch_memory_ids_for_transcript(user_id, transcript_id, since, limit) do
-    from(m in MemoryEntry,
-      where: m.user_id == ^user_id and m.source_conversation_id == ^transcript_id,
-      order_by: [desc: m.inserted_at],
-      limit: ^limit,
-      select: m.id
-    )
-    |> maybe_filter_memory_id_since(since)
     |> Repo.all()
   end
 
@@ -447,8 +334,6 @@ defmodule Assistant.MemoryGraph do
     |> Repo.all()
   end
 
-  defp fetch_mentions_for_memories(_user_id, [], _since, _limit), do: []
-
   defp fetch_mentions_for_memories(user_id, memory_ids, since, limit) do
     from(em in MemoryEntityMention,
       join: m in MemoryEntry,
@@ -460,32 +345,6 @@ defmodule Assistant.MemoryGraph do
     )
     |> maybe_filter_mention_since(since)
     |> Repo.all()
-  end
-
-  defp source_links(memories, transcripts) do
-    transcript_ids = transcripts |> Enum.map(& &1.id) |> MapSet.new()
-
-    memories
-    |> Enum.reduce([], fn memory, acc ->
-      conversation_id = memory.source_conversation_id
-
-      if is_binary(conversation_id) and MapSet.member?(transcript_ids, conversation_id) do
-        [
-          %{
-            id: "source:#{memory.id}:#{conversation_id}",
-            source: "memory:#{memory.id}",
-            target: "transcript:#{conversation_id}",
-            label: "source",
-            kind: "source",
-            color: "rgba(41, 171, 226, 0.35)",
-            directional: true
-          }
-          | acc
-        ]
-      else
-        acc
-      end
-    end)
   end
 
   defp relation_link(relation) do
@@ -534,26 +393,6 @@ defmodule Assistant.MemoryGraph do
     }
   end
 
-  defp transcript_node(transcript) do
-    channel =
-      transcript.channel
-      |> to_string()
-      |> String.trim()
-      |> case do
-        "" -> "transcript"
-        value -> value
-      end
-      |> String.capitalize()
-
-    %{
-      id: "transcript:#{transcript.id}",
-      kind: "transcript",
-      label: "#{channel} #{short_id(transcript.id)}",
-      color: "#00a99d",
-      val: 7
-    }
-  end
-
   defp include_flags("entities"), do: %{entities: true, memories: false, transcripts: false}
   defp include_flags("memories"), do: %{entities: true, memories: true, transcripts: false}
   defp include_flags("transcripts"), do: %{entities: false, memories: true, transcripts: true}
@@ -580,7 +419,6 @@ defmodule Assistant.MemoryGraph do
     case String.split(node_id, ":", parts: 2) do
       ["entity", id] when id != "" -> {:entity, id}
       ["memory", id] when id != "" -> {:memory, id}
-      ["transcript", id] when id != "" -> {:transcript, id}
       _ -> :error
     end
   end
@@ -599,18 +437,6 @@ defmodule Assistant.MemoryGraph do
     where(queryable, [m], ilike(m.content, ^pattern))
   end
 
-  defp maybe_filter_transcript_query(queryable, ""), do: queryable
-
-  defp maybe_filter_transcript_query(queryable, query) do
-    pattern = "%#{query}%"
-
-    where(
-      queryable,
-      [c],
-      fragment("CAST(? AS text) ILIKE ?", c.id, ^pattern) or ilike(c.channel, ^pattern)
-    )
-  end
-
   defp maybe_filter_entity_since(queryable, nil), do: queryable
 
   defp maybe_filter_entity_since(queryable, since),
@@ -620,21 +446,6 @@ defmodule Assistant.MemoryGraph do
 
   defp maybe_filter_memory_since(queryable, since),
     do: where(queryable, [m], m.inserted_at >= ^since)
-
-  defp maybe_filter_memory_id_since(queryable, nil), do: queryable
-
-  defp maybe_filter_memory_id_since(queryable, since),
-    do: where(queryable, [m], m.inserted_at >= ^since)
-
-  defp maybe_filter_transcript_since(queryable, nil), do: queryable
-
-  defp maybe_filter_transcript_since(queryable, since) do
-    where(
-      queryable,
-      [c],
-      fragment("COALESCE(?, ?) >= ?", c.last_active_at, c.inserted_at, ^since)
-    )
-  end
 
   defp maybe_filter_relation_since(queryable, nil), do: queryable
 
@@ -675,9 +486,6 @@ defmodule Assistant.MemoryGraph do
   end
 
   defp truncate_text(_, _), do: "(empty memory)"
-
-  defp short_id(id) when is_binary(id), do: String.slice(id, 0, 8)
-  defp short_id(_), do: "unknown"
 
   defp entity_color("person"), do: "#f7931e"
   defp entity_color("organization"), do: "#93278f"

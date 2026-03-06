@@ -1193,6 +1193,10 @@ a {
   cursor: grabbing;
 }
 
+.sa-knowledge-graph-canvas canvas.dragging {
+  cursor: grabbing;
+}
+
 .sa-graph-controls {
   position: absolute;
   right: 12px;
