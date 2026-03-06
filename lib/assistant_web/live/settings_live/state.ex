@@ -219,9 +219,5 @@ defmodule AssistantWeb.SettingsLive.State do
     end
   end
 
-  defp section_scope_name("analytics"), do: "analytics"
-  defp section_scope_name("memory"), do: "memory"
-  defp section_scope_name("workflows"), do: "workflows"
-  defp section_scope_name("apps"), do: "integrations"
-  defp section_scope_name(_), do: nil
+  defp section_scope_name(section), do: PageHelpers.section_scope(section)
 end

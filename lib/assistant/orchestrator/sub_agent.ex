@@ -617,7 +617,7 @@ defmodule Assistant.Orchestrator.SubAgent do
       {:error, :over_budget} ->
         %{
           status: :completed,
-          result: "Unable to complete — usage limit reached.",
+          result: SpendingLimits.Enforcer.over_budget_message(),
           tool_calls_used: agent_state.skill_calls,
           messages: context.messages
         }

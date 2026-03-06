@@ -85,32 +85,41 @@ defmodule Assistant.SpendingLimits do
         prompt_tokens = usage_data[:prompt_tokens] || 0
         completion_tokens = usage_data[:completion_tokens] || 0
 
-        Repo.insert(
-          %UsageRecord{
-            settings_user_id: settings_user_id,
-            period_start: period_start,
-            period_end: period_end,
-            total_cost_cents: cost_cents,
-            total_prompt_tokens: prompt_tokens,
-            total_completion_tokens: completion_tokens,
-            call_count: 1
-          },
-          on_conflict:
-            from(u in UsageRecord,
-              update: [
-                inc: [
-                  total_cost_cents: ^cost_cents,
-                  total_prompt_tokens: ^prompt_tokens,
-                  total_completion_tokens: ^completion_tokens,
-                  call_count: 1
-                ],
-                set: [updated_at: ^DateTime.utc_now()]
-              ]
-            ),
-          conflict_target: [:settings_user_id, :period_start]
-        )
+        case Repo.insert(
+               %UsageRecord{
+                 settings_user_id: settings_user_id,
+                 period_start: period_start,
+                 period_end: period_end,
+                 total_cost_cents: cost_cents,
+                 total_prompt_tokens: prompt_tokens,
+                 total_completion_tokens: completion_tokens,
+                 call_count: 1
+               },
+               on_conflict:
+                 from(u in UsageRecord,
+                   update: [
+                     inc: [
+                       total_cost_cents: ^cost_cents,
+                       total_prompt_tokens: ^prompt_tokens,
+                       total_completion_tokens: ^completion_tokens,
+                       call_count: 1
+                     ],
+                     set: [updated_at: ^DateTime.utc_now()]
+                   ]
+                 ),
+               conflict_target: [:settings_user_id, :period_start]
+             ) do
+          {:ok, _record} ->
+            :ok
 
-        :ok
+          {:error, changeset} ->
+            Logger.warning("Failed to upsert usage record",
+              settings_user_id: settings_user_id,
+              error: inspect(changeset.errors)
+            )
+
+            {:error, changeset}
+        end
     end
   rescue
     e ->

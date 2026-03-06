@@ -93,7 +93,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
         process_response(response, loop_state)
 
       {:error, :over_budget} ->
-        {:text, "Your usage limit has been reached for this period.", %{}}
+        {:text, SpendingLimits.Enforcer.over_budget_message(), %{}}
 
       {:error, reason} ->
         record_llm_analytics(loop_state, nil, model, :error, reason)

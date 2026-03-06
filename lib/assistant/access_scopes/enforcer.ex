@@ -16,6 +16,8 @@ defmodule Assistant.AccessScopes.Enforcer do
 
   alias Assistant.Accounts
 
+  require Logger
+
   # Maps access scope names to the skill domain prefixes they grant.
   # Skill names follow the pattern "domain.action" (e.g., "email.send").
   @scope_to_skill_domains %{
@@ -32,7 +34,7 @@ defmodule Assistant.AccessScopes.Enforcer do
   def skill_allowed?("unknown", _skill_name), do: true
 
   def skill_allowed?(user_id, skill_name) do
-    case Accounts.get_settings_user_by_user_id(user_id) do
+    case cached_settings_user(user_id) do
       nil -> true
       settings_user -> authorized?(settings_user, skill_name)
     end
@@ -50,9 +52,34 @@ defmodule Assistant.AccessScopes.Enforcer do
       required_scope = scope_for_domain(domain)
 
       case required_scope do
-        nil -> true
-        scope -> scope in scopes
+        nil ->
+          Logger.info("Skill denied — unmapped domain has no access scope",
+            skill_name: skill_name,
+            domain: domain
+          )
+
+          false
+
+        scope ->
+          scope in scopes
       end
+    end
+  end
+
+  # Per-process cache for settings_user lookups. Within a single request
+  # (sub-agent LLM loop iteration), multiple skill calls share the same
+  # process, so this avoids repeated DB queries for the same user_id.
+  defp cached_settings_user(user_id) do
+    cache_key = {:access_scope_user, user_id}
+
+    case Process.get(cache_key) do
+      nil ->
+        result = Accounts.get_settings_user_by_user_id(user_id)
+        Process.put(cache_key, {:cached, result})
+        result
+
+      {:cached, result} ->
+        result
     end
   end
 

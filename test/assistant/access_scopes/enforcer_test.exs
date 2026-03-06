@@ -184,20 +184,20 @@ defmodule Assistant.AccessScopes.EnforcerTest do
   # ──────────────────────────────────────────────
 
   describe "skill_allowed?/2 with unknown domains" do
-    test "skill with unmapped domain is allowed (no scope covers it)" do
+    test "skill with unmapped domain is denied (default-deny for unmapped)" do
       {user, settings_user} = create_linked_settings_user()
       set_scopes(settings_user, ["chat"])
 
-      # Unknown domain doesn't map to any scope, so nil scope => allowed
-      assert Enforcer.skill_allowed?(user.id, "unknown.action")
+      # Unknown domain doesn't map to any scope => denied (default-deny)
+      refute Enforcer.skill_allowed?(user.id, "unknown.action")
     end
 
-    test "skill without dot separator is allowed" do
+    test "skill without dot separator is denied (default-deny for unmapped)" do
       {user, settings_user} = create_linked_settings_user()
       set_scopes(settings_user, ["chat"])
 
-      # No domain extracted => nil domain => nil scope => allowed
-      assert Enforcer.skill_allowed?(user.id, "standalone_skill")
+      # No domain extracted => nil domain => nil scope => denied (default-deny)
+      refute Enforcer.skill_allowed?(user.id, "standalone_skill")
     end
   end
 end

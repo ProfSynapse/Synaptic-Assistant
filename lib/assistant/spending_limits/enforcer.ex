@@ -12,6 +12,12 @@ defmodule Assistant.SpendingLimits.Enforcer do
 
   alias Assistant.{Accounts, SpendingLimits}
 
+  @over_budget_user_message "Your usage limit has been reached for this billing period."
+
+  @doc "Consistent user-facing message for over-budget conditions."
+  @spec over_budget_message() :: String.t()
+  def over_budget_message, do: @over_budget_user_message
+
   @spec check_budget(String.t() | nil) :: :ok | {:warning, float()} | {:error, :over_budget}
   def check_budget(nil), do: :ok
   def check_budget("unknown"), do: :ok

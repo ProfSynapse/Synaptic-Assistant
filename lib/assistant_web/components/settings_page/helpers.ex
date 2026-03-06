@@ -54,7 +54,11 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
 
   def scope_visible?(_scope_name, _current_scope), do: true
 
-  defp section_scope(section) do
+  @doc """
+  Maps a settings section name to its access scope name.
+  Returns nil for sections that don't require a specific scope.
+  """
+  def section_scope(section) do
     case section do
       "analytics" -> "analytics"
       "memory" -> "memory"

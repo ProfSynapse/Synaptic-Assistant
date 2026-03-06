@@ -87,6 +87,7 @@ defmodule Assistant.Memory.Agent do
   alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Registry, Result}
+  alias Assistant.SpendingLimits
 
   require Logger
 
@@ -426,7 +427,7 @@ defmodule Assistant.Memory.Agent do
 
         %{
           status: :failed,
-          result: "Memory agent skipped: usage limit reached.",
+          result: SpendingLimits.Enforcer.over_budget_message(),
           tool_calls_used: agent_state.skill_calls
         }
 
