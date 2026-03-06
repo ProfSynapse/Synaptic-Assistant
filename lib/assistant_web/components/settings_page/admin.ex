@@ -8,6 +8,7 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
 
   import AssistantWeb.Components.AdminIntegrations, only: [admin_integrations: 1]
   import AssistantWeb.Components.SettingsPage.Models, only: [models_section: 1]
+
   import AssistantWeb.Components.SettingsPage.UserDetail,
     only: [user_detail_section: 1, user_create_section: 1]
 
@@ -534,5 +535,4 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
        "Service account for Synaptic Assistant to send messages in Google Chat spaces"}
     ]
   end
-
 end

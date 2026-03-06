@@ -473,7 +473,9 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     permissions =
       case Context.current_user_id(socket) do
         user_id when is_binary(user_id) ->
-          SkillPermissions.list_permissions_for_user(user_id, integration_group: integration_group)
+          SkillPermissions.list_permissions_for_user(user_id,
+            integration_group: integration_group
+          )
 
         _ ->
           SkillPermissions.list_permissions(integration_group: integration_group)

@@ -39,8 +39,8 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
 
     ~H"""
     <section class="sa-google-drive-access">
-      <div class="sa-row">
-        <div>
+      <div class="sa-drive-access-header">
+        <div class="sa-drive-access-heading">
           <h2>Drive Access</h2>
           <p class="sa-muted">
             Turn on full-drive sync for the common case, or open a drive to scope access down to folders and files.
@@ -68,199 +68,243 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
         <span>No drives available yet. Refresh drives to discover shared drives.</span>
       </div>
 
-      <table :if={@has_google_token and @rows != []} class="sa-table sa-drive-table" style="margin-top: 1rem;">
-        <thead>
-          <tr>
-            <th>Drive</th>
-            <th>Scope</th>
-            <th>Full Access</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            :for={row <- @rows}
-            class={[@manager_drive && @manager_drive.drive_key == row.drive_key && "sa-drive-table-row-active"]}
-          >
-            <td>
-              <div class="sa-drive-row-title">
-                <.icon name={drive_icon(row.drive_type)} class="h-5 w-5 sa-drive-icon" />
-                <div>
-                  <div class="sa-drive-name">{row.drive_name}</div>
-                  <div class="sa-drive-type">{drive_type_label(row.drive_type)}</div>
+      <div :if={@has_google_token and @rows != []} class="sa-drive-table-shell">
+        <table class="sa-table sa-drive-table">
+          <thead>
+            <tr>
+              <th>Drive</th>
+              <th>Scope</th>
+              <th>Full Access</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              :for={row <- @rows}
+              class={[
+                "sa-drive-table-row",
+                @manager_drive && @manager_drive.drive_key == row.drive_key && "sa-drive-table-row-active"
+              ]}
+            >
+              <td>
+                <div class="sa-drive-row-title">
+                  <span class="sa-drive-row-avatar">
+                    <.icon name={drive_icon(row.drive_type)} class="h-5 w-5 sa-drive-icon" />
+                  </span>
+                  <div class="sa-drive-row-copy">
+                    <div class="sa-drive-name">{row.drive_name}</div>
+                    <div class="sa-drive-type">{drive_type_label(row.drive_type)}</div>
+                  </div>
                 </div>
-              </div>
-            </td>
-            <td>
-              <span class="sa-drive-scope-summary">{scope_summary(row, @sync_scopes)}</span>
-            </td>
-            <td>
-              <label class="sa-switch">
-                <input
-                  type="checkbox"
-                  checked={row.enabled}
-                  class="sa-switch-input"
-                  role="switch"
-                  aria-checked={to_string(row.enabled)}
-                  aria-label={"Toggle full access for #{row.drive_name}"}
-                  phx-click="toggle_drive"
+              </td>
+              <td>
+                <span class={["sa-drive-scope-summary", scope_summary_class(row, @sync_scopes)]}>
+                  {scope_summary(row, @sync_scopes)}
+                </span>
+              </td>
+              <td>
+                <label class="sa-switch">
+                  <input
+                    type="checkbox"
+                    checked={row.enabled}
+                    class="sa-switch-input"
+                    role="switch"
+                    aria-checked={to_string(row.enabled)}
+                    aria-label={"Toggle full access for #{row.drive_name}"}
+                    phx-click="toggle_drive"
+                    phx-value-id={row.connected_id}
+                    phx-value-drive_id={row.drive_id || ""}
+                    phx-value-drive_name={row.drive_name}
+                    phx-value-drive_type={row.drive_type}
+                    phx-value-enabled={to_string(!row.enabled)}
+                  />
+                  <span class="sa-switch-slider"></span>
+                </label>
+              </td>
+              <td>
+                <button
+                  type="button"
+                  class="sa-icon-btn sa-drive-manage-btn"
+                  title={"Manage #{row.drive_name}"}
+                  aria-label={"Manage #{row.drive_name}"}
+                  phx-click="open_drive_scope_manager"
                   phx-value-id={row.connected_id}
                   phx-value-drive_id={row.drive_id || ""}
                   phx-value-drive_name={row.drive_name}
                   phx-value-drive_type={row.drive_type}
-                  phx-value-enabled={to_string(!row.enabled)}
-                />
-                <span class="sa-switch-slider"></span>
-              </label>
-            </td>
-            <td>
-              <button
-                type="button"
-                class="sa-icon-btn"
-                title={"Manage #{row.drive_name}"}
-                aria-label={"Manage #{row.drive_name}"}
-                phx-click="open_drive_scope_manager"
-                phx-value-id={row.connected_id}
-                phx-value-drive_id={row.drive_id || ""}
-                phx-value-drive_name={row.drive_name}
-                phx-value-drive_type={row.drive_type}
-              >
-                <.icon name="hero-cog-6-tooth" class="h-4 w-4" />
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+                >
+                  <.icon name="hero-adjustments-horizontal" class="h-4 w-4" />
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <.modal
         :if={@manager_drive}
         id="drive-scope-manager-modal"
         title={"Manage " <> @manager_drive.drive_name}
-        max_width="2xl"
+        max_width="full"
+        class="sa-drive-manager-modal"
         on_cancel={Phoenix.LiveView.JS.push("close_drive_scope_manager")}
       >
-        <p class="sa-muted" style="margin: 0 0 1rem 0;">
-          Select the folders and files to sync into the agent workspace. Folder selections cascade until you override a child.
-        </p>
-
-        <div
-          :if={@manager_drive.enabled}
-          class="sa-drive-notice sa-drive-notice--info"
-          style="margin-top: 1rem;"
-        >
-          <.icon name="hero-information-circle" class="h-5 w-5" />
-          <span>Full access is on for this drive. Turn it off to scope down to folders and files.</span>
-        </div>
-
-        <div :if={!@manager_drive.enabled}>
-          <div :if={@tree_error} class="sa-drive-notice" style="margin-top: 1rem;">
-            <.icon name="hero-exclamation-triangle" class="h-5 w-5" />
-            <span>{@tree_error}</span>
-          </div>
-
-          <div :if={@tree_loading} class="sa-empty" style="margin-top: 1rem;">
-            Loading drive contents...
+        <div class="sa-drive-manager">
+          <div class="sa-drive-manager-intro">
+            <div>
+              <p class="sa-drive-manager-kicker">Scoped Drive Access</p>
+              <p class="sa-muted">
+                Select the folders and files to sync into the agent workspace. Folder selections cascade until you override a child.
+              </p>
+            </div>
+            <span class={["sa-drive-scope-summary", scope_summary_class(@manager_drive, @manager_scopes)]}>
+              {scope_summary(@manager_drive, @manager_scopes)}
+            </span>
           </div>
 
           <div
-            :if={!@tree_loading and @tree_rows == [] and is_nil(@tree_error)}
-            class="sa-empty"
-            style="margin-top: 1rem;"
+            :if={@manager_drive.enabled}
+            class="sa-drive-notice sa-drive-notice--info"
           >
-            No folders or files found at the root of this drive.
+            <.icon name="hero-information-circle" class="h-5 w-5" />
+            <span>Full access is on for this drive. Turn it off to scope down to folders and files.</span>
           </div>
 
-          <div
-            :if={!@tree_loading and @tree_rows != []}
-            class="sa-drive-tree"
-            style="margin-top: 1rem;"
-          >
-            <div :for={row <- @tree_rows} class="sa-drive-tree-row" style={indent_style(row.depth)}>
-              <button
-                type="button"
-                class="sa-drive-tree-check"
-                phx-click="toggle_drive_tree_node_scope"
-                phx-value-node_key={row.node.key}
-                phx-value-node_type={row.node.node_type}
-                aria-label={"Toggle #{row.node.name}"}
+          <div :if={!@manager_drive.enabled} class="sa-drive-manager-body">
+            <div :if={@tree_error} class="sa-drive-notice">
+              <.icon name="hero-exclamation-triangle" class="h-5 w-5" />
+              <span>{@tree_error}</span>
+            </div>
+
+            <div :if={@tree_loading} class="sa-empty sa-drive-manager-state">
+              Loading drive contents...
+            </div>
+
+            <div
+              :if={!@tree_loading and @tree_rows == [] and is_nil(@tree_error)}
+              class="sa-empty sa-drive-manager-state"
+            >
+              No folders or files found at the root of this drive.
+            </div>
+
+            <div
+              :if={!@tree_loading and @tree_rows != []}
+              class="sa-drive-tree"
+            >
+              <div
+                :for={row <- @tree_rows}
+                class={tree_row_classes(row)}
+                style={tree_row_style(row.depth)}
               >
-                <span class="sa-drive-tree-check-shell">
-                  <input
-                    type="checkbox"
-                    checked={row.checkbox_state == :checked}
-                    aria-checked={checkbox_aria_state(row.checkbox_state)}
-                    tabindex="-1"
-                    class="sa-drive-tree-native-check"
-                    readonly
-                  />
-                  <span class={["sa-drive-tree-check-box", "is-#{row.checkbox_state}"]}>
-                    <.icon
-                      :if={row.checkbox_state == :checked}
-                      name="hero-check-solid"
-                      class="h-3.5 w-3.5"
+                <button
+                  type="button"
+                  class="sa-drive-tree-check"
+                  phx-click="toggle_drive_tree_node_scope"
+                  phx-value-node_key={row.node.key}
+                  phx-value-node_type={row.node.node_type}
+                  aria-label={"Toggle #{row.node.name}"}
+                >
+                  <span class="sa-drive-tree-check-shell">
+                    <input
+                      type="checkbox"
+                      checked={row.checkbox_state == :checked}
+                      aria-checked={checkbox_aria_state(row.checkbox_state)}
+                      tabindex="-1"
+                      class="sa-drive-tree-native-check"
+                      readonly
                     />
+                    <span class={["sa-drive-tree-check-box", "is-#{row.checkbox_state}"]}>
+                      <.icon
+                        :if={row.checkbox_state == :checked}
+                        name="hero-check-solid"
+                        class="h-3.5 w-3.5"
+                      />
+                      <.icon
+                        :if={row.checkbox_state == :partial}
+                        name="hero-minus"
+                        class="h-3.5 w-3.5"
+                      />
+                    </span>
+                  </span>
+                </button>
+
+                <button
+                  :if={row.node.node_type == "folder"}
+                  type="button"
+                  class="sa-drive-tree-node-trigger"
+                  phx-click="toggle_drive_tree_node_expanded"
+                  phx-value-node_key={row.node.key}
+                  aria-label={if row.expanded?, do: "Collapse #{row.node.name}", else: "Expand #{row.node.name}"}
+                >
+                  <span class={["sa-drive-tree-node-avatar", node_avatar_class(row.node)]}>
                     <.icon
-                      :if={row.checkbox_state == :partial}
-                      name="hero-minus"
-                      class="h-3.5 w-3.5"
+                      name={node_icon(row.node, row.expanded?)}
+                      class="h-4 w-4 sa-drive-tree-node-icon"
                     />
                   </span>
-                </span>
-              </button>
+                  <span class="sa-drive-tree-label-wrap">
+                    <span class="sa-drive-tree-label">{row.node.name}</span>
+                    <span class="sa-drive-tree-subtitle">Folder</span>
+                  </span>
+                  <span class="sa-drive-tree-tail">
+                    <span
+                      :if={MapSet.member?(@tree_loading_nodes, row.node.key)}
+                      class="sa-drive-tree-meta"
+                    >
+                      Loading...
+                    </span>
+                    <span :if={row.explicit_effect} class="sa-drive-tree-meta">
+                      {String.capitalize(row.explicit_effect)}
+                    </span>
+                  </span>
+                </button>
 
-              <button
-                :if={row.node.node_type == "folder"}
-                type="button"
-                class="sa-drive-tree-node-trigger"
-                phx-click="toggle_drive_tree_node_expanded"
-                phx-value-node_key={row.node.key}
-                aria-label={if row.expanded?, do: "Collapse #{row.node.name}", else: "Expand #{row.node.name}"}
-              >
-                <.icon
-                  name={if row.expanded?, do: "hero-folder-open", else: "hero-folder"}
-                  class="h-4 w-4 sa-drive-tree-node-icon"
-                />
-                <span class="sa-drive-tree-label">{row.node.name}</span>
-                <span
-                  :if={MapSet.member?(@tree_loading_nodes, row.node.key)}
-                  class="sa-drive-tree-meta"
-                >
-                  Loading...
-                </span>
-                <span :if={row.explicit_effect} class="sa-drive-tree-meta">
-                  {String.capitalize(row.explicit_effect)}
-                </span>
-              </button>
-
-              <div :if={row.node.node_type != "folder"} class="sa-drive-tree-node-trigger is-file">
-                <span class={["sa-drive-file-badge", file_badge_class(row.node.file_kind)]}>
-                  {file_badge_label(row.node.file_kind)}
-                </span>
-                <span class="sa-drive-tree-label">{row.node.name}</span>
-                <span :if={row.explicit_effect} class="sa-drive-tree-meta">
-                  {String.capitalize(row.explicit_effect)}
-                </span>
+                <div :if={row.node.node_type != "folder"} class="sa-drive-tree-node-trigger is-file">
+                  <span class={["sa-drive-tree-node-avatar", node_avatar_class(row.node)]}>
+                    <.icon
+                      name={node_icon(row.node, row.expanded?)}
+                      class="h-4 w-4 sa-drive-tree-node-icon"
+                    />
+                  </span>
+                  <span class="sa-drive-tree-label-wrap">
+                    <span class="sa-drive-tree-label">{row.node.name}</span>
+                    <span class="sa-drive-tree-subtitle">{file_kind_text(row.node.file_kind)}</span>
+                  </span>
+                  <span class="sa-drive-tree-tail">
+                    <span class={["sa-drive-file-badge", file_badge_class(row.node.file_kind)]}>
+                      {file_badge_label(row.node.file_kind)}
+                    </span>
+                    <span :if={row.explicit_effect} class="sa-drive-tree-meta">
+                      {String.capitalize(row.explicit_effect)}
+                    </span>
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div class="sa-row" style="margin-top: 1rem;">
-          <button
-            type="button"
-            class="sa-btn secondary"
-            phx-click="close_drive_scope_manager"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="sa-btn"
-            phx-click="save_drive_scope_manager"
-            disabled={!@drive_scope_dirty or @manager_drive.enabled}
-          >
-            Save Access
-          </button>
+          <div class="sa-drive-manager-footer">
+            <span class="sa-drive-manager-dirty">
+              {if @drive_scope_dirty, do: "Unsaved changes", else: "No changes yet"}
+            </span>
+            <div class="sa-drive-manager-actions">
+              <button
+                type="button"
+                class="sa-btn secondary"
+                phx-click="close_drive_scope_manager"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="sa-btn"
+                phx-click="save_drive_scope_manager"
+                disabled={!@drive_scope_dirty or @manager_drive.enabled}
+              >
+                Save Access
+              </button>
+            </div>
+          </div>
         </div>
       </.modal>
     </section>
@@ -481,16 +525,59 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
     end
   end
 
+  defp scope_summary_class(row, scopes) do
+    drive_scopes =
+      Enum.filter(scopes, fn scope ->
+        scope.drive_id == row.drive_id and scope.scope_type in ["folder", "file"]
+      end)
+
+    cond do
+      row.enabled -> "is-full"
+      drive_scopes == [] -> "is-empty"
+      true -> "is-scoped"
+    end
+  end
+
   defp drive_icon("shared"), do: "hero-circle-stack"
   defp drive_icon(_), do: "hero-folder"
 
   defp drive_type_label("shared"), do: "Shared Drive"
   defp drive_type_label(_), do: "My Drive"
 
-  defp indent_style(depth), do: "padding-left: #{depth * 1.5}rem;"
+  defp tree_row_style(depth), do: "--sa-drive-depth: #{depth};"
+
+  defp tree_row_classes(row) do
+    [
+      "sa-drive-tree-row",
+      row.node.node_type == "folder" && "is-folder",
+      row.node.node_type != "folder" && "is-file",
+      row.depth == 0 && "is-root",
+      row.expanded? && "is-expanded",
+      row.checkbox_state == :checked && "is-selected",
+      row.checkbox_state == :partial && "is-partial"
+    ]
+  end
+
   defp checkbox_aria_state(:partial), do: "mixed"
   defp checkbox_aria_state(:checked), do: "true"
   defp checkbox_aria_state(_), do: "false"
+
+  defp node_icon(%{node_type: "folder"}, true), do: "hero-folder-open"
+  defp node_icon(%{node_type: "folder"}, false), do: "hero-folder"
+  defp node_icon(%{file_kind: "doc"}, _expanded?), do: "hero-document-text"
+  defp node_icon(%{file_kind: "sheet"}, _expanded?), do: "hero-table-cells"
+  defp node_icon(%{file_kind: "slides"}, _expanded?), do: "hero-presentation-chart-bar"
+  defp node_icon(%{file_kind: "pdf"}, _expanded?), do: "hero-document"
+  defp node_icon(%{file_kind: "image"}, _expanded?), do: "hero-photo"
+  defp node_icon(_node, _expanded?), do: "hero-document"
+
+  defp node_avatar_class(%{node_type: "folder"}), do: "is-folder"
+  defp node_avatar_class(%{file_kind: "doc"}), do: "is-doc"
+  defp node_avatar_class(%{file_kind: "sheet"}), do: "is-sheet"
+  defp node_avatar_class(%{file_kind: "slides"}), do: "is-slides"
+  defp node_avatar_class(%{file_kind: "pdf"}), do: "is-pdf"
+  defp node_avatar_class(%{file_kind: "image"}), do: "is-image"
+  defp node_avatar_class(_node), do: "is-file"
 
   defp file_badge_class("doc"), do: "is-doc"
   defp file_badge_class("sheet"), do: "is-sheet"
@@ -505,4 +592,11 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
   defp file_badge_label("pdf"), do: "PDF"
   defp file_badge_label("image"), do: "IMG"
   defp file_badge_label(_), do: "FILE"
+
+  defp file_kind_text("doc"), do: "Google Doc"
+  defp file_kind_text("sheet"), do: "Google Sheet"
+  defp file_kind_text("slides"), do: "Google Slides"
+  defp file_kind_text("pdf"), do: "PDF"
+  defp file_kind_text("image"), do: "Image"
+  defp file_kind_text(_), do: "File"
 end

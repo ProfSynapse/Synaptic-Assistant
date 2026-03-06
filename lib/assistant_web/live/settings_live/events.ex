@@ -935,7 +935,9 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   def handle_event("toggle_personal_skill", %{"skill" => skill, "enabled" => enabled}, socket) do
     enabled? = enabled == "true"
-    integration_group = socket.assigns[:current_app] && socket.assigns.current_app.integration_group
+
+    integration_group =
+      socket.assigns[:current_app] && socket.assigns.current_app.integration_group
 
     Context.with_settings_user(socket, fn settings_user ->
       case Context.ensure_linked_user(settings_user) do
