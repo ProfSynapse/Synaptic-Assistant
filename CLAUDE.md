@@ -8,7 +8,7 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
 - Resume: `claude --resume 21d70a72-99b4-4fde-8cbc-2394ee7e6ad0`
 - Team: `pact-21d70a72`
-- Started: 2026-03-05 17:48:05 UTC
+- Started: 2026-03-06 12:04:35 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -124,10 +124,19 @@ Single dispatch pipeline for all channels (Telegram, Discord, Slack, Google Chat
 Credential-based LLM routing and admin-only model/skill management. Key patterns:
 - **LLMRouter.route/2**: 3-tier priority: (1) user OpenRouter key → OpenRouter, (2) user OpenAI creds → Direct OpenAI (strip `openai/` prefix), (3) neither → OpenRouter with nil api_key (client falls back to system key). No guessing/parsing — credentials are source of truth.
 - **ModelDefaults admin-only**: `mode/1` returns `:global` for admins, `:readonly` for all others. `:personal` mode removed entirely. `save_defaults/2` guards on `is_admin: true`.
-- **Fallback model cascade**: `ConfigLoader.resolve_fast_model/2` shared helper — tries role-specific → compaction → `:model_default_fallback` (registry) → `models_by_tier(:fast)`. Used by sentinel + turn_classifier.
-- **3-layer skill permissions**: `SkillPermissions.enabled_for_user?/2` — `global_enabled AND user_enabled AND connector_enabled`. Admin gate on `toggle_skill_permission` LiveView event.
+- **Per-role fallback cascade**: `ConfigLoader.resolve_fast_model/2` — tries `role-specific → role_fallback → models_by_tier(:fast)`. Each role has its own fallback key (e.g., `:model_default_orchestrator_fallback`). Used by sentinel + turn_classifier.
+- **4-layer skill permissions**: `SkillPermissions.enabled_for_user?/2` — `workspace_enabled AND global_enabled AND user_enabled AND connector_enabled`. Workspace enforcement at runtime via `@skill_prefix_to_group` mapping.
 - **Per-user connectors**: `settings_user_connector_states` table (FK to settings_users) + `user_skill_overrides` table. Upsert pattern with unique indexes.
 - **Elixir 1.19 gotcha**: Schema modules need `@type t :: %__MODULE__{}` or compilation fails with `type t/0 undefined`.
+
+### Admin-First Connectors + Per-Role Fallback (PR #46)
+Consolidated admin section with integration catalog and per-role fallback models.
+- **Sidebar cleanup**: Removed "Models" and "Skill Permissions" from sidebar nav — all model management consolidated into Admin section
+- **Admin integration catalog**: Card grid with per-group detail pages at `/settings/admin/integrations/:group`. Setup instructions, credential forms, portal/docs links.
+- **App card toggles**: Users toggle connectors on/off from Apps & Connections. `toggle_connector` event → `ensure_linked_user` → `SettingsUserConnectorStates.set_enabled_for_user`
+- **Per-role fallback UI**: Each role row in Admin > Role Defaults shows Primary + Fallback dropdowns side-by-side
+- **Connection validation admin gate**: `load_connection_status/1` runs full `ConnectionValidator.validate_all` for admins only; non-admins get `lightweight_connection_status/0` (key-existence check, no API calls)
+- **Connector default: true**: All connectors default to enabled until user explicitly disables
 
 ### Phase Status
 - Phase 1-4 complete and merged (PR #9). Branch: `main`.
@@ -140,3 +149,4 @@ Credential-based LLM routing and admin-only model/skill management. Key patterns
 - PR #32: Cross-channel OAuth key resolution fix — CrossChannelBridge module, ensure_linked_user dedup, data repair migration.
 - PR #37: HubSpot CRM connector — 18 skills (contacts, companies, deals) with pagination, retry, multi-filter search.
 - PR #45: Admin-only model management, credential-based LLM routing, fallback model cascade, 3-layer skill permissions, per-user connector states.
+- PR #46: Admin-first connectors (integration catalog, app card toggles, sidebar cleanup), per-role fallback models, 4-layer skill permissions with workspace runtime enforcement.
