@@ -8,7 +8,7 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
 - Resume: `claude --resume 21d70a72-99b4-4fde-8cbc-2394ee7e6ad0`
 - Team: `pact-21d70a72`
-- Started: 2026-03-06 12:04:35 UTC
+- Started: 2026-03-06 16:10:37 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -138,6 +138,17 @@ Consolidated admin section with integration catalog and per-role fallback models
 - **Connection validation admin gate**: `load_connection_status/1` runs full `ConnectionValidator.validate_all` for admins only; non-admins get `lightweight_connection_status/0` (key-existence check, no API calls)
 - **Connector default: true**: All connectors default to enabled until user explicitly disables
 
+### User Management, Access Scopes & Spending Limits (PR #50)
+Comprehensive user management with dual-layer enforcement and per-user spending limits.
+- **Upfront user creation**: `Accounts.create_settings_user_from_admin/2` — transactional allowlist + settings_user + invite email. `full_name` field on both schemas.
+- **AccessScopes.Enforcer**: Scope-to-skill-domain mapping (`chat→[agents,tasks,web,images]`, `integrations→[email,calendar,files,hubspot]`, `workflows→[workflow]`, `memory→[memory]`). Default-deny for unmapped domains. Per-request caching via process dictionary.
+- **Dual-layer enforcement**: (1) LiveView `on_mount({:require_scope, scope})` hook gates sections, (2) SubAgent `skill_allowed?/2` check before SkillPermissions. Admins bypass all. Empty scopes = unrestricted.
+- **SpendingLimits**: `spending_limits` table (admin config) + `usage_records` table (per-period tracking). `check_budget/1` returns `:ok | {:warning, pct} | {:error, :over_budget}`. Monthly period with configurable reset_day.
+- **SpendingLimits.Enforcer**: Bridges `user_id` → `settings_user_id` for cross-layer enforcement. Shared `record_spending/2` for post-flight recording. `over_budget_message/0` for unified error messages.
+- **LLMRouter pre-flight**: `chat_completion/3` checks budget before LLM call via `do_chat_completion/3` pattern. `:skip_spending_check` opt for sentinel exemption.
+- **Unified UI**: Add User mirrors Edit User with all controls (scopes, connectors, API keys, model defaults, spending limits). Scope-gated sidebar navigation.
+- **4-layer skill permissions** (updated): `workspace_enabled AND global_enabled AND user_enabled AND connector_enabled AND scope_allowed`.
+
 ### Phase Status
 - Phase 1-4 complete and merged (PR #9). Branch: `main`.
 - Phase 4 covers: Gmail (5 skills), Calendar (3 skills), Workflow scheduler (4 skills + WorkflowWorker + QuantumLoader).
@@ -150,3 +161,4 @@ Consolidated admin section with integration catalog and per-role fallback models
 - PR #37: HubSpot CRM connector — 18 skills (contacts, companies, deals) with pagination, retry, multi-filter search.
 - PR #45: Admin-only model management, credential-based LLM routing, fallback model cascade, 3-layer skill permissions, per-user connector states.
 - PR #46: Admin-first connectors (integration catalog, app card toggles, sidebar cleanup), per-role fallback models, 4-layer skill permissions with workspace runtime enforcement.
+- PR #50: User management, access scope enforcement, spending limits — dual-layer enforcement, per-user budgets, unified Add/Edit UI, 172 feature tests.
