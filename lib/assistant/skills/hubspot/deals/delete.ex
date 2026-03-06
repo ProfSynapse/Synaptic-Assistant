@@ -49,7 +49,8 @@ defmodule Assistant.Skills.HubSpot.Deals.Delete do
             {:ok,
              %Result{
                status: :ok,
-               content: "Deal #{id} has been archived successfully.\n\nNote: Archived deals can be restored from the HubSpot UI.",
+               content:
+                 "Deal #{id} has been archived successfully.\n\nNote: Archived deals can be restored from the HubSpot UI.",
                side_effects: [:hubspot_deal_deleted],
                metadata: %{deal_id: id}
              }}

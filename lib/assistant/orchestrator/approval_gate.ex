@@ -56,7 +56,8 @@ defmodule Assistant.Orchestrator.ApprovalGate do
     * `{:denied, feedback_message}` - User denied; message for the LLM
     * `{:timeout, timeout_message}` - Approval timed out; message for the LLM
   """
-  @spec check(String.t(), map(), keyword()) :: :approved | {:denied, String.t()} | {:timeout, String.t()}
+  @spec check(String.t(), map(), keyword()) ::
+          :approved | {:denied, String.t()} | {:timeout, String.t()}
   def check(skill_name, skill_args, opts) do
     skill_def = Keyword.fetch!(opts, :skill_def)
     dispatch_params = Keyword.fetch!(opts, :dispatch_params)

@@ -27,7 +27,9 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.SettingsUserConnectorStates
   alias Assistant.SkillPermissions
   alias Assistant.SpendingLimits
+  alias Assistant.Sync.FileManager
   alias Assistant.Sync.StateStore
+  alias Assistant.Sync.Workers.FileSyncWorker
   alias Assistant.Transcripts
   alias Assistant.Workflows
   alias AssistantWeb.SettingsLive.Context
@@ -431,14 +433,42 @@ defmodule AssistantWeb.SettingsLive.Events do
   def handle_event("toggle_drive", %{"id" => id, "enabled" => enabled}, socket) do
     enabled? = enabled == "true"
 
-    case ConnectedDrives.toggle(id, enabled?) do
-      {:ok, _drive} ->
-        {:noreply, Loaders.load_connected_drives(socket)}
+    case ensure_drive_for_access(socket, %{"id" => id}, enabled?) do
+      {:ok, drive, socket} ->
+        {:noreply,
+         socket
+         |> maybe_ensure_drive_cursor(drive, enabled?)
+         |> reload_google_workspace_access()
+         |> refresh_manager_drive()
+         |> reconcile_drive_workspace(drive.drive_id)}
 
-      {:error, :not_found} ->
+      {:error, :not_found, socket} ->
         {:noreply, put_flash(socket, :error, "Drive not found.")}
 
-      {:error, _reason} ->
+      {:error, :not_connected, socket} ->
+        {:noreply, put_flash(socket, :error, "Connect your Google account first.")}
+
+      {:error, _reason, socket} ->
+        {:noreply, put_flash(socket, :error, "Failed to toggle drive.")}
+    end
+  end
+
+  def handle_event("toggle_drive", params, socket) do
+    enabled? = Map.get(params, "enabled") == "true"
+
+    case ensure_drive_for_access(socket, params, enabled?) do
+      {:ok, drive, socket} ->
+        {:noreply,
+         socket
+         |> maybe_ensure_drive_cursor(drive, enabled?)
+         |> reload_google_workspace_access()
+         |> refresh_manager_drive()
+         |> reconcile_drive_workspace(drive.drive_id)}
+
+      {:error, :not_connected, socket} ->
+        {:noreply, put_flash(socket, :error, "Connect your Google account first.")}
+
+      {:error, _reason, socket} ->
         {:noreply, put_flash(socket, :error, "Failed to toggle drive.")}
     end
   end
@@ -448,10 +478,13 @@ defmodule AssistantWeb.SettingsLive.Events do
       attrs = %{drive_id: drive_id, drive_name: name, drive_type: "shared"}
 
       case ConnectedDrives.connect(user_id, attrs) do
-        {:ok, _drive} ->
+        {:ok, drive} ->
           {:noreply,
            socket
-           |> Loaders.load_connected_drives()
+           |> maybe_ensure_drive_cursor(drive, true)
+           |> reload_google_workspace_access()
+           |> refresh_manager_drive()
+           |> reconcile_drive_workspace(drive.drive_id)
            |> put_flash(:info, "Connected #{name}.")}
 
         {:error, _reason} ->
@@ -463,10 +496,13 @@ defmodule AssistantWeb.SettingsLive.Events do
   def handle_event("connect_personal_drive", _params, socket) do
     Context.with_linked_user(socket, fn _settings_user, user_id ->
       case ConnectedDrives.ensure_personal_drive(user_id) do
-        {:ok, _drive} ->
+        {:ok, drive} ->
           {:noreply,
            socket
-           |> Loaders.load_connected_drives()
+           |> maybe_ensure_drive_cursor(drive, true)
+           |> reload_google_workspace_access()
+           |> refresh_manager_drive()
+           |> reconcile_drive_workspace(drive.drive_id)
            |> put_flash(:info, "Connected My Drive.")}
 
         {:error, _reason} ->
@@ -481,10 +517,151 @@ defmodule AssistantWeb.SettingsLive.Events do
         {:noreply,
          socket
          |> Loaders.load_connected_drives()
+         |> refresh_manager_drive()
          |> put_flash(:info, "Drive disconnected.")}
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to disconnect drive.")}
+    end
+  end
+
+  def handle_event("open_drive_scope_manager", params, socket) do
+    with {:ok, drive, socket} <- ensure_drive_for_access(socket, params, :preserve),
+         socket <- assign(socket, :drive_tree_error, nil),
+         {:ok, socket} <- load_drive_tree_root(socket, drive) do
+      {:noreply,
+       socket
+       |> assign(:drive_manager_drive, drive_to_manager_assign(drive))
+       |> seed_drive_scope_draft(drive)
+       |> refresh_manager_drive()}
+    else
+      {:error, :not_connected, socket} ->
+        {:noreply, put_flash(socket, :error, "Connect your Google account first.")}
+
+      {:error, reason, socket} ->
+        {:noreply,
+         socket
+         |> assign(:drive_tree_error, drive_tree_error_message(reason))
+         |> put_flash(:error, "Failed to load drive contents.")}
+    end
+  end
+
+  def handle_event("close_drive_scope_manager", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:drive_manager_drive, nil)
+     |> assign(:drive_tree_nodes, %{})
+     |> assign(:drive_tree_root_keys, [])
+     |> assign(:drive_tree_expanded, MapSet.new())
+     |> assign(:drive_tree_loading, false)
+     |> assign(:drive_tree_loading_nodes, MapSet.new())
+     |> assign(:drive_tree_error, nil)
+     |> assign(:drive_scope_draft_scopes, %{})
+     |> assign(:drive_scope_pending_ops, [])
+     |> assign(:drive_scope_dirty, false)}
+  end
+
+  def handle_event("toggle_drive_tree_node_expanded", %{"node_key" => node_key}, socket) do
+    node = socket.assigns.drive_tree_nodes[node_key]
+    expanded = socket.assigns.drive_tree_expanded || MapSet.new()
+
+    cond do
+      is_nil(node) or node.node_type != "folder" ->
+        {:noreply, socket}
+
+      MapSet.member?(expanded, node_key) ->
+        {:noreply, assign(socket, :drive_tree_expanded, MapSet.delete(expanded, node_key))}
+
+      node.children_loaded? ->
+        {:noreply, assign(socket, :drive_tree_expanded, MapSet.put(expanded, node_key))}
+
+      true ->
+        socket =
+          assign(
+            socket,
+            :drive_tree_loading_nodes,
+            MapSet.put(socket.assigns.drive_tree_loading_nodes, node_key)
+          )
+
+        case load_drive_tree_children(socket, node) do
+          {:ok, socket} ->
+            {:noreply,
+             socket
+             |> assign(
+               :drive_tree_loading_nodes,
+               MapSet.delete(socket.assigns.drive_tree_loading_nodes, node_key)
+             )
+             |> assign(
+               :drive_tree_expanded,
+               MapSet.put(socket.assigns.drive_tree_expanded, node_key)
+             )
+             |> assign(:drive_tree_error, nil)}
+
+          {:error, reason, socket} ->
+            {:noreply,
+             socket
+             |> assign(
+               :drive_tree_loading_nodes,
+               MapSet.delete(socket.assigns.drive_tree_loading_nodes, node_key)
+             )
+             |> assign(:drive_tree_error, drive_tree_error_message(reason))
+             |> put_flash(:error, "Failed to load folder contents.")}
+        end
+    end
+  end
+
+  def handle_event("toggle_drive_tree_node_scope", %{"node_key" => node_key}, socket) do
+    with %{drive_id: _drive_id} = manager_drive when not is_nil(manager_drive) <-
+           socket.assigns[:drive_manager_drive],
+         node when not is_nil(node) <- socket.assigns.drive_tree_nodes[node_key] do
+      {:noreply, update_drive_scope_draft(socket, manager_drive, node)}
+    else
+      nil ->
+        {:noreply, socket}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Failed to update Drive access.")}
+    end
+  end
+
+  def handle_event("save_drive_scope_manager", _params, socket) do
+    with %{drive_id: drive_id} = manager_drive when not is_nil(manager_drive) <-
+           socket.assigns[:drive_manager_drive],
+         user_id when is_binary(user_id) <- Context.current_user_id(socket),
+         {:ok, access_token} <- GoogleAuth.user_token(user_id),
+         :ok <-
+           persist_drive_scope_draft(
+             user_id,
+             access_token,
+             drive_id,
+             socket.assigns.drive_tree_nodes,
+             socket.assigns.drive_scope_pending_ops || []
+           ) do
+      {:noreply,
+       socket
+       |> Loaders.load_sync_scopes()
+       |> refresh_manager_drive()
+       |> reconcile_drive_workspace(drive_id)
+       |> assign(:drive_scope_draft_scopes, %{})
+       |> assign(:drive_scope_pending_ops, [])
+       |> assign(:drive_scope_dirty, false)
+       |> assign(:drive_manager_drive, nil)
+       |> assign(:drive_tree_nodes, %{})
+       |> assign(:drive_tree_root_keys, [])
+       |> assign(:drive_tree_expanded, MapSet.new())
+       |> assign(:drive_tree_loading, false)
+       |> assign(:drive_tree_loading_nodes, MapSet.new())
+       |> assign(:drive_tree_error, nil)
+       |> put_flash(:info, "Drive access updated.")}
+    else
+      {:error, :not_connected} ->
+        {:noreply, put_flash(socket, :error, "Connect your Google account first.")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, drive_tree_error_message(reason))}
+
+      _ ->
+        {:noreply, socket}
     end
   end
 
@@ -561,6 +738,7 @@ defmodule AssistantWeb.SettingsLive.Events do
            |> assign(:sync_target_loading, false)
            |> assign(:sync_target_error, nil)
            |> Loaders.load_sync_scopes()
+           |> reconcile_drive_workspace(drive_id)
            |> put_flash(:info, "Added sync target #{folder_name}.")}
         else
           {:error, :not_connected} ->
@@ -757,6 +935,7 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   def handle_event("toggle_personal_skill", %{"skill" => skill, "enabled" => enabled}, socket) do
     enabled? = enabled == "true"
+    integration_group = socket.assigns[:current_app] && socket.assigns.current_app.integration_group
 
     Context.with_settings_user(socket, fn settings_user ->
       case Context.ensure_linked_user(settings_user) do
@@ -766,7 +945,7 @@ defmodule AssistantWeb.SettingsLive.Events do
               {:noreply,
                socket
                |> reload_current_user_scope()
-               |> Loaders.load_personal_skill_permissions()
+               |> Loaders.load_personal_skill_permissions(integration_group: integration_group)
                |> put_flash(:info, "#{SkillPermissions.skill_label(skill)} updated")}
 
             {:error, _changeset} ->
@@ -1398,6 +1577,773 @@ defmodule AssistantWeb.SettingsLive.Events do
     {:noreply, socket}
   end
 
+  defp reload_google_workspace_access(socket) do
+    socket
+    |> Loaders.load_connected_drives()
+    |> Loaders.load_sync_scopes()
+  end
+
+  defp refresh_manager_drive(socket) do
+    case socket.assigns[:drive_manager_drive] do
+      nil ->
+        socket
+
+      manager_drive ->
+        refreshed =
+          Enum.find(socket.assigns[:connected_drives] || [], fn drive ->
+            drive.drive_type == manager_drive.drive_type and
+              drive.drive_id == manager_drive.drive_id
+          end)
+
+        case refreshed do
+          nil ->
+            assign(socket, :drive_manager_drive, %{
+              manager_drive
+              | connected_id: nil,
+                enabled: false
+            })
+
+          drive ->
+            assign(socket, :drive_manager_drive, drive_to_manager_assign(drive))
+        end
+    end
+  end
+
+  defp drive_to_manager_assign(drive) do
+    %{
+      drive_key: drive_access_key(drive.drive_type, drive.drive_id),
+      drive_id: drive.drive_id,
+      drive_name: drive.drive_name,
+      drive_type: drive.drive_type,
+      connected_id: drive.id,
+      enabled: drive.enabled
+    }
+  end
+
+  defp seed_drive_scope_draft(socket, drive) do
+    drive_scopes =
+      socket.assigns.sync_scopes
+      |> Enum.filter(&scope_in_drive?(&1, drive.drive_id))
+      |> Enum.reduce(%{}, fn scope, acc ->
+        case draft_scope_key(scope) do
+          nil -> acc
+          key -> Map.put(acc, key, draft_scope_from_sync_scope(scope))
+        end
+      end)
+
+    socket
+    |> assign(:drive_scope_draft_scopes, drive_scopes)
+    |> assign(:drive_scope_pending_ops, [])
+    |> assign(:drive_scope_dirty, false)
+  end
+
+  defp ensure_drive_for_access(socket, %{"id" => id} = params, mode)
+       when is_binary(id) and id != "" do
+    case ConnectedDrives.get(id) do
+      nil ->
+        ensure_drive_for_access(socket, Map.delete(params, "id"), mode)
+
+      drive ->
+        case mode do
+          :preserve ->
+            {:ok, drive, socket}
+
+          enabled? when is_boolean(enabled?) and drive.enabled != enabled? ->
+            case ConnectedDrives.toggle(id, enabled?) do
+              {:ok, updated_drive} -> {:ok, updated_drive, socket}
+              {:error, reason} -> {:error, reason, socket}
+            end
+
+          _ ->
+            {:ok, drive, socket}
+        end
+    end
+  end
+
+  defp ensure_drive_for_access(socket, params, mode) do
+    case Context.current_settings_user(socket) do
+      nil ->
+        {:error, :not_connected, socket}
+
+      settings_user ->
+        with {:ok, user_id} <- Context.ensure_linked_user(settings_user),
+             attrs <- drive_attrs_from_params(params, mode),
+             {:ok, drive} <- ConnectedDrives.connect(user_id, attrs) do
+          {:ok, drive, reload_current_user_scope(socket)}
+        else
+          {:error, reason} -> {:error, reason, socket}
+        end
+    end
+  end
+
+  defp drive_attrs_from_params(params, mode) do
+    drive_id =
+      params
+      |> Map.get("drive_id")
+      |> normalize_sync_drive_id()
+
+    drive_type =
+      case Map.get(params, "drive_type") do
+        "shared" -> "shared"
+        _ when is_nil(drive_id) -> "personal"
+        _ -> "shared"
+      end
+
+    enabled? =
+      case mode do
+        :preserve -> false
+        value when is_boolean(value) -> value
+      end
+
+    %{
+      drive_id: drive_id,
+      drive_name:
+        Map.get(
+          params,
+          "drive_name",
+          if(drive_type == "personal", do: "My Drive", else: "Shared Drive")
+        ),
+      drive_type: drive_type,
+      enabled: enabled?
+    }
+  end
+
+  defp load_drive_tree_root(socket, drive) do
+    socket =
+      socket
+      |> assign(:drive_tree_loading, true)
+      |> assign(:drive_tree_error, nil)
+      |> assign(:drive_tree_nodes, %{})
+      |> assign(:drive_tree_root_keys, [])
+      |> assign(:drive_tree_expanded, MapSet.new())
+      |> assign(:drive_tree_loading_nodes, MapSet.new())
+
+    with user_id when is_binary(user_id) <- Context.current_user_id(socket),
+         {:ok, access_token} <- GoogleAuth.user_token(user_id),
+         {:ok, children} <- list_drive_children(access_token, drive.drive_id, :root) do
+      {nodes, root_keys} = merge_drive_tree_children(%{}, nil, children)
+
+      {:ok,
+       socket
+       |> assign(:drive_tree_nodes, nodes)
+       |> assign(:drive_tree_root_keys, root_keys)
+       |> assign(:drive_tree_loading, false)}
+    else
+      {:error, reason} ->
+        {:error, reason, assign(socket, :drive_tree_loading, false)}
+
+      _ ->
+        {:error, :not_connected, assign(socket, :drive_tree_loading, false)}
+    end
+  end
+
+  defp load_drive_tree_children(socket, node) do
+    with %{drive_id: drive_id} <- socket.assigns[:drive_manager_drive],
+         user_id when is_binary(user_id) <- Context.current_user_id(socket),
+         {:ok, access_token} <- GoogleAuth.user_token(user_id),
+         {:ok, children} <- list_drive_children(access_token, drive_id, node.id) do
+      {nodes, _child_keys} =
+        merge_drive_tree_children(socket.assigns.drive_tree_nodes, node.key, children)
+
+      {:ok, assign(socket, :drive_tree_nodes, nodes)}
+    else
+      {:error, reason} -> {:error, reason, socket}
+      _ -> {:error, :not_connected, socket}
+    end
+  end
+
+  defp list_drive_children(access_token, drive_id, parent_id) do
+    query = drive_children_query(drive_id, parent_id)
+
+    case drive_module().list_files(access_token, query, drive_children_query_opts(drive_id)) do
+      {:ok, files} -> {:ok, sort_drive_items(files)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp merge_drive_tree_children(nodes, parent_key, children) do
+    Enum.reduce(children, {nodes, []}, fn child, {acc_nodes, child_keys} ->
+      node_key = drive_tree_node_key(child)
+      existing = Map.get(acc_nodes, node_key, %{})
+      folder? = drive_folder?(child.mime_type)
+
+      node =
+        existing
+        |> Map.merge(%{
+          key: node_key,
+          id: child.id,
+          name: child.name,
+          mime_type: child.mime_type,
+          node_type: if(folder?, do: "folder", else: "file"),
+          file_kind: drive_file_kind(child.mime_type),
+          parent_key: parent_key
+        })
+        |> Map.put_new(:child_keys, [])
+        |> Map.put(
+          :children_loaded?,
+          if(folder?, do: Map.get(existing, :children_loaded?, false), else: true)
+        )
+
+      {Map.put(acc_nodes, node_key, node), child_keys ++ [node_key]}
+    end)
+    |> then(fn {updated_nodes, child_keys} ->
+      nodes_with_parent =
+        case parent_key do
+          nil ->
+            updated_nodes
+
+          _ ->
+            update_in(updated_nodes[parent_key], fn parent ->
+              parent
+              |> Map.put(:child_keys, child_keys)
+              |> Map.put(:children_loaded?, true)
+            end)
+        end
+
+      {nodes_with_parent, child_keys}
+    end)
+  end
+
+  defp update_drive_scope_draft(socket, manager_drive, node) do
+    draft_scopes = socket.assigns.drive_scope_draft_scopes || %{}
+    tree_nodes = socket.assigns.drive_tree_nodes || %{}
+
+    {inherited_selected?, currently_selected?} =
+      tree_node_selection_from_draft(draft_scopes, tree_nodes, node)
+
+    desired_selected? = !currently_selected?
+
+    updated_scopes =
+      draft_scopes
+      |> clear_loaded_descendant_draft_scopes(node, tree_nodes)
+      |> persist_draft_explicit_scope(
+        manager_drive.drive_id,
+        tree_nodes,
+        node,
+        inherited_selected?,
+        desired_selected?
+      )
+
+    pending_ops = socket.assigns.drive_scope_pending_ops || []
+
+    socket
+    |> assign(:drive_scope_draft_scopes, updated_scopes)
+    |> assign(
+      :drive_scope_pending_ops,
+      pending_ops ++ [%{node_key: node.key, desired_selected?: desired_selected?}]
+    )
+    |> assign(:drive_scope_dirty, true)
+  end
+
+  defp maybe_clear_descendant_scopes(_user_id, _access_token, _drive_id, %{node_type: "file"}),
+    do: :ok
+
+  defp maybe_clear_descendant_scopes(user_id, access_token, drive_id, %{
+         node_type: "folder",
+         id: folder_id
+       }) do
+    with {:ok, descendants} <- fetch_subtree_descendants(access_token, drive_id, folder_id) do
+      _ =
+        StateStore.delete_scopes_in_targets(
+          user_id,
+          drive_id,
+          descendants.folder_ids,
+          descendants.file_ids
+        )
+
+      :ok
+    end
+  end
+
+  defp persist_explicit_scope(
+         user_id,
+         drive_id,
+         tree_nodes,
+         node,
+         existing_scope,
+         inherited_selected?,
+         desired_selected?
+       ) do
+    if desired_selected? == inherited_selected? do
+      case existing_scope do
+        nil ->
+          :ok
+
+        scope ->
+          case StateStore.delete_scope(scope) do
+            {:ok, _} -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+      end
+    else
+      attrs =
+        %{
+          user_id: user_id,
+          drive_id: drive_id,
+          access_level: "read_write",
+          scope_effect: if(desired_selected?, do: "include", else: "exclude")
+        }
+        |> Map.merge(node_scope_attrs(node, tree_nodes))
+
+      case StateStore.upsert_scope(attrs) do
+        {:ok, _scope} -> :ok
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  defp persist_drive_scope_draft(_user_id, _access_token, _drive_id, _tree_nodes, []), do: :ok
+
+  defp persist_drive_scope_draft(user_id, access_token, drive_id, tree_nodes, operations) do
+    Enum.reduce_while(operations, :ok, fn operation, :ok ->
+      case persist_drive_scope_operation(user_id, access_token, drive_id, tree_nodes, operation) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp persist_drive_scope_operation(user_id, access_token, drive_id, tree_nodes, operation) do
+    case tree_nodes[operation.node_key] do
+      nil ->
+        :ok
+
+      node ->
+        sync_scopes = StateStore.list_scopes(user_id, drive_id: drive_scope_filter(drive_id))
+
+        {inherited_selected?, _currently_selected?} =
+          tree_node_selection_from_scopes(sync_scopes, tree_nodes, node, drive_id)
+
+        explicit_scope = explicit_scope_for_node(user_id, drive_id, node)
+
+        with :ok <- maybe_clear_descendant_scopes(user_id, access_token, drive_id, node),
+             :ok <-
+               persist_explicit_scope(
+                 user_id,
+                 drive_id,
+                 tree_nodes,
+                 node,
+                 explicit_scope,
+                 inherited_selected?,
+                 operation.desired_selected?
+               ) do
+          :ok
+        end
+    end
+  end
+
+  defp node_scope_attrs(%{node_type: "folder", id: folder_id, name: folder_name}, _nodes) do
+    %{folder_id: folder_id}
+    |> Map.put(:folder_name, folder_name)
+  end
+
+  defp node_scope_attrs(
+         %{node_type: "file", id: file_id, name: file_name, mime_type: mime_type} = node,
+         nodes
+       ) do
+    %{
+      folder_id: parent_folder_id(node),
+      folder_name: node_folder_name(node, nodes),
+      file_id: file_id,
+      file_name: file_name,
+      file_mime_type: mime_type
+    }
+  end
+
+  defp parent_folder_id(%{parent_key: nil}), do: nil
+
+  defp parent_folder_id(%{parent_key: parent_key} = _node) do
+    case parent_key do
+      "folder:" <> folder_id -> folder_id
+      _ -> nil
+    end
+  end
+
+  defp node_folder_name(%{parent_key: nil, name: name}, _nodes), do: name
+
+  defp node_folder_name(%{parent_key: parent_key, name: name}, nodes) do
+    case Map.get(nodes, parent_key) do
+      %{name: parent_name} -> parent_name
+      _ -> name
+    end
+  end
+
+  defp explicit_scope_for_node(user_id, drive_id, %{node_type: "folder", id: folder_id}) do
+    StateStore.get_scope(user_id, drive_id, folder_id)
+  end
+
+  defp explicit_scope_for_node(user_id, drive_id, %{node_type: "file", id: file_id}) do
+    StateStore.get_file_scope(user_id, drive_id, file_id)
+  end
+
+  defp tree_node_selection_from_draft(draft_scopes, tree_nodes, node) do
+    inherited_selected? =
+      node_ancestor_chain(tree_nodes, node)
+      |> Enum.reduce(false, fn ancestor, acc ->
+        case draft_explicit_effect_for_tree_node(draft_scopes, ancestor) do
+          "include" -> true
+          "exclude" -> false
+          nil -> acc
+        end
+      end)
+
+    current_selected? =
+      case draft_explicit_effect_for_tree_node(draft_scopes, node) do
+        "include" -> true
+        "exclude" -> false
+        nil -> inherited_selected?
+      end
+
+    {inherited_selected?, current_selected?}
+  end
+
+  defp tree_node_selection_from_scopes(sync_scopes, tree_nodes, node, drive_id) do
+    inherited_selected? =
+      node_ancestor_chain(tree_nodes, node)
+      |> Enum.reduce(false, fn ancestor, acc ->
+        case explicit_effect_for_tree_node(sync_scopes, drive_id, ancestor) do
+          "include" -> true
+          "exclude" -> false
+          nil -> acc
+        end
+      end)
+
+    current_selected? =
+      case explicit_effect_for_tree_node(sync_scopes, drive_id, node) do
+        "include" -> true
+        "exclude" -> false
+        nil -> inherited_selected?
+      end
+
+    {inherited_selected?, current_selected?}
+  end
+
+  defp node_ancestor_chain(nodes, node) do
+    do_node_ancestor_chain(nodes, node.parent_key, [])
+  end
+
+  defp do_node_ancestor_chain(_nodes, nil, acc), do: Enum.reverse(acc)
+
+  defp do_node_ancestor_chain(nodes, parent_key, acc) do
+    parent = Map.get(nodes, parent_key)
+
+    case parent do
+      nil -> Enum.reverse(acc)
+      _ -> do_node_ancestor_chain(nodes, parent.parent_key, [parent | acc])
+    end
+  end
+
+  defp explicit_effect_for_tree_node(sync_scopes, drive_id, %{node_type: "folder", id: folder_id}) do
+    case Enum.find(
+           sync_scopes,
+           &(&1.drive_id == drive_id and &1.scope_type == "folder" and &1.folder_id == folder_id)
+         ) do
+      nil -> nil
+      scope -> scope.scope_effect
+    end
+  end
+
+  defp explicit_effect_for_tree_node(sync_scopes, drive_id, %{node_type: "file", id: file_id}) do
+    case Enum.find(
+           sync_scopes,
+           &(&1.drive_id == drive_id and &1.scope_type == "file" and &1.file_id == file_id)
+         ) do
+      nil -> nil
+      scope -> scope.scope_effect
+    end
+  end
+
+  defp draft_explicit_effect_for_tree_node(draft_scopes, %{key: key}) do
+    case Map.get(draft_scopes, key) do
+      nil -> nil
+      scope -> scope.scope_effect
+    end
+  end
+
+  defp clear_loaded_descendant_draft_scopes(draft_scopes, %{node_type: "file"}, _tree_nodes),
+    do: draft_scopes
+
+  defp clear_loaded_descendant_draft_scopes(draft_scopes, node, tree_nodes) do
+    loaded_descendant_node_keys(tree_nodes, node)
+    |> Enum.reduce(draft_scopes, &Map.delete(&2, &1))
+  end
+
+  defp loaded_descendant_node_keys(tree_nodes, node) do
+    (node.child_keys || [])
+    |> Enum.flat_map(fn child_key ->
+      case tree_nodes[child_key] do
+        nil -> []
+        child -> [child.key | loaded_descendant_node_keys(tree_nodes, child)]
+      end
+    end)
+  end
+
+  defp persist_draft_explicit_scope(
+         draft_scopes,
+         drive_id,
+         tree_nodes,
+         node,
+         inherited_selected?,
+         desired_selected?
+       ) do
+    if desired_selected? == inherited_selected? do
+      Map.delete(draft_scopes, node.key)
+    else
+      Map.put(
+        draft_scopes,
+        node.key,
+        %{
+          drive_id: drive_id,
+          scope_type: node.node_type,
+          scope_effect: if(desired_selected?, do: "include", else: "exclude")
+        }
+        |> Map.merge(node_scope_attrs(node, tree_nodes))
+      )
+    end
+  end
+
+  defp draft_scope_key(%{scope_type: "folder", folder_id: folder_id}) when is_binary(folder_id),
+    do: "folder:#{folder_id}"
+
+  defp draft_scope_key(%{scope_type: "file", file_id: file_id}) when is_binary(file_id),
+    do: "file:#{file_id}"
+
+  defp draft_scope_key(_scope), do: nil
+
+  defp draft_scope_from_sync_scope(scope) do
+    %{
+      drive_id: scope.drive_id,
+      scope_type: scope.scope_type,
+      scope_effect: scope.scope_effect,
+      folder_id: scope.folder_id,
+      folder_name: scope.folder_name,
+      file_id: scope.file_id,
+      file_name: scope.file_name,
+      file_mime_type: scope.file_mime_type
+    }
+  end
+
+  defp scope_in_drive?(scope, drive_id), do: scope.drive_id == drive_id
+
+  defp drive_scope_filter(nil), do: :personal
+  defp drive_scope_filter(drive_id), do: drive_id
+
+  defp fetch_subtree_descendants(access_token, drive_id, folder_id) do
+    do_fetch_subtree_descendants(access_token, drive_id, [folder_id], MapSet.new(), MapSet.new())
+  end
+
+  defp do_fetch_subtree_descendants(_access_token, _drive_id, [], folder_ids, file_ids) do
+    {:ok, %{folder_ids: MapSet.to_list(folder_ids), file_ids: MapSet.to_list(file_ids)}}
+  end
+
+  defp do_fetch_subtree_descendants(
+         access_token,
+         drive_id,
+         [folder_id | rest],
+         folder_ids,
+         file_ids
+       ) do
+    with {:ok, children} <- list_drive_children(access_token, drive_id, folder_id) do
+      {child_folders, child_files} = Enum.split_with(children, &drive_folder?(&1.mime_type))
+
+      next_queue = rest ++ Enum.map(child_folders, & &1.id)
+      next_folder_ids = Enum.reduce(child_folders, folder_ids, &MapSet.put(&2, &1.id))
+      next_file_ids = Enum.reduce(child_files, file_ids, &MapSet.put(&2, &1.id))
+
+      do_fetch_subtree_descendants(
+        access_token,
+        drive_id,
+        next_queue,
+        next_folder_ids,
+        next_file_ids
+      )
+    end
+  end
+
+  defp drive_children_query(nil, :root), do: "'root' in parents and trashed=false"
+
+  defp drive_children_query(drive_id, :root) when is_binary(drive_id),
+    do: "'#{drive_id}' in parents and trashed=false"
+
+  defp drive_children_query(_drive_id, parent_id),
+    do: "'#{parent_id}' in parents and trashed=false"
+
+  defp drive_children_query_opts(nil) do
+    [
+      pageSize: 200,
+      orderBy: "name",
+      corpora: "user",
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true
+    ]
+  end
+
+  defp drive_children_query_opts(drive_id) do
+    [
+      pageSize: 200,
+      orderBy: "name",
+      corpora: "drive",
+      driveId: drive_id,
+      includeItemsFromAllDrives: true,
+      supportsAllDrives: true
+    ]
+  end
+
+  defp sort_drive_items(items) do
+    Enum.sort_by(items, fn item ->
+      {
+        if(drive_folder?(item.mime_type), do: 0, else: 1),
+        String.downcase(item.name || "")
+      }
+    end)
+  end
+
+  defp drive_tree_node_key(%{mime_type: mime_type, id: id}) do
+    if drive_folder?(mime_type), do: "folder:#{id}", else: "file:#{id}"
+  end
+
+  defp drive_access_key("personal", _drive_id), do: "personal"
+  defp drive_access_key(_drive_type, drive_id), do: "drive:#{drive_id}"
+
+  defp drive_folder?("application/vnd.google-apps.folder"), do: true
+  defp drive_folder?(_), do: false
+
+  defp drive_file_kind("application/vnd.google-apps.document"), do: "doc"
+  defp drive_file_kind("application/vnd.google-apps.spreadsheet"), do: "sheet"
+  defp drive_file_kind("application/vnd.google-apps.presentation"), do: "slides"
+  defp drive_file_kind("application/pdf"), do: "pdf"
+
+  defp drive_file_kind(mime_type) when is_binary(mime_type) do
+    if String.starts_with?(mime_type, "image/"), do: "image", else: "file"
+  end
+
+  defp drive_file_kind(_), do: "file"
+
+  defp drive_tree_error_message(:not_connected), do: "Connect your Google account first."
+  defp drive_tree_error_message(:not_found), do: "Drive item not found."
+  defp drive_tree_error_message(_), do: "Unable to update Drive access."
+
+  defp drive_module do
+    Application.get_env(:assistant, :google_drive_module, GoogleDrive)
+  end
+
+  defp file_sync_worker_module do
+    Application.get_env(:assistant, :google_drive_file_sync_worker_module, FileSyncWorker)
+  end
+
+  defp reconcile_drive_workspace(socket, drive_id) do
+    with user_id when is_binary(user_id) <- Context.current_user_id(socket),
+         {:ok, access_token} <- GoogleAuth.user_token(user_id) do
+      prune_revoked_drive_files(user_id, access_token, drive_id)
+      backfill_accessible_drive_files(user_id, access_token, drive_id)
+      socket
+    else
+      _ -> socket
+    end
+  end
+
+  defp prune_revoked_drive_files(user_id, access_token, drive_id) do
+    user_id
+    |> synced_files_for_drive(drive_id)
+    |> Enum.each(fn synced_file ->
+      case drive_module().get_file(access_token, synced_file.drive_file_id) do
+        {:ok, remote_file} ->
+          unless drive_file_accessible?(user_id, drive_id, remote_file) do
+            _ = FileManager.delete_file(user_id, synced_file.local_path)
+            _ = StateStore.delete_synced_file(synced_file)
+          end
+
+        {:error, :not_found} ->
+          _ = FileManager.delete_file(user_id, synced_file.local_path)
+          _ = StateStore.delete_synced_file(synced_file)
+
+        {:error, _reason} ->
+          :ok
+      end
+    end)
+  end
+
+  defp backfill_accessible_drive_files(user_id, access_token, drive_id) do
+    existing_ids =
+      user_id
+      |> synced_files_for_drive(drive_id)
+      |> MapSet.new(& &1.drive_file_id)
+
+    access_token
+    |> list_all_drive_files(drive_id)
+    |> Enum.reject(&MapSet.member?(existing_ids, &1.id))
+    |> Enum.filter(&drive_file_accessible?(user_id, drive_id, &1))
+    |> Enum.each(fn remote_file ->
+      args = %{
+        action: "upsert",
+        user_id: user_id,
+        drive_id: drive_id,
+        drive_file_id: remote_file.id,
+        access_token: access_token,
+        change: %{
+          file_id: remote_file.id,
+          name: remote_file.name,
+          mime_type: remote_file.mime_type,
+          modified_time: Map.get(remote_file, :modified_time),
+          size: Map.get(remote_file, :size),
+          parents: remote_file.parents || []
+        }
+      }
+
+      _ = args |> file_sync_worker_module().new() |> Oban.insert()
+    end)
+  end
+
+  defp synced_files_for_drive(user_id, nil),
+    do: StateStore.list_synced_files(user_id, drive_id: :personal)
+
+  defp synced_files_for_drive(user_id, drive_id),
+    do: StateStore.list_synced_files(user_id, drive_id: drive_id)
+
+  defp drive_file_accessible?(user_id, drive_id, remote_file) do
+    ConnectedDrives.enabled?(user_id, drive_id) or
+      StateStore.file_in_scope?(
+        user_id,
+        drive_id,
+        first_parent_from_metadata(remote_file),
+        remote_file.id
+      ) != nil
+  end
+
+  defp first_parent_from_metadata(%{parents: [parent | _]}), do: parent
+  defp first_parent_from_metadata(%{"parents" => [parent | _]}), do: parent
+  defp first_parent_from_metadata(_), do: nil
+
+  defp list_all_drive_files(access_token, drive_id) do
+    do_list_all_drive_files(access_token, drive_id, [:root], [], MapSet.new())
+  end
+
+  defp do_list_all_drive_files(_access_token, _drive_id, [], files, _seen_folders), do: files
+
+  defp do_list_all_drive_files(access_token, drive_id, [parent_id | rest], files, seen_folders) do
+    folder_key = {drive_id, parent_id}
+
+    if MapSet.member?(seen_folders, folder_key) do
+      do_list_all_drive_files(access_token, drive_id, rest, files, seen_folders)
+    else
+      children =
+        case list_drive_children(access_token, drive_id, parent_id) do
+          {:ok, items} -> items
+          {:error, _reason} -> []
+        end
+
+      {folders, regular_files} = Enum.split_with(children, &drive_folder?(&1.mime_type))
+
+      do_list_all_drive_files(
+        access_token,
+        drive_id,
+        rest ++ Enum.map(folders, & &1.id),
+        files ++ regular_files,
+        MapSet.put(seen_folders, folder_key)
+      )
+    end
+  end
+
   defp sync_target_drives(socket) do
     socket.assigns[:connected_drives]
     |> List.wrap()
@@ -1470,6 +2416,26 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   defp drive_changes_module do
     Application.get_env(:assistant, :google_drive_changes_module, Changes)
+  end
+
+  defp maybe_ensure_drive_cursor(socket, _drive, false), do: socket
+
+  defp maybe_ensure_drive_cursor(socket, drive, true) do
+    with %{user_id: user_id} when is_binary(user_id) <- drive,
+         {:ok, access_token} <- GoogleAuth.user_token(user_id),
+         {:ok, token} <-
+           drive_changes_module().get_start_page_token(access_token, drive_id: drive.drive_id) do
+      _ =
+        StateStore.upsert_cursor(%{
+          user_id: user_id,
+          drive_id: drive.drive_id,
+          start_page_token: token
+        })
+
+      socket
+    else
+      _ -> socket
+    end
   end
 
   defp sync_folder_query_opts(nil) do

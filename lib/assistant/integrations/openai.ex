@@ -676,7 +676,8 @@ defmodule Assistant.Integrations.OpenAI do
 
   defp oauth_token_expired?(_), do: false
 
-  defp build_codex_request_body(messages, opts) do
+  @doc false
+  def build_codex_request_body(messages, opts) do
     case Keyword.fetch(opts, :model) do
       {:ok, model} ->
         sanitized = sanitize_messages(messages)
@@ -719,12 +720,14 @@ defmodule Assistant.Integrations.OpenAI do
       &(Map.get(&1, :role) in ["system", :system] or Map.get(&1, "role") == "system")
     )
     |> Enum.map(fn msg ->
+      content = codex_content(msg)
+
       %{
         role: normalize_role(Map.get(msg, :role) || Map.get(msg, "role")),
-        content: message_text(msg)
+        content: content
       }
     end)
-    |> Enum.reject(&(blank_to_nil(&1.content) == nil))
+    |> Enum.reject(&codex_message_blank?/1)
   end
 
   defp message_text(%{} = msg) do
@@ -755,6 +758,101 @@ defmodule Assistant.Integrations.OpenAI do
   defp normalize_role(role) when role in [:assistant, "assistant"], do: "assistant"
   defp normalize_role(role) when role in [:tool, "tool"], do: "tool"
   defp normalize_role(_), do: "user"
+
+  defp codex_content(%{} = msg) do
+    case Map.get(msg, :content) || Map.get(msg, "content") do
+      content when is_binary(content) ->
+        [%{type: "input_text", text: content}]
+
+      content when is_list(content) ->
+        content
+        |> Enum.map(&codex_content_part/1)
+        |> Enum.reject(&is_nil/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp codex_content_part(%{"type" => "input_text", "text" => text}) when is_binary(text),
+    do: %{type: "input_text", text: text}
+
+  defp codex_content_part(%{type: "input_text", text: text}) when is_binary(text),
+    do: %{type: "input_text", text: text}
+
+  defp codex_content_part(%{"type" => "text", "text" => text}) when is_binary(text),
+    do: %{type: "input_text", text: text}
+
+  defp codex_content_part(%{type: "text", text: text}) when is_binary(text),
+    do: %{type: "input_text", text: text}
+
+  defp codex_content_part(%{"type" => "input_image", "image_url" => url}) when is_binary(url),
+    do: %{type: "input_image", image_url: url}
+
+  defp codex_content_part(%{type: "input_image", image_url: url}) when is_binary(url),
+    do: %{type: "input_image", image_url: url}
+
+  defp codex_content_part(%{"type" => "image_url", "image_url" => %{"url" => url}})
+       when is_binary(url),
+       do: %{type: "input_image", image_url: url}
+
+  defp codex_content_part(%{type: "image_url", image_url: %{url: url}}) when is_binary(url),
+    do: %{type: "input_image", image_url: url}
+
+  defp codex_content_part(%{"type" => "input_file"} = part), do: codex_input_file_part(part)
+  defp codex_content_part(%{type: "input_file"} = part), do: codex_input_file_part(part)
+
+  defp codex_content_part(%{"type" => "file", "file" => file}) when is_map(file),
+    do: codex_file_part(file)
+
+  defp codex_content_part(%{type: "file", file: file}) when is_map(file),
+    do: codex_file_part(file)
+
+  defp codex_content_part(other) when is_binary(other),
+    do: %{type: "input_text", text: other}
+
+  defp codex_content_part(_), do: nil
+
+  defp codex_input_file_part(part) when is_map(part) do
+    filename = Map.get(part, "filename") || Map.get(part, :filename)
+    file_data = Map.get(part, "file_data") || Map.get(part, :file_data)
+    file_id = Map.get(part, "file_id") || Map.get(part, :file_id)
+
+    cond do
+      is_binary(file_data) and file_data != "" ->
+        %{type: "input_file", filename: filename, file_data: file_data}
+
+      is_binary(file_id) and file_id != "" ->
+        %{type: "input_file", file_id: file_id}
+
+      true ->
+        nil
+    end
+  end
+
+  defp codex_file_part(file) do
+    filename = Map.get(file, "filename") || Map.get(file, :filename)
+    file_data = Map.get(file, "file_data") || Map.get(file, :file_data)
+    file_id = Map.get(file, "file_id") || Map.get(file, :file_id)
+
+    cond do
+      is_binary(file_data) and file_data != "" ->
+        %{type: "input_file", filename: filename, file_data: file_data}
+
+      is_binary(file_id) and file_id != "" ->
+        %{type: "input_file", file_id: file_id}
+
+      true ->
+        nil
+    end
+  end
+
+  defp codex_message_blank?(%{content: content}) when is_list(content), do: content == []
+
+  defp codex_message_blank?(%{content: content}) when is_binary(content),
+    do: blank_to_nil(content) == nil
+
+  defp codex_message_blank?(_), do: true
 
   defp maybe_put_instructions(body, nil), do: body
   defp maybe_put_instructions(body, instructions), do: Map.put(body, :instructions, instructions)

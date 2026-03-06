@@ -78,7 +78,9 @@ defmodule Assistant.ModelDefaultsTest do
   describe "save_defaults/2" do
     test "returns :not_authorized for non-admin" do
       user = settings_user_fixture()
-      assert ModelDefaults.save_defaults(user, %{"orchestrator" => "some/model"}) == {:error, :not_authorized}
+
+      assert ModelDefaults.save_defaults(user, %{"orchestrator" => "some/model"}) ==
+               {:error, :not_authorized}
     end
 
     test "succeeds for admin" do
@@ -105,7 +107,12 @@ defmodule Assistant.ModelDefaultsTest do
 
     test "unknown role keys are silently ignored" do
       admin = admin_settings_user_fixture()
-      :ok = save_and_warm_cache([admin, %{"unknown_role" => "some/model", "orchestrator" => "openai/gpt-5-mini"}])
+
+      :ok =
+        save_and_warm_cache([
+          admin,
+          %{"unknown_role" => "some/model", "orchestrator" => "openai/gpt-5-mini"}
+        ])
 
       defaults = ModelDefaults.global_defaults()
       assert Map.get(defaults, "orchestrator") == "openai/gpt-5-mini"
@@ -118,7 +125,8 @@ defmodule Assistant.ModelDefaultsTest do
       admin = admin_settings_user_fixture()
       target = settings_user_fixture()
 
-      assert ModelDefaults.save_defaults(admin, target, %{"orchestrator" => "openai/gpt-5-mini"}) == :ok
+      assert ModelDefaults.save_defaults(admin, target, %{"orchestrator" => "openai/gpt-5-mini"}) ==
+               :ok
 
       user_defaults = ModelDefaults.user_defaults(Repo.reload!(target))
       assert Map.get(user_defaults, "orchestrator") == "openai/gpt-5-mini"
@@ -128,14 +136,16 @@ defmodule Assistant.ModelDefaultsTest do
       actor = settings_user_fixture()
       target = settings_user_fixture()
 
-      assert ModelDefaults.save_defaults(actor, target, %{"orchestrator" => "some/model"}) == {:error, :not_authorized}
+      assert ModelDefaults.save_defaults(actor, target, %{"orchestrator" => "some/model"}) ==
+               {:error, :not_authorized}
     end
 
     test "self-edit delegates to save_defaults/2" do
       admin = admin_settings_user_fixture()
 
       # Admin editing themselves goes through save_defaults/2 (global path)
-      assert ModelDefaults.save_defaults(admin, admin, %{"orchestrator" => "openai/gpt-5-mini"}) == :ok
+      assert ModelDefaults.save_defaults(admin, admin, %{"orchestrator" => "openai/gpt-5-mini"}) ==
+               :ok
     end
   end
 
@@ -156,7 +166,8 @@ defmodule Assistant.ModelDefaultsTest do
       :ok = save_and_warm_cache([admin, %{"orchestrator" => "openai/gpt-5-mini"}])
 
       # Set user override for a different role (user overrides go to settings_users, no cache issue)
-      :ok = ModelDefaults.save_defaults(admin, target, %{"sub_agent" => "anthropic/claude-sonnet-4.6"})
+      :ok =
+        ModelDefaults.save_defaults(admin, target, %{"sub_agent" => "anthropic/claude-sonnet-4.6"})
 
       effective = ModelDefaults.effective_defaults(Repo.reload!(target))
 
@@ -171,7 +182,11 @@ defmodule Assistant.ModelDefaultsTest do
       target = settings_user_fixture()
 
       :ok = save_and_warm_cache([admin, %{"orchestrator" => "openai/gpt-5-mini"}])
-      :ok = ModelDefaults.save_defaults(admin, target, %{"orchestrator" => "anthropic/claude-sonnet-4.6"})
+
+      :ok =
+        ModelDefaults.save_defaults(admin, target, %{
+          "orchestrator" => "anthropic/claude-sonnet-4.6"
+        })
 
       effective = ModelDefaults.effective_defaults(Repo.reload!(target))
       assert Map.get(effective, "orchestrator") == "anthropic/claude-sonnet-4.6"

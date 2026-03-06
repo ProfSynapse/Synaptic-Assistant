@@ -43,6 +43,7 @@ defmodule Assistant.Config.Loader do
   require Logger
 
   @ets_table :assistant_config
+  @input_modalities ~w(text image document audio)a
 
   # --- Public API (read from ETS, no GenServer call) ---
 
@@ -168,6 +169,29 @@ defmodule Assistant.Config.Loader do
   def models_by_tier(tier) do
     [{:models, models}] = :ets.lookup(@ets_table, :models)
     Enum.filter(models, fn model -> model.tier == tier end)
+  end
+
+  @doc """
+  Returns true when a model declares support for a given input modality.
+
+  Supported modalities are `:text`, `:image`, `:document`, and `:audio`.
+  Models default to `[:text]` when `input_modalities` is omitted from config.
+  """
+  @spec model_supports_input?(map() | nil, atom()) :: boolean()
+  def model_supports_input?(%{input_modalities: input_modalities}, modality)
+      when modality in @input_modalities and is_list(input_modalities) do
+    modality in input_modalities
+  end
+
+  def model_supports_input?(_model, _modality), do: false
+
+  @doc """
+  Returns all configured models that support the given input modality.
+  """
+  @spec models_supporting_input(atom()) :: [map()]
+  def models_supporting_input(modality) when modality in @input_modalities do
+    all_models()
+    |> Enum.filter(&model_supports_input?(&1, modality))
   end
 
   @doc """
@@ -352,6 +376,7 @@ defmodule Assistant.Config.Loader do
           tier: String.to_atom(model["tier"]),
           description: model["description"],
           use_cases: Enum.map(model["use_cases"] || [], &String.to_atom/1),
+          input_modalities: parse_input_modalities(model["input_modalities"]),
           supports_tools: model["supports_tools"] || false,
           max_context_tokens: model["max_context_tokens"],
           cost_tier: String.to_atom(model["cost_tier"])
@@ -460,4 +485,31 @@ defmodule Assistant.Config.Loader do
         {:error, {:invalid_field, key, other}}
     end
   end
+
+  defp parse_input_modalities(nil), do: [:text]
+
+  defp parse_input_modalities(values) when is_list(values) do
+    values
+    |> Enum.map(&normalize_input_modality/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> case do
+      [] -> [:text]
+      parsed -> parsed
+    end
+  end
+
+  defp parse_input_modalities(_), do: [:text]
+
+  defp normalize_input_modality(value) when is_binary(value) do
+    case String.downcase(String.trim(value)) do
+      "text" -> :text
+      "image" -> :image
+      "document" -> :document
+      "audio" -> :audio
+      _ -> nil
+    end
+  end
+
+  defp normalize_input_modality(_), do: nil
 end

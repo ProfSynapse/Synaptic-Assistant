@@ -124,6 +124,21 @@ defmodule Assistant.Sync.Workers.SyncPollWorkerTest do
 
       assert StateStore.folder_in_scope?(user.id, nil, "folder-123") != nil
     end
+
+    test "exact file scopes are treated as in scope", %{user: user} do
+      {:ok, _} =
+        StateStore.upsert_scope(%{
+          user_id: user.id,
+          drive_id: nil,
+          folder_id: "folder-123",
+          folder_name: "Projects",
+          file_id: "file-123",
+          file_name: "Roadmap",
+          file_mime_type: "application/pdf"
+        })
+
+      assert StateStore.file_in_scope?(user.id, nil, "folder-123", "file-123") != nil
+    end
   end
 
   # ---------------------------------------------------------------

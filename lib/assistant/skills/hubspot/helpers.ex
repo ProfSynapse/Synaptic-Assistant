@@ -178,9 +178,15 @@ defmodule Assistant.Skills.HubSpot.Helpers do
 
   def parse_properties_json(json_string) when is_binary(json_string) do
     case Jason.decode(json_string) do
-      {:ok, map} when is_map(map) -> {:ok, map}
-      {:ok, _} -> {:error, "The --properties flag must be a JSON object (e.g. '{\"jobtitle\": \"CTO\"}')."}
-      {:error, _} -> {:error, "Invalid JSON in --properties flag. Use valid JSON (e.g. '{\"jobtitle\": \"CTO\"}')."}
+      {:ok, map} when is_map(map) ->
+        {:ok, map}
+
+      {:ok, _} ->
+        {:error, "The --properties flag must be a JSON object (e.g. '{\"jobtitle\": \"CTO\"}')."}
+
+      {:error, _} ->
+        {:error,
+         "Invalid JSON in --properties flag. Use valid JSON (e.g. '{\"jobtitle\": \"CTO\"}')."}
     end
   end
 
@@ -195,7 +201,8 @@ defmodule Assistant.Skills.HubSpot.Helpers do
   Standard error result for missing HubSpot integration.
   """
   def integration_not_configured do
-    {:ok, %Assistant.Skills.Result{status: :error, content: "HubSpot integration not configured."}}
+    {:ok,
+     %Assistant.Skills.Result{status: :error, content: "HubSpot integration not configured."}}
   end
 
   @doc """

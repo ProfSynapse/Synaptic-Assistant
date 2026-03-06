@@ -32,6 +32,8 @@ defaults:
 #                     image_generation (can generate image output),
 #                     audio_transcription (can process audio/speech input — STT),
 #                     audio_output (can generate audio/speech output — TTS via model)
+#   input_modalities  List of input types the model can ingest:
+#                     text, image, document, audio
 #   supports_tools  Whether the model supports tool/function calling
 #   max_context_tokens  Maximum context window size
 #   cost_tier       low | medium | high (relative cost classification)
@@ -43,6 +45,10 @@ models:
     use_cases:
       - orchestrator
       - sub_agent
+    input_modalities:
+      - text
+      - image
+      - document
     supports_tools: true
     max_context_tokens: 200000
     cost_tier: high
@@ -53,6 +59,10 @@ models:
     use_cases:
       - orchestrator
       - sub_agent
+    input_modalities:
+      - text
+      - image
+      - document
     supports_tools: true
     max_context_tokens: 400000
     cost_tier: high
@@ -63,6 +73,9 @@ models:
     description: "GPT-5 Image — highest quality OpenAI image generation"
     use_cases:
       - image_generation
+    input_modalities:
+      - text
+      - image
     supports_tools: false
     max_context_tokens: 400000
     cost_tier: high
@@ -72,6 +85,9 @@ models:
     description: "GPT-5 Image Mini — faster, lower-cost image generation"
     use_cases:
       - image_generation
+    input_modalities:
+      - text
+      - image
     supports_tools: false
     max_context_tokens: 400000
     cost_tier: medium
@@ -81,6 +97,9 @@ models:
     description: "Gemini 2.5 Flash Image — fast multimodal image generation"
     use_cases:
       - image_generation
+    input_modalities:
+      - text
+      - image
     supports_tools: false
     max_context_tokens: 1048576
     cost_tier: low
@@ -90,6 +109,10 @@ models:
     description: "Claude Haiku 4.5 — fast and cheap, good for compaction and lightweight summarization"
     use_cases:
       - compaction
+    input_modalities:
+      - text
+      - image
+      - document
     supports_tools: true
     max_context_tokens: 200000
     cost_tier: low
@@ -99,6 +122,8 @@ models:
     description: "GPT OSS Safeguard 20B — purpose-built safety classifier, fast and cheap, ideal for sentinel gate"
     use_cases:
       - sentinel
+    input_modalities:
+      - text
     supports_tools: false
     max_context_tokens: 131072
     cost_tier: low
@@ -109,6 +134,10 @@ models:
     use_cases:
       - sub_agent
       - compaction
+    input_modalities:
+      - text
+      - image
+      - document
     supports_tools: true
     max_context_tokens: 400000
     cost_tier: low
@@ -125,6 +154,11 @@ models:
       - sub_agent
       - compaction
       - audio_transcription
+    input_modalities:
+      - text
+      - image
+      - document
+      - audio
     supports_tools: true
     max_context_tokens: 1048576
     cost_tier: low
@@ -137,6 +171,11 @@ models:
       - sub_agent
       - audio_transcription
       - audio_output
+    input_modalities:
+      - text
+      - image
+      - document
+      - audio
     supports_tools: true
     max_context_tokens: 1048576
     cost_tier: high
@@ -148,6 +187,9 @@ models:
       - sub_agent
       - audio_transcription
       - audio_output
+    input_modalities:
+      - text
+      - audio
     supports_tools: true
     max_context_tokens: 128000
     cost_tier: high
@@ -159,6 +201,9 @@ models:
       - sub_agent
       - audio_transcription
       - audio_output
+    input_modalities:
+      - text
+      - audio
     supports_tools: true
     max_context_tokens: 128000
     cost_tier: medium

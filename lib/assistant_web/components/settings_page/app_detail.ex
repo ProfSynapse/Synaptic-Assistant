@@ -10,6 +10,11 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
 
   use AssistantWeb, :html
 
+  alias Assistant.Integrations.Google.Auth, as: GoogleAuth
+
+  import AssistantWeb.Components.GoogleWorkspaceDriveAccess,
+    only: [google_workspace_drive_access: 1]
+
   def app_detail_section(assigns) do
     is_admin =
       case assigns[:current_scope] do
@@ -90,6 +95,29 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
             </button>
           </div>
         </div>
+      </section>
+
+      <section
+        :if={@current_app.id == "google_workspace"}
+        class="sa-card"
+        style="margin-top: 1.5rem;"
+      >
+        <.google_workspace_drive_access
+          connected_drives={@connected_drives}
+          available_drives={@available_drives}
+          drives_loading={@drives_loading}
+        has_google_token={GoogleAuth.configured?()}
+        sync_scopes={@sync_scopes}
+        manager_drive={@drive_manager_drive}
+        manager_scopes={Map.values(@drive_scope_draft_scopes || %{})}
+        tree_nodes={@drive_tree_nodes}
+        tree_root_keys={@drive_tree_root_keys}
+        tree_expanded={@drive_tree_expanded}
+        tree_loading={@drive_tree_loading}
+        tree_loading_nodes={@drive_tree_loading_nodes}
+        tree_error={@drive_tree_error}
+        drive_scope_dirty={@drive_scope_dirty}
+      />
       </section>
 
       <section :if={@current_app.id == "telegram"} class="sa-card" style="margin-top: 1.5rem;">
@@ -220,11 +248,11 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
       <section class="sa-card" style="margin-top: 1.5rem;">
         <h2>Personal Tool Access</h2>
         <p style="margin-top: 0.25rem; margin-bottom: 1rem;" class="sa-page-subtitle">
-          Control which tools the model can use for your account.
+          Control which {@current_app.name} tools the model can use for your account.
         </p>
 
         <div :if={@personal_skill_permissions == []} class="sa-empty">
-          No registered skills were found.
+          No {@current_app.name} tools are available for personal control.
         </div>
 
         <table :if={@personal_skill_permissions != []} class="sa-table">

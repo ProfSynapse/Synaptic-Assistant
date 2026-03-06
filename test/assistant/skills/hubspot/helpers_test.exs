@@ -69,7 +69,11 @@ defmodule Assistant.Skills.HubSpot.HelpersTest do
 
     test "preserves existing keys" do
       map = %{"email" => "old@example.com"}
-      assert Helpers.maybe_put(map, "phone", "555") == %{"email" => "old@example.com", "phone" => "555"}
+
+      assert Helpers.maybe_put(map, "phone", "555") == %{
+               "email" => "old@example.com",
+               "phone" => "555"
+             }
     end
   end
 

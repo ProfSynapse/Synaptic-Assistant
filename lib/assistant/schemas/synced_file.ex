@@ -34,7 +34,7 @@ defmodule Assistant.Schemas.SyncedFile do
   @foreign_key_type :binary_id
 
   @sync_statuses ~w(synced local_ahead remote_ahead conflict error)
-  @local_formats ~w(md csv txt json bin)
+  @local_formats ~w(md csv txt json pdf png jpg webp gif svg bin)
 
   schema "synced_files" do
     field :drive_file_id, :string

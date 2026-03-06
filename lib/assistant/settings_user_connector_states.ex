@@ -21,10 +21,14 @@ defmodule Assistant.SettingsUserConnectorStates do
 
   def list_for_user(_), do: []
 
-  @spec get_for_user(String.t(), String.t()) :: {:ok, SettingsUserConnectorState.t()} | {:error, :not_found}
+  @spec get_for_user(String.t(), String.t()) ::
+          {:ok, SettingsUserConnectorState.t()} | {:error, :not_found}
   def get_for_user(user_id, integration_group)
       when is_binary(user_id) and is_binary(integration_group) do
-    case Repo.get_by(SettingsUserConnectorState, user_id: user_id, integration_group: integration_group) do
+    case Repo.get_by(SettingsUserConnectorState,
+           user_id: user_id,
+           integration_group: integration_group
+         ) do
       %SettingsUserConnectorState{} = state -> {:ok, state}
       nil -> {:error, :not_found}
     end
@@ -61,7 +65,8 @@ defmodule Assistant.SettingsUserConnectorStates do
   def set_enabled_for_user(user_id, integration_group, enabled, metadata \\ %{})
 
   def set_enabled_for_user(user_id, integration_group, enabled, metadata)
-      when is_binary(user_id) and is_binary(integration_group) and is_boolean(enabled) and is_map(metadata) do
+      when is_binary(user_id) and is_binary(integration_group) and is_boolean(enabled) and
+             is_map(metadata) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
     attrs = %{
@@ -76,12 +81,14 @@ defmodule Assistant.SettingsUserConnectorStates do
     %SettingsUserConnectorState{}
     |> SettingsUserConnectorState.changeset(attrs)
     |> Repo.insert(
-      on_conflict: {:replace, [:enabled, :metadata, :connected_at, :disconnected_at, :updated_at]},
+      on_conflict:
+        {:replace, [:enabled, :metadata, :connected_at, :disconnected_at, :updated_at]},
       conflict_target: [:user_id, :integration_group]
     )
   end
 
-  def set_enabled_for_user(_user_id, _integration_group, _enabled, _metadata), do: {:error, :invalid}
+  def set_enabled_for_user(_user_id, _integration_group, _enabled, _metadata),
+    do: {:error, :invalid}
 
   @spec clear_for_user(String.t(), String.t()) :: :ok
   def clear_for_user(user_id, integration_group)

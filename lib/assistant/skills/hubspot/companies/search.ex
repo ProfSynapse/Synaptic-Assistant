@@ -45,7 +45,8 @@ defmodule Assistant.Skills.HubSpot.Companies.Search do
     query = Map.get(flags, "query")
 
     if is_nil(query) || query == "" do
-      {:ok, %Result{status: :error, content: "Missing required parameter: --query (search term)."}}
+      {:ok,
+       %Result{status: :error, content: "Missing required parameter: --query (search term)."}}
     else
       search_by = Map.get(flags, "search_by", "name")
       limit = Helpers.parse_limit(Map.get(flags, "limit"))
@@ -54,7 +55,9 @@ defmodule Assistant.Skills.HubSpot.Companies.Search do
         {:ok, property, operator} ->
           case hubspot.search_companies(api_key, property, operator, query, limit) do
             {:ok, companies} ->
-              formatted = Helpers.format_object_list(companies, Helpers.company_fields(), "companies")
+              formatted =
+                Helpers.format_object_list(companies, Helpers.company_fields(), "companies")
+
               {:ok, %Result{status: :ok, content: formatted}}
 
             error ->
@@ -72,9 +75,17 @@ defmodule Assistant.Skills.HubSpot.Companies.Search do
 
     case Helpers.parse_filters_json(filters_json) do
       {:ok, filters} ->
-        case Client.crm_search_multi(api_key, "companies", filters, limit, ~w(name domain website industry description)) do
+        case Client.crm_search_multi(
+               api_key,
+               "companies",
+               filters,
+               limit,
+               ~w(name domain website industry description)
+             ) do
           {:ok, companies} ->
-            formatted = Helpers.format_object_list(companies, Helpers.company_fields(), "companies")
+            formatted =
+              Helpers.format_object_list(companies, Helpers.company_fields(), "companies")
+
             {:ok, %Result{status: :ok, content: formatted}}
 
           error ->

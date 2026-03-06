@@ -145,7 +145,9 @@ defmodule Assistant.SkillPermissions.EnabledForUserTest do
   end
 
   describe "3-layer gate: all enabled" do
-    test "returns true when global enabled, no user override, non-hubspot skill", %{user_id: user_id} do
+    test "returns true when global enabled, no user override, non-hubspot skill", %{
+      user_id: user_id
+    } do
       assert SkillPermissions.enabled_for_user?(user_id, "email.send") == true
     end
 
@@ -256,6 +258,28 @@ defmodule Assistant.SkillPermissions.EnabledForUserTest do
     test "clear_user_override with invalid args returns :ok" do
       assert SkillPermissions.clear_user_override(nil, "email.send") == :ok
       assert SkillPermissions.clear_user_override("uid", nil) == :ok
+    end
+  end
+
+  describe "integration-group filtering" do
+    test "google_workspace filter excludes hubspot skills", %{user_id: user_id} do
+      permissions =
+        SkillPermissions.list_permissions_for_user(user_id, integration_group: "google_workspace")
+
+      assert permissions != []
+      assert Enum.any?(permissions, &String.starts_with?(&1.id, "email."))
+      assert Enum.any?(permissions, &String.starts_with?(&1.id, "calendar."))
+      assert Enum.any?(permissions, &String.starts_with?(&1.id, "files."))
+      refute Enum.any?(permissions, &String.starts_with?(&1.id, "hubspot."))
+    end
+
+    test "hubspot filter excludes google workspace skills", %{user_id: user_id} do
+      permissions =
+        SkillPermissions.list_permissions_for_user(user_id, integration_group: "hubspot")
+
+      assert permissions != []
+      assert Enum.all?(permissions, &String.starts_with?(&1.id, "hubspot."))
+      refute Enum.any?(permissions, &String.starts_with?(&1.id, "email."))
     end
   end
 end

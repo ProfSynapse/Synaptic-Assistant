@@ -24,6 +24,10 @@ defmodule Assistant.Config.LoaderTest do
       use_cases:
         - orchestrator
         - sub_agent
+      input_modalities:
+        - text
+        - image
+        - document
       supports_tools: true
       max_context_tokens: 200000
       cost_tier: high
@@ -35,6 +39,8 @@ defmodule Assistant.Config.LoaderTest do
         - sub_agent
         - compaction
         - sentinel
+      input_modalities:
+        - text
       supports_tools: true
       max_context_tokens: 100000
       cost_tier: low
@@ -133,6 +139,7 @@ defmodule Assistant.Config.LoaderTest do
       # Verify ETS is populated
       models = Loader.all_models()
       assert length(models) == 2
+      assert hd(models).input_modalities == [:text, :image, :document]
 
       http = Loader.http_config()
       assert http.max_retries == 3
@@ -204,6 +211,22 @@ defmodule Assistant.Config.LoaderTest do
     test "returns nil for non-matching explicit id" do
       model = Loader.model_for(:orchestrator, id: "nonexistent/model")
       assert model == nil
+    end
+
+    test "exposes input modality helpers" do
+      primary = Loader.model_for(:orchestrator)
+      fast = Loader.model_for(:sub_agent, prefer: :fast)
+
+      assert Loader.model_supports_input?(primary, :document)
+      assert Loader.model_supports_input?(primary, :image)
+      refute Loader.model_supports_input?(fast, :document)
+
+      supporting_ids =
+        Loader.models_supporting_input(:document)
+        |> Enum.map(& &1.id)
+
+      assert "test/model-primary" in supporting_ids
+      refute "test/model-fast" in supporting_ids
     end
   end
 

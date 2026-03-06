@@ -69,8 +69,17 @@ defmodule Assistant.Orchestrator.SubAgent do
   alias Assistant.Config.{Loader, PromptLoader}
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.LLMRouter
-  alias Assistant.Orchestrator.{ApprovalGate, GoogleContext, LLMHelpers, Limits, Sentinel}
   alias Assistant.AccessScopes
+
+  alias Assistant.Orchestrator.{
+    ApprovalGate,
+    ContextFiles,
+    GoogleContext,
+    LLMHelpers,
+    Limits,
+    Sentinel
+  }
+
   alias Assistant.SkillPermissions
   alias Assistant.SpendingLimits
   alias Assistant.Skills.{Context, Executor, Registry, Result}
@@ -1115,22 +1124,41 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp build_context(dispatch_params, dep_results, _engine_state) do
     allowed_skills = effective_skills(dispatch_params)
+    {:ok, system_prompt} = build_system_prompt(dispatch_params, dep_results)
+    build_context_with_files(system_prompt, dispatch_params, allowed_skills)
+  end
 
-    case build_system_prompt(dispatch_params, dep_results) do
-      {:error, _} = error ->
-        error
+  defp build_context_with_files(system_prompt, dispatch_params, allowed_skills) do
+    tools = build_scoped_tools(allowed_skills, dispatch_params.user_id)
+    mission_msg = %{role: "user", content: dispatch_params.mission}
+    model_info = context_file_model_info(dispatch_params)
 
-      {:ok, system_prompt} ->
-        tools = build_scoped_tools(allowed_skills, dispatch_params.user_id)
-        mission_msg = %{role: "user", content: dispatch_params.mission}
+    case ContextFiles.load(dispatch_params[:context_files] || [],
+           user_id: dispatch_params.user_id,
+           model: dispatch_params[:model_override],
+           model_info: model_info,
+           agent_id: dispatch_params[:agent_id],
+           budget_tokens: compute_context_file_budget(dispatch_params)
+         ) do
+      {:ok, context_payload} ->
+        system_content =
+          case context_payload.prompt_prefix do
+            "" -> system_prompt
+            prefix -> prefix <> "\n\n" <> system_prompt
+          end
 
         {:ok,
          %{
-           system_prompt: system_prompt,
-           messages: [%{role: "system", content: system_prompt}, mission_msg],
+           system_prompt: system_content,
+           messages:
+             [%{role: "system", content: system_content}] ++
+               context_payload.messages ++ [mission_msg],
            tools: tools,
            allowed_skills: allowed_skills
          }}
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -1175,25 +1203,10 @@ defmodule Assistant.Orchestrator.SubAgent do
       end
 
     # Inject skill definitions for cache positioning (static section)
-    prompt_with_skills =
-      if skill_definitions_section != "" do
-        base_prompt <> "\n\n" <> skill_definitions_section
-      else
-        base_prompt
-      end
-
-    # Inject context documents at the TOP of the prompt for cache positioning
-    context_files = dispatch_params[:context_files] || []
-
-    case load_context_files(context_files, dispatch_params) do
-      {:ok, ""} ->
-        {:ok, prompt_with_skills}
-
-      {:ok, docs_section} ->
-        {:ok, docs_section <> "\n\n" <> prompt_with_skills}
-
-      {:error, _} = error ->
-        error
+    if skill_definitions_section != "" do
+      {:ok, base_prompt <> "\n\n" <> skill_definitions_section}
+    else
+      {:ok, base_prompt}
     end
   end
 
@@ -1303,89 +1316,9 @@ defmodule Assistant.Orchestrator.SubAgent do
     peer_agents != [] and Registry.skill_exists?(@peer_query_skill)
   end
 
-  # --- Context File Loading ---
-
-  # Reads context files and checks the total against the model's token budget.
-  defp load_context_files([], _dispatch_params), do: {:ok, ""}
-
-  defp load_context_files(file_paths, dispatch_params) do
-    budget_tokens = compute_context_file_budget(dispatch_params)
-
-    # Phase 1: Read all readable files, skip missing ones with a warning
-    loaded_files =
-      file_paths
-      |> Enum.reduce([], fn path, acc ->
-        case resolve_path(path) do
-          {:ok, resolved} ->
-            case File.read(resolved) do
-              {:ok, contents} ->
-                estimated_tokens = div(byte_size(contents), 4)
-                [%{path: path, contents: contents, estimated_tokens: estimated_tokens} | acc]
-
-              {:error, reason} ->
-                Logger.warning("Context file not found or unreadable — skipping",
-                  path: path,
-                  resolved: resolved,
-                  reason: inspect(reason),
-                  agent_id: dispatch_params[:agent_id]
-                )
-
-                acc
-            end
-
-          {:error, :path_traversal_denied} ->
-            Logger.warning("Context file path rejected — outside allowed base directory",
-              path: path,
-              agent_id: dispatch_params[:agent_id]
-            )
-
-            acc
-        end
-      end)
-      |> Enum.reverse()
-
-    # Phase 2: Check total against budget
-    total_tokens = Enum.reduce(loaded_files, 0, fn f, sum -> sum + f.estimated_tokens end)
-
-    if total_tokens > budget_tokens do
-      file_breakdown =
-        loaded_files
-        |> Enum.map(fn f -> %{path: f.path, estimated_tokens: f.estimated_tokens} end)
-        |> Enum.sort_by(& &1.estimated_tokens, :desc)
-
-      {:error,
-       {:context_budget_exceeded,
-        %{
-          estimated_tokens: total_tokens,
-          budget_tokens: budget_tokens,
-          overage_tokens: total_tokens - budget_tokens,
-          files: file_breakdown
-        }}}
-    else
-      case loaded_files do
-        [] ->
-          {:ok, ""}
-
-        entries ->
-          docs =
-            Enum.map_join(entries, "\n---\n", fn %{path: path, contents: contents} ->
-              "### #{path}\n#{contents}"
-            end)
-
-          {:ok, "## Context Documents\n#{docs}"}
-      end
-    end
-  end
-
   defp compute_context_file_budget(dispatch_params) do
     model_info =
-      case dispatch_params[:model_override] do
-        model_id when is_binary(model_id) and model_id != "" ->
-          Loader.model_for(:sub_agent, id: model_id)
-
-        _ ->
-          Loader.model_for(:sub_agent, user_id: dispatch_params[:user_id])
-      end
+      context_file_model_info(dispatch_params)
 
     max_context = (model_info && model_info.max_context_tokens) || 200_000
     limits = Loader.limits_config()
@@ -1397,20 +1330,13 @@ defmodule Assistant.Orchestrator.SubAgent do
     div(max(available, 0), 2)
   end
 
-  defp resolve_path(path) do
-    base = File.cwd!()
+  defp context_file_model_info(dispatch_params) do
+    case dispatch_params[:model_override] do
+      model_id when is_binary(model_id) and model_id != "" ->
+        Loader.model_for(:sub_agent, id: model_id)
 
-    resolved =
-      if Path.type(path) == :absolute do
-        Path.expand(path)
-      else
-        Path.expand(path, base)
-      end
-
-    if String.starts_with?(resolved, base <> "/") or resolved == base do
-      {:ok, resolved}
-    else
-      {:error, :path_traversal_denied}
+      _ ->
+        Loader.model_for(:sub_agent, user_id: dispatch_params[:user_id])
     end
   end
 

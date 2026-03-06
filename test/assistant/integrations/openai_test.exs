@@ -95,5 +95,93 @@ defmodule Assistant.Integrations.OpenAITest do
       names = Enum.map(body.tools, fn t -> t.function.name end)
       assert names == ["a_tool", "b_tool"]
     end
+
+    test "preserves multimodal image content parts" do
+      messages = [
+        %{
+          role: "user",
+          content: [
+            %{type: "text", text: "Review this image."},
+            %{type: "image_url", image_url: %{url: "data:image/png;base64,ZmFrZQ=="}}
+          ]
+        }
+      ]
+
+      assert {:ok, body} = OpenAI.build_request_body(messages, model: "gpt-5-mini")
+
+      [message] = body.messages
+      [text_part, image_part] = message.content
+
+      assert text_part.type == "text"
+      assert image_part.type == "image_url"
+      assert image_part.image_url.url == "data:image/png;base64,ZmFrZQ=="
+    end
+
+    test "preserves PDF file content parts" do
+      messages = [
+        %{
+          role: "user",
+          content: [
+            %{type: "text", text: "Review this document."},
+            %{
+              type: "file",
+              file: %{
+                filename: "spec.pdf",
+                file_data: "data:application/pdf;base64,JVBERi0xLjc="
+              }
+            }
+          ]
+        }
+      ]
+
+      assert {:ok, body} = OpenAI.build_request_body(messages, model: "gpt-5-mini")
+
+      [message] = body.messages
+      [text_part, file_part] = message.content
+
+      assert text_part.type == "text"
+      assert file_part.type == "file"
+      assert file_part.file.filename == "spec.pdf"
+      assert file_part.file.file_data == "data:application/pdf;base64,JVBERi0xLjc="
+    end
+  end
+
+  describe "build_codex_request_body/2" do
+    test "maps multimodal content to Responses API input parts" do
+      messages = [
+        %{role: "system", content: "You are a reviewer."},
+        %{
+          role: "user",
+          content: [
+            %{type: "text", text: "Review both attachments."},
+            %{type: "image_url", image_url: %{url: "data:image/png;base64,ZmFrZQ=="}},
+            %{
+              type: "file",
+              file: %{
+                filename: "spec.pdf",
+                file_data: "data:application/pdf;base64,JVBERi0xLjc="
+              }
+            }
+          ]
+        }
+      ]
+
+      assert {:ok, body} = OpenAI.build_codex_request_body(messages, model: "gpt-5.2-codex")
+
+      assert body.instructions == "You are a reviewer."
+      [message] = body.input
+      assert message.role == "user"
+
+      [text_part, image_part, file_part] = message.content
+
+      assert text_part == %{type: "input_text", text: "Review both attachments."}
+      assert image_part == %{type: "input_image", image_url: "data:image/png;base64,ZmFrZQ=="}
+
+      assert file_part == %{
+               type: "input_file",
+               filename: "spec.pdf",
+               file_data: "data:application/pdf;base64,JVBERi0xLjc="
+             }
+    end
   end
 end
