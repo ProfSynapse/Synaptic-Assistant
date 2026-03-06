@@ -46,6 +46,14 @@ defmodule AssistantWeb.SettingsLive.Events do
     {:noreply, assign(socket, :admin_tab, tab)}
   end
 
+  def handle_event("open_add_user_modal", _params, socket) do
+    {:noreply, assign(socket, :add_user_modal_open, true)}
+  end
+
+  def handle_event("close_add_user_modal", _params, socket) do
+    {:noreply, assign(socket, :add_user_modal_open, false)}
+  end
+
   def handle_event("toggle_workflow_enabled", %{"name" => name, "enabled" => enabled}, socket) do
     enabled? = enabled == "true"
 
