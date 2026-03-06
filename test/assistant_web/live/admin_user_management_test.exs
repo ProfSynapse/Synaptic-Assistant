@@ -811,6 +811,196 @@ defmodule AssistantWeb.AdminUserManagementTest do
   end
 
   # ──────────────────────────────────────────────
+  # Event: save_spending_limit
+  # ──────────────────────────────────────────────
+
+  describe "save_spending_limit event" do
+    test "saves spending limit with valid budget and shows flash", %{conn: conn} do
+      target = create_target_user(%{email: "spending-save@example.com"})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html =
+        lv
+        |> form("#spending-limit-form-#{target.id}", %{
+          "user_id" => target.id,
+          "budget_dollars" => "50.00",
+          "warning_threshold" => "80",
+          "hard_cap" => "true"
+        })
+        |> render_submit()
+
+      assert html =~ "Spending limit updated"
+
+      limit = Assistant.SpendingLimits.get_spending_limit(target.id)
+      assert limit.budget_cents == 5_000
+      assert limit.hard_cap == true
+      assert limit.warning_threshold == 80
+    end
+
+    test "removes spending limit when budget is blank", %{conn: conn} do
+      target = create_target_user(%{email: "spending-blank@example.com"})
+
+      # Pre-create a spending limit
+      Assistant.SpendingLimits.upsert_spending_limit(target.id, %{budget_cents: 5_000})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html =
+        lv
+        |> form("#spending-limit-form-#{target.id}", %{
+          "user_id" => target.id,
+          "budget_dollars" => "",
+          "warning_threshold" => "80"
+        })
+        |> render_submit()
+
+      assert html =~ "Spending limit removed"
+      assert is_nil(Assistant.SpendingLimits.get_spending_limit(target.id))
+    end
+
+    test "updates existing spending limit", %{conn: conn} do
+      target = create_target_user(%{email: "spending-update@example.com"})
+      Assistant.SpendingLimits.upsert_spending_limit(target.id, %{budget_cents: 5_000})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html =
+        lv
+        |> form("#spending-limit-form-#{target.id}", %{
+          "user_id" => target.id,
+          "budget_dollars" => "100.00",
+          "warning_threshold" => "90",
+          "hard_cap" => "true"
+        })
+        |> render_submit()
+
+      assert html =~ "Spending limit updated"
+
+      limit = Assistant.SpendingLimits.get_spending_limit(target.id)
+      assert limit.budget_cents == 10_000
+      assert limit.warning_threshold == 90
+    end
+  end
+
+  # ──────────────────────────────────────────────
+  # Event: remove_spending_limit
+  # ──────────────────────────────────────────────
+
+  describe "remove_spending_limit event" do
+    test "removes spending limit and shows flash", %{conn: conn} do
+      target = create_target_user(%{email: "spending-remove@example.com"})
+      Assistant.SpendingLimits.upsert_spending_limit(target.id, %{budget_cents: 5_000})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html = render_click(lv, "remove_spending_limit", %{"id" => target.id})
+
+      assert html =~ "Spending limit removed"
+      assert is_nil(Assistant.SpendingLimits.get_spending_limit(target.id))
+    end
+  end
+
+  # ──────────────────────────────────────────────
+  # Event: create_admin_user (new user flow)
+  # ──────────────────────────────────────────────
+
+  describe "create_admin_user flow" do
+    test "creates a new user via allowlist form", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      render_click(lv, "start_add_user")
+
+      html =
+        lv
+        |> form("form[phx-submit=\"save_allowlist_entry\"]", %{
+          "allowlist_entry" => %{
+            "email" => "brand-new-user@example.com",
+            "full_name" => "Brand New User"
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "User created successfully"
+
+      user = Accounts.get_settings_user_by_email("brand-new-user@example.com")
+      assert user
+      assert is_nil(user.hashed_password)
+    end
+
+    test "handles duplicate email gracefully", %{conn: conn} do
+      _existing = create_target_user(%{email: "dupe-test@example.com"})
+
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      render_click(lv, "start_add_user")
+
+      html =
+        lv
+        |> form("form[phx-submit=\"save_allowlist_entry\"]", %{
+          "allowlist_entry" => %{
+            "email" => "dupe-test@example.com",
+            "full_name" => "Duplicate"
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "User created successfully"
+    end
+
+    test "creates user with spending limit in same flow", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      render_click(lv, "start_add_user")
+
+      html =
+        lv
+        |> form("form[phx-submit=\"save_allowlist_entry\"]", %{
+          "allowlist_entry" => %{
+            "email" => "user-with-budget@example.com",
+            "full_name" => "Budget User",
+            "budget_dollars" => "25.00",
+            "warning_threshold" => "90",
+            "hard_cap" => "true"
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "User created successfully"
+
+      user = Accounts.get_settings_user_by_email("user-with-budget@example.com")
+      assert user
+
+      limit = Assistant.SpendingLimits.get_spending_limit(user.id)
+      assert limit
+      assert limit.budget_cents == 2_500
+    end
+  end
+
+  # ──────────────────────────────────────────────
   # Non-admin access control
   # ──────────────────────────────────────────────
 
