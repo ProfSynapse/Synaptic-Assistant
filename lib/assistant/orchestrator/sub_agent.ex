@@ -6,7 +6,7 @@
 # :awaiting_orchestrator) when it calls the `request_help` tool, and resume
 # when the orchestrator sends new context via `send_agent_update`.
 #
-# States: :running | :awaiting_orchestrator | :completed | :failed
+# States: :running | :awaiting_orchestrator | :completed | :failed | :cancelled
 #
 # Related files:
 #   - lib/assistant/orchestrator/engine.ex (spawns sub-agents via scheduler)
@@ -38,6 +38,8 @@ defmodule Assistant.Orchestrator.SubAgent do
   6. `resume/2` — orchestrator sends update, task resumes LLM loop
   7. If tool budget exhausted -> `:completed` with partial result
   8. If LLM error -> `:failed`
+  9. `cancel/2` — orchestrator terminates the agent immediately with a
+     truncated transcript snapshot and `:cancelled` terminal state
 
   ## States
 
@@ -45,6 +47,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     * `:awaiting_orchestrator` — paused, waiting for orchestrator update
     * `:completed` — terminal, mission finished or budget exhausted
     * `:failed` — terminal, unrecoverable error
+    * `:cancelled` — terminal, stopped immediately by the orchestrator
 
   ## Scope Enforcement
 
@@ -74,6 +77,7 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   # Google skill domains that require a per-user OAuth2 token.
   @google_skill_domains ~w(email calendar files)
+  @peer_query_skill "agents.query_subagent"
 
   @default_max_tool_calls 5
   @default_timeout_ms 30_000
@@ -113,12 +117,27 @@ defmodule Assistant.Orchestrator.SubAgent do
   ## Returns
 
     * `{:ok, status_map}` with keys: `:status`, `:result`, `:tool_calls_used`,
-      `:duration_ms`, `:reason` (for awaiting_orchestrator), `:partial_history`
+      `:duration_ms`, `:reason` (for awaiting_orchestrator), `:partial_history`,
+      `:transcript_tail`
     * `{:error, :not_found}` if agent is not registered
   """
   @spec get_status(String.t()) :: {:ok, map()} | {:error, :not_found}
   def get_status(agent_id) do
     GenServer.call(via_tuple(agent_id), :get_status)
+  catch
+    :exit, {:noproc, _} -> {:error, :not_found}
+  end
+
+  @doc """
+  Returns the agent's current live snapshot for read-only inspection.
+
+  This is the bounded in-memory transcript snapshot published while the agent
+  runs. It is suitable for progress inspection, cancellation truncation, and
+  future snapshot-based query flows.
+  """
+  @spec get_snapshot(String.t()) :: {:ok, map()} | {:error, :not_found}
+  def get_snapshot(agent_id) do
+    GenServer.call(via_tuple(agent_id), :get_snapshot)
   catch
     :exit, {:noproc, _} -> {:error, :not_found}
   end
@@ -147,6 +166,21 @@ defmodule Assistant.Orchestrator.SubAgent do
   @spec resume(String.t(), map()) :: :ok | {:error, :not_awaiting | :not_found}
   def resume(agent_id, update) do
     GenServer.call(via_tuple(agent_id), {:resume, update})
+  catch
+    :exit, {:noproc, _} -> {:error, :not_found}
+  end
+
+  @doc """
+  Immediately terminates a sub-agent.
+
+  This is an orchestrator kill switch, distinct from `interrupt/1`. The agent
+  is not resumed in place afterwards; continuation should happen by launching a
+  fresh agent seeded from the saved snapshot if needed.
+  """
+  @spec cancel(String.t(), String.t()) ::
+          :ok | {:error, :already_terminal, atom()} | {:error, :not_found}
+  def cancel(agent_id, reason \\ "Cancelled by orchestrator.") do
+    GenServer.call(via_tuple(agent_id), {:cancel, reason})
   catch
     :exit, {:noproc, _} -> {:error, :not_found}
   end
@@ -189,7 +223,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   ## Returns
 
   A map with:
-    * `:status` - `:completed`, `:failed`, `:timeout`, or `:awaiting_orchestrator`
+    * `:status` - `:completed`, `:failed`, `:timeout`, `:awaiting_orchestrator`, or `:cancelled`
     * `:result` - Human-readable summary of what was accomplished
     * `:tool_calls_used` - Number of skill calls executed
     * `:duration_ms` - Wall-clock execution time
@@ -275,10 +309,14 @@ defmodule Assistant.Orchestrator.SubAgent do
       duration_ms: nil,
       # Full LLM conversation transcript (populated on completion)
       messages: nil,
+      # Bounded live transcript snapshot, updated while the agent runs
+      live_messages: [],
+      snapshot_updated_at: nil,
       # Pause/resume state
       awaiting_reason: nil,
       awaiting_partial_history: nil,
       pending_help_tc: nil,
+      cancel_reason: nil,
       # The Task running the LLM loop
       loop_task: nil,
       loop_ref: nil,
@@ -309,6 +347,7 @@ defmodule Assistant.Orchestrator.SubAgent do
       {:ok, context} ->
         max_calls = state.dispatch_params[:max_tool_calls] || @default_max_tool_calls
         agent_limit_state = Limits.new_agent_state(max_skill_calls: max_calls)
+        state = update_live_snapshot(state, context.messages)
 
         # Spawn the LLM loop as a linked Task
         parent = self()
@@ -329,12 +368,26 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   @impl true
+  def handle_continue({:stop_with_result, result_map}, state) do
+    if state.loop_ref do
+      Process.demonitor(state.loop_ref, [:flush])
+    end
+
+    if state.loop_task && Process.alive?(state.loop_task.pid) do
+      Process.exit(state.loop_task.pid, :kill)
+    end
+
+    {:stop, {:shutdown, result_map}, state}
+  end
+
+  @impl true
   def handle_call(:get_status, _from, state) do
     status_map = %{
       status: state.status,
       result: extract_result_text(state.result),
       tool_calls_used: state.tool_calls_used,
-      duration_ms: state.duration_ms || elapsed_ms(state.started_at)
+      duration_ms: state.duration_ms || elapsed_ms(state.started_at),
+      transcript_tail: transcript_tail(state)
     }
 
     status_map =
@@ -346,7 +399,19 @@ defmodule Assistant.Orchestrator.SubAgent do
         status_map
       end
 
+    status_map =
+      if state.status == :cancelled and is_binary(state.cancel_reason) do
+        Map.put(status_map, :cancel_reason, state.cancel_reason)
+      else
+        status_map
+      end
+
     {:reply, {:ok, status_map}, state}
+  end
+
+  @impl true
+  def handle_call(:get_snapshot, _from, state) do
+    {:reply, {:ok, build_snapshot(state)}, state}
   end
 
   @impl true
@@ -365,6 +430,24 @@ defmodule Assistant.Orchestrator.SubAgent do
 
       {:reply, :ok,
        %{state | status: :running, awaiting_reason: nil, awaiting_partial_history: nil}}
+    end
+  end
+
+  @impl true
+  def handle_call({:cancel, reason}, _from, state) do
+    if state.status in [:completed, :failed, :timeout, :cancelled] do
+      {:reply, {:error, :already_terminal, state.status}, state}
+    else
+      Logger.warning("Sub-agent cancelled",
+        agent_id: state.agent_id,
+        reason: reason,
+        status: state.status
+      )
+
+      final_state = cancel_state(state, reason)
+
+      {:reply, :ok, final_state,
+       {:continue, {:stop_with_result, build_final_result_map(final_state)}}}
     end
   end
 
@@ -408,6 +491,11 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   @impl true
+  def handle_info({:snapshot_update, messages}, state) do
+    {:noreply, update_live_snapshot(state, messages)}
+  end
+
+  @impl true
   def handle_info({:tool_calls_update, count}, state) do
     {:noreply, %{state | tool_calls_used: count}}
   end
@@ -448,7 +536,8 @@ defmodule Assistant.Orchestrator.SubAgent do
         result: final_result.result,
         tool_calls_used: final_result[:tool_calls_used] || state.tool_calls_used,
         duration_ms: duration_ms,
-        messages: final_result[:messages]
+        messages: final_result[:messages],
+        live_messages: snapshot_messages(final_result[:messages] || state.live_messages)
     }
 
     # Use {:shutdown, result_map} so wait_for_completion can extract the
@@ -471,7 +560,8 @@ defmodule Assistant.Orchestrator.SubAgent do
       state
       | status: :failed,
         result: "Sub-agent loop crashed: #{inspect(reason)}",
-        duration_ms: duration_ms
+        duration_ms: duration_ms,
+        messages: state.messages || state.live_messages
     }
 
     {:stop, {:shutdown, build_final_result_map(final_state)}, final_state}
@@ -484,6 +574,8 @@ defmodule Assistant.Orchestrator.SubAgent do
   # --- LLM Loop (runs in Task) ---
 
   defp run_loop(context, agent_state, dispatch_params, engine_state, genserver_pid) do
+    publish_snapshot(genserver_pid, context.messages)
+
     # Check for interrupt before starting a new LLM call
     if interrupted?() do
       last_text = extract_last_text(context.messages)
@@ -548,11 +640,14 @@ defmodule Assistant.Orchestrator.SubAgent do
     cond do
       # Text response — mission complete
       has_text_no_tools?(response) ->
+        final_messages = context.messages ++ [%{role: "assistant", content: response.content}]
+        publish_snapshot(genserver_pid, final_messages)
+
         %{
           status: :completed,
           result: response.content,
           tool_calls_used: agent_state.skill_calls,
-          messages: context.messages
+          messages: final_messages
         }
 
       # Tool calls — execute and loop
@@ -569,11 +664,15 @@ defmodule Assistant.Orchestrator.SubAgent do
 
       # Fallback: empty response
       true ->
+        final_content = response[:content] || "Agent completed with no output."
+        final_messages = context.messages ++ [%{role: "assistant", content: final_content}]
+        publish_snapshot(genserver_pid, final_messages)
+
         %{
           status: :completed,
-          result: response[:content] || "Agent completed with no output.",
+          result: final_content,
           tool_calls_used: agent_state.skill_calls,
-          messages: context.messages
+          messages: final_messages
         }
     end
   end
@@ -660,6 +759,7 @@ defmodule Assistant.Orchestrator.SubAgent do
           end)
 
         new_messages = context.messages ++ [assistant_msg | tool_msgs]
+        publish_snapshot(genserver_pid, new_messages)
 
         # If there was a request_help call, pause and wait for orchestrator
         case help_calls do
@@ -687,6 +787,7 @@ defmodule Assistant.Orchestrator.SubAgent do
                 skill_injection_msgs = build_skill_injection_messages(update)
 
                 resumed_messages = new_messages ++ [help_result_msg | skill_injection_msgs]
+                publish_snapshot(genserver_pid, resumed_messages)
 
                 # Update dispatch_params with any new skills
                 updated_dispatch = maybe_add_skills(dispatch_params, update[:skills])
@@ -826,7 +927,14 @@ defmodule Assistant.Orchestrator.SubAgent do
                        approval_index: approval_index
                      ) do
                   :approved ->
-                    execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
+                    execute_skill_call(
+                      tc,
+                      skill_name,
+                      skill_args,
+                      skill_def,
+                      dispatch_params,
+                      engine_state
+                    )
 
                   {:denied, message} ->
                     {tc, message}
@@ -836,7 +944,14 @@ defmodule Assistant.Orchestrator.SubAgent do
                 end
 
               {:ok, skill_def} ->
-                execute_skill_call(tc, skill_name, skill_args, skill_def, dispatch_params, engine_state)
+                execute_skill_call(
+                  tc,
+                  skill_name,
+                  skill_args,
+                  skill_def,
+                  dispatch_params,
+                  engine_state
+                )
 
               {:error, :not_found} ->
                 {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
@@ -879,8 +994,7 @@ defmodule Assistant.Orchestrator.SubAgent do
             {tc, format_needs_auth_message(magic_link_url, channel)}
 
           {:needs_auth_rate_limited} ->
-            {tc,
-             "Authorization already in progress. Please check your messages for the link."}
+            {tc, "Authorization already in progress. Please check your messages for the link."}
         end
 
       {:error, :circuit_open} ->
@@ -986,12 +1100,14 @@ defmodule Assistant.Orchestrator.SubAgent do
   # --- Context Building ---
 
   defp build_context(dispatch_params, dep_results, _engine_state) do
+    allowed_skills = effective_skills(dispatch_params)
+
     case build_system_prompt(dispatch_params, dep_results) do
       {:error, _} = error ->
         error
 
       {:ok, system_prompt} ->
-        tools = build_scoped_tools(dispatch_params.skills, dispatch_params.user_id)
+        tools = build_scoped_tools(allowed_skills, dispatch_params.user_id)
         mission_msg = %{role: "user", content: dispatch_params.mission}
 
         {:ok,
@@ -999,16 +1115,20 @@ defmodule Assistant.Orchestrator.SubAgent do
            system_prompt: system_prompt,
            messages: [%{role: "system", content: system_prompt}, mission_msg],
            tools: tools,
-           allowed_skills: dispatch_params.skills
+           allowed_skills: allowed_skills
          }}
     end
   end
 
   defp build_system_prompt(dispatch_params, dep_results) do
-    skills_text = Enum.join(dispatch_params.skills, ", ")
+    skill_names = effective_skills(dispatch_params)
+    skills_text = Enum.join(skill_names, ", ")
     dep_section = build_dependency_section(dep_results)
-    context_section = build_context_section(dispatch_params.context)
-    skill_definitions_section = build_skill_definitions_section(dispatch_params.skills)
+
+    context_section =
+      build_context_section(dispatch_params.context, dispatch_params[:peer_agents] || [])
+
+    skill_definitions_section = build_skill_definitions_section(skill_names)
 
     assigns = %{
       skills_text: skills_text,
@@ -1112,9 +1232,62 @@ defmodule Assistant.Orchestrator.SubAgent do
     "\n\nPrior agent results:\n#{results_text}"
   end
 
-  defp build_context_section(nil), do: ""
-  defp build_context_section(""), do: ""
-  defp build_context_section(ctx), do: "\n\nAdditional context: #{ctx}"
+  defp build_context_section(context, peer_agents) do
+    parts =
+      [
+        case context do
+          nil -> nil
+          "" -> nil
+          ctx -> "Additional context: #{ctx}"
+        end,
+        build_peer_agents_section(peer_agents)
+      ]
+      |> Enum.reject(&(&1 in [nil, ""]))
+
+    case parts do
+      [] -> ""
+      _ -> "\n\n" <> Enum.join(parts, "\n\n")
+    end
+  end
+
+  defp build_peer_agents_section([]), do: ""
+
+  defp build_peer_agents_section(peer_agents) do
+    lines =
+      Enum.map_join(peer_agents, "\n", fn peer ->
+        deps =
+          case peer[:depends_on] || [] do
+            [] -> "none"
+            list -> Enum.join(list, ", ")
+          end
+
+        "- #{peer.agent_id}: mission=#{peer.mission}; skills=#{Enum.join(peer.skills || [], ", ")}; depends_on=#{deps}"
+      end)
+
+    """
+    Other active agents in this parallel wave:
+    #{lines}
+
+    If you have the #{@peer_query_skill} skill, use it for focused questions
+    about a peer's current progress without interrupting that peer.
+    """
+    |> String.trim()
+  end
+
+  defp effective_skills(dispatch_params) do
+    base_skills = dispatch_params.skills || []
+
+    if peer_query_available?(dispatch_params) do
+      Enum.uniq(base_skills ++ [@peer_query_skill])
+    else
+      base_skills
+    end
+  end
+
+  defp peer_query_available?(dispatch_params) do
+    peer_agents = dispatch_params[:peer_agents] || []
+    peer_agents != [] and Registry.skill_exists?(@peer_query_skill)
+  end
 
   # --- Context File Loading ---
 
@@ -1562,19 +1735,29 @@ defmodule Assistant.Orchestrator.SubAgent do
   end
 
   defp build_final_result_map(state) do
+    messages = final_messages_for(state)
+
     base = %{
       status: state.status,
       result: extract_result_text(state.result),
       tool_calls_used: state.tool_calls_used,
       duration_ms: state.duration_ms,
-      messages: state.messages
+      messages: messages,
+      transcript_tail: transcript_tail_from_messages(messages)
     }
 
     # Include awaiting details so get_agent_results can surface them
-    if state.status == :awaiting_orchestrator do
-      base
-      |> Map.put(:reason, state.awaiting_reason)
-      |> Map.put(:partial_history, state.awaiting_partial_history)
+    base =
+      if state.status == :awaiting_orchestrator do
+        base
+        |> Map.put(:reason, state.awaiting_reason)
+        |> Map.put(:partial_history, state.awaiting_partial_history)
+      else
+        base
+      end
+
+    if state.status == :cancelled and is_binary(state.cancel_reason) do
+      Map.put(base, :cancel_reason, state.cancel_reason)
     else
       base
     end
@@ -1590,6 +1773,108 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp elapsed_ms(started_at) do
     System.monotonic_time(:millisecond) - started_at
+  end
+
+  defp build_snapshot(state) do
+    messages = snapshot_messages(final_messages_for(state))
+
+    %{
+      agent_id: state.agent_id,
+      mission: state.dispatch_params.mission,
+      status: state.status,
+      result: extract_result_text(state.result),
+      tool_calls_used: state.tool_calls_used,
+      duration_ms: state.duration_ms || elapsed_ms(state.started_at),
+      updated_at: state.snapshot_updated_at,
+      messages: messages,
+      transcript_tail: transcript_tail_from_messages(messages),
+      peer_agents: state.dispatch_params[:peer_agents] || []
+    }
+  end
+
+  defp cancel_state(state, reason) do
+    duration_ms = elapsed_ms(state.started_at)
+    messages = final_messages_for(state)
+
+    %{
+      state
+      | status: :cancelled,
+        result: "Agent cancelled: #{reason}",
+        duration_ms: duration_ms,
+        cancel_reason: reason,
+        messages: messages,
+        live_messages: snapshot_messages(messages)
+    }
+  end
+
+  defp update_live_snapshot(state, messages) do
+    %{
+      state
+      | live_messages: snapshot_messages(messages),
+        snapshot_updated_at: DateTime.utc_now()
+    }
+  end
+
+  defp publish_snapshot(genserver_pid, messages) when is_pid(genserver_pid) do
+    send(genserver_pid, {:snapshot_update, messages})
+  end
+
+  defp publish_snapshot(_genserver_pid, _messages), do: :ok
+
+  defp final_messages_for(state) do
+    cond do
+      is_list(state.messages) -> state.messages
+      is_list(state.live_messages) -> state.live_messages
+      true -> []
+    end
+  end
+
+  @max_snapshot_messages 40
+  @max_transcript_tail_lines 10
+
+  defp snapshot_messages(messages) when is_list(messages) do
+    messages
+    |> Enum.reject(fn msg -> msg[:role] == "system" end)
+    |> Enum.take(-@max_snapshot_messages)
+  end
+
+  defp snapshot_messages(_), do: []
+
+  defp transcript_tail(state) do
+    state
+    |> final_messages_for()
+    |> transcript_tail_from_messages()
+  end
+
+  defp transcript_tail_from_messages(messages) do
+    messages
+    |> snapshot_messages()
+    |> Enum.map(&format_snapshot_message/1)
+    |> Enum.take(-@max_transcript_tail_lines)
+  end
+
+  defp format_snapshot_message(%{role: "assistant", tool_calls: tool_calls} = msg)
+       when is_list(tool_calls) and tool_calls != [] do
+    calls_text =
+      Enum.map_join(tool_calls, "\n", fn tc ->
+        name = get_in(tc, [:function, :name]) || get_in(tc, ["function", "name"]) || "unknown"
+        args = get_in(tc, [:function, :arguments]) || get_in(tc, ["function", "arguments"]) || ""
+        "[tool_call] #{name}: #{args}"
+      end)
+
+    case msg[:content] do
+      nil -> "[assistant]\n#{calls_text}"
+      "" -> "[assistant]\n#{calls_text}"
+      text -> "[assistant] #{text}\n#{calls_text}"
+    end
+  end
+
+  defp format_snapshot_message(%{role: role, content: content}) do
+    "[#{role}] #{content}"
+  end
+
+  defp format_snapshot_message(%{role: role}) do
+    "[#{role}]"
   end
 
   # Non-blocking check for an interrupt message from the GenServer.

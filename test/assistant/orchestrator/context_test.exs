@@ -7,6 +7,8 @@
 defmodule Assistant.Orchestrator.ContextTest do
   use ExUnit.Case, async: true
 
+  alias Assistant.Orchestrator.Context
+
   # We test the trimming logic by calling the module's private functions
   # through the public API surface. Since trim_messages is private,
   # we test it indirectly through build/3 behavior or by extracting
@@ -109,6 +111,17 @@ defmodule Assistant.Orchestrator.ContextTest do
       # Baseline covers everything, no new messages
       trimmed = trim_by_usage(messages, 100_000, 500, 3)
       assert length(trimmed) == 3
+    end
+  end
+
+  describe "system prompt contract" do
+    test "includes non-interrupting query and hard cancel guidance" do
+      prompt = Context.build_system_prompt(%{user_id: "user-1", channel: "test"})
+
+      assert prompt =~ "query_subagent"
+      assert prompt =~ "cancel_agent"
+      assert prompt =~ "Use query_subagent only for read-only inspection"
+      assert prompt =~ "A cancelled agent cannot be resumed in place"
     end
   end
 

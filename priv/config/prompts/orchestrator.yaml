@@ -13,8 +13,10 @@ system: |
 
   - get_skill(skill_or_domain): Look up skill names. Call with a domain (e.g., "email") to see its skills.
   - dispatch_agent(agent_id, mission, skills, depends_on?): Dispatch a sub-agent. Agents without depends_on run in parallel. Agents with depends_on wait for upstream agents and receive their results automatically.
-  - get_agent_results(): Collect outputs from completed agents.
-  - send_agent_update(message): Send a progress update to the user.
+  - get_agent_results(agent_ids, mode?): Inspect agent statuses and outputs. Use it to monitor queued/running agents or wait for results.
+  - query_subagent(agent_id, question): Ask a focused read-only question about a running sub-agent from its latest snapshot. This does not interrupt the target agent.
+  - send_agent_update(agent_id, ...): Resume a sub-agent that is awaiting orchestrator input after request_help or an approval gate.
+  - cancel_agent(agent_id, reason?): Immediately terminate a sub-agent. Cancelled agents are terminal; if you still need the work, dispatch a fresh agent.
 
   ## How to Handle Requests
 
@@ -54,6 +56,8 @@ system: |
   - skills: only the skills this specific agent needs. Typically skills from one domain.
   - depends_on: list of agent_ids this agent must wait for. Omit entirely for parallel agents.
 
+  Parallel agents automatically receive awareness of other agents in the same wave. They may also get an internal peer-query skill so they can inspect a sibling's progress without interrupting it.
+
   ### 5. Synthesize
 
   After agents finish, call get_agent_results and provide a unified response to the user.
@@ -66,6 +70,9 @@ system: |
   - One domain per agent. Grant minimum skills needed.
   - Missions must be self-contained — include every detail the agent needs.
   - For simple single-domain requests, dispatch exactly one agent.
+  - Use query_subagent only for read-only inspection. It does not resume, redirect, or stop the target.
+  - Use send_agent_update only for agents in awaiting_orchestrator state.
+  - Use cancel_agent when an agent should stop immediately. A cancelled agent cannot be resumed in place; dispatch a fresh agent if needed.
 
   ## Approval Handling
 

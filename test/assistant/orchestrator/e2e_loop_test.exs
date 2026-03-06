@@ -40,9 +40,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
 
     # Skills.Registry (ETS-backed GenServer for skill lookups)
     if :ets.whereis(:assistant_skills) == :undefined do
-      tmp = Path.join(System.tmp_dir!(), "e2e_skills_#{System.unique_integer([:positive])}")
-      File.mkdir_p!(tmp)
-      start_unlinked(Assistant.Skills.Registry, skills_dir: tmp)
+      skills_dir = Path.join(File.cwd!(), "priv/skills")
+      start_unlinked(Assistant.Skills.Registry, skills_dir: skills_dir)
     end
 
     # PromptLoader (ETS-backed GenServer for prompt templates)
@@ -63,6 +62,7 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
     end
 
     # Config.Loader (ETS-backed GenServer for model/limits config)
+    original_config_path = current_config_loader_path()
     ensure_config_loader_started()
 
     # --- Bypass for OpenRouter HTTP ---
@@ -89,6 +89,8 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
       else
         Application.delete_env(:assistant, :openrouter_api_key)
       end
+
+      restore_config_loader(original_config_path)
     end)
 
     %{bypass: bypass}
@@ -910,56 +912,116 @@ defmodule Assistant.Orchestrator.E2ELoopTest do
     case module.start_link(opts) do
       {:ok, pid} -> Process.unlink(pid)
       {:error, {:already_started, _}} -> :ok
+      {:error, reason} -> raise "failed to start #{inspect(module)}: #{inspect(reason)}"
     end
   end
 
   defp ensure_config_loader_started do
-    if :ets.whereis(:assistant_config) != :undefined do
-      :ok
-    else
-      tmp_dir = System.tmp_dir!()
+    config_path = write_e2e_config_file()
 
-      config_path =
-        Path.join(tmp_dir, "test_config_e2e_#{System.unique_integer([:positive])}.yaml")
+    detach_supervised_config_loader()
+    stop_named_process(Assistant.Config.Loader)
+    delete_config_ets()
+    start_unlinked(Assistant.Config.Loader, path: config_path)
+  end
 
-      yaml = """
-      defaults:
-        orchestrator: primary
-        compaction: fast
-
-      models:
-        - id: "test/fast"
-          tier: fast
-          description: "test model"
-          use_cases: [orchestrator, compaction, sentinel, sub_agent]
-          supports_tools: true
-          max_context_tokens: 100000
-          cost_tier: low
-
-      http:
-        max_retries: 0
-        base_backoff_ms: 100
-        max_backoff_ms: 1000
-        request_timeout_ms: 5000
-        streaming_timeout_ms: 10000
-
-      limits:
-        context_utilization_target: 0.85
-        compaction_trigger_threshold: 0.75
-        response_reserve_tokens: 1024
-        orchestrator_turn_limit: 10
-        sub_agent_turn_limit: 5
-        cache_ttl_seconds: 60
-        orchestrator_cache_breakpoints: 2
-        sub_agent_cache_breakpoints: 1
-      """
-
-      File.write!(config_path, yaml)
-
-      case Assistant.Config.Loader.start_link(path: config_path) do
-        {:ok, _} -> :ok
-        {:error, {:already_started, _}} -> :ok
-      end
+  defp current_config_loader_path do
+    case Process.whereis(Assistant.Config.Loader) do
+      nil -> nil
+      _pid -> :sys.get_state(Assistant.Config.Loader).path
     end
+  end
+
+  defp restore_config_loader(nil) do
+    stop_named_process(Assistant.Config.Loader)
+    delete_config_ets()
+  end
+
+  defp restore_config_loader(path) do
+    stop_named_process(Assistant.Config.Loader)
+    delete_config_ets()
+
+    if Process.whereis(Assistant.Supervisor) do
+      Supervisor.start_child(Assistant.Supervisor, {Assistant.Config.Loader, path: path})
+    else
+      start_unlinked(Assistant.Config.Loader, path: path)
+    end
+  end
+
+  defp stop_named_process(name) do
+    case Process.whereis(name) do
+      nil ->
+        :ok
+
+      pid ->
+        ref = Process.monitor(pid)
+        GenServer.stop(pid, :normal, 5_000)
+        assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 5_000
+        :ok
+    end
+  end
+
+  defp detach_supervised_config_loader do
+    if Process.whereis(Assistant.Config.Loader) && Process.whereis(Assistant.Supervisor) do
+      Supervisor.terminate_child(Assistant.Supervisor, Assistant.Config.Loader)
+      Supervisor.delete_child(Assistant.Supervisor, Assistant.Config.Loader)
+    end
+  end
+
+  defp delete_config_ets do
+    if :ets.whereis(:assistant_config) != :undefined do
+      :ets.delete(:assistant_config)
+    end
+  end
+
+  defp write_e2e_config_file do
+    tmp_dir = System.tmp_dir!()
+
+    config_path =
+      Path.join(tmp_dir, "test_config_e2e_#{System.unique_integer([:positive])}.yaml")
+
+    yaml = """
+    defaults:
+      orchestrator: primary
+      sub_agent: primary
+      compaction: fast
+      sentinel: fast
+
+    models:
+      - id: "test/primary"
+        tier: primary
+        description: "test primary model"
+        use_cases: [orchestrator, sub_agent]
+        supports_tools: true
+        max_context_tokens: 100000
+        cost_tier: low
+      - id: "test/fast"
+        tier: fast
+        description: "test fast model"
+        use_cases: [compaction, sentinel]
+        supports_tools: true
+        max_context_tokens: 100000
+        cost_tier: low
+
+    http:
+      max_retries: 0
+      base_backoff_ms: 100
+      max_backoff_ms: 1000
+      request_timeout_ms: 5000
+      streaming_timeout_ms: 10000
+
+    limits:
+      context_utilization_target: 0.85
+      compaction_trigger_threshold: 0.75
+      response_reserve_tokens: 1024
+      orchestrator_turn_limit: 10
+      sub_agent_turn_limit: 5
+      cache_ttl_seconds: 60
+      orchestrator_cache_breakpoints: 2
+      sub_agent_cache_breakpoints: 1
+    """
+
+    File.write!(config_path, yaml)
+    config_path
   end
 end

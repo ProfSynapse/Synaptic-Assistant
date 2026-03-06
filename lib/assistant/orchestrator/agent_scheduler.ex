@@ -128,6 +128,38 @@ defmodule Assistant.Orchestrator.AgentScheduler do
     end
   end
 
+  @doc """
+  Marks transitive dependents of failed agents as skipped and removes them from
+  remaining waves.
+
+  Useful for non-blocking engine orchestration where waves are launched over
+  time rather than in a single blocking `execute/3` call.
+  """
+  @spec mark_blocked_dependents([String.t()], [[String.t()]], map()) :: {map(), [[String.t()]]}
+  def mark_blocked_dependents([], remaining_waves, _dispatches), do: {%{}, remaining_waves}
+
+  def mark_blocked_dependents(failed_ids, remaining_waves, dispatches) do
+    failed_set = MapSet.new(failed_ids)
+
+    skipped =
+      find_transitive_dependents(failed_set, List.flatten(remaining_waves), dispatches)
+      |> Enum.into(%{}, fn id ->
+        dep_chain =
+          failed_set
+          |> MapSet.to_list()
+          |> Enum.join(", ")
+
+        {id,
+         %{
+           status: :skipped,
+           result: "Skipped because dependency failed: #{dep_chain}",
+           tool_calls_used: 0
+         }}
+      end)
+
+    {skipped, remove_skipped_from_waves(remaining_waves, skipped)}
+  end
+
   # --- Graph Building ---
 
   defp build_graph(dispatches) do
@@ -314,7 +346,7 @@ defmodule Assistant.Orchestrator.AgentScheduler do
   defp handle_wave_failures(wave_results, remaining_waves, dispatches) do
     failed_ids =
       wave_results
-      |> Enum.filter(fn {_id, result} -> result[:status] in [:failed, :timeout] end)
+      |> Enum.filter(fn {_id, result} -> result[:status] in [:failed, :timeout, :cancelled] end)
       |> Enum.map(fn {id, _} -> id end)
       |> MapSet.new()
 

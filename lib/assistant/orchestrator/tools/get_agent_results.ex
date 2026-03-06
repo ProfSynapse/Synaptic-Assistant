@@ -24,7 +24,7 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
 
   ## Agent States
 
-  Terminal states: `completed`, `failed`, `timeout`
+  Terminal states: `completed`, `failed`, `timeout`, `cancelled`, `skipped`
   Non-terminal: `pending`, `running`
 
   ## Integration
@@ -41,8 +41,15 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
   @default_wait_ms 5_000
   @max_wait_ms 60_000
   @default_tail_lines 10
-  @terminal_statuses [:completed, :failed, :timeout]
-  @actionable_statuses [:completed, :failed, :timeout, :awaiting_orchestrator]
+  @terminal_statuses [:completed, :failed, :timeout, :cancelled, :skipped]
+  @actionable_statuses [
+    :completed,
+    :failed,
+    :timeout,
+    :cancelled,
+    :skipped,
+    :awaiting_orchestrator
+  ]
 
   @doc """
   Returns the OpenAI-compatible function tool definition for get_agent_results.
@@ -201,6 +208,7 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
         total: length(agents_data),
         completed: Enum.count(agents_data, &(&1.status == "completed")),
         failed: Enum.count(agents_data, &(&1.status in ["failed", "timeout"])),
+        cancelled: Enum.count(agents_data, &(&1.status == "cancelled")),
         awaiting: Enum.count(agents_data, &(&1.status == "awaiting_orchestrator"))
       }
     }
@@ -296,6 +304,8 @@ defmodule Assistant.Orchestrator.Tools.GetAgentResults do
   defp status_icon("completed"), do: "[OK]"
   defp status_icon("failed"), do: "[FAIL]"
   defp status_icon("timeout"), do: "[TIMEOUT]"
+  defp status_icon("cancelled"), do: "[CANCELLED]"
+  defp status_icon("skipped"), do: "[SKIPPED]"
   defp status_icon("running"), do: "[RUNNING]"
   defp status_icon("pending"), do: "[PENDING]"
   defp status_icon("awaiting_orchestrator"), do: "[AWAITING]"
