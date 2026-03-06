@@ -793,19 +793,24 @@ defmodule Assistant.Skills.ApprovalGateTest do
              "System prompt missing general approval workflow"
     end
 
-    test "orchestrator tool definitions include all 6 tools with correct schemas" do
+    test "orchestrator tool definitions include task and agent tools with correct schemas" do
       tools = Assistant.Orchestrator.Context.tool_definitions()
       tool_names = Enum.map(tools, & &1.function.name) |> Enum.sort()
 
       assert tool_names == [
                "cancel_agent",
+               "create_task",
+               "delete_task",
                "dispatch_agent",
                "get_agent_results",
                "get_skill",
+               "get_task",
                "query_subagent",
-               "send_agent_update"
+               "search_tasks",
+               "send_agent_update",
+               "update_task"
              ],
-             "Expected 6 orchestrator tools, got: #{inspect(tool_names)}"
+             "Unexpected orchestrator tool set: #{inspect(tool_names)}"
     end
 
     test "send_agent_update tool has approved boolean parameter" do
@@ -963,6 +968,23 @@ defmodule Assistant.Skills.ApprovalGateTest do
 
         assert content =~ "approved",
                "orchestrator.yaml should mention the approved field"
+      end
+    end
+
+    test "orchestrator.yaml defines the orchestrator as task-oriented project manager" do
+      path = Path.join(File.cwd!(), "priv/config/prompts/orchestrator.yaml")
+
+      if File.exists?(path) do
+        {:ok, content} = File.read(path)
+
+        assert content =~ "project manager and task master",
+               "orchestrator.yaml should define the orchestrator's purpose explicitly"
+
+        assert content =~ "Think in tasks, assignments, dependencies, blockers, and next steps",
+               "orchestrator.yaml should reinforce task-oriented control flow"
+
+        assert content =~ "NEVER execute non-task domain work yourself",
+               "orchestrator.yaml should keep domain work delegated to sub-agents"
       end
     end
   end

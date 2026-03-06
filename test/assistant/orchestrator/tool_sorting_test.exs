@@ -40,10 +40,15 @@ defmodule Assistant.Orchestrator.ToolSortingTest do
       tools = [
         %{function: %{name: "send_agent_update"}},
         %{function: %{name: "cancel_agent"}},
+        %{function: %{name: "create_task"}},
+        %{function: %{name: "delete_task"}},
         %{function: %{name: "query_subagent"}},
         %{function: %{name: "get_skill"}},
+        %{function: %{name: "get_task"}},
+        %{function: %{name: "search_tasks"}},
         %{function: %{name: "dispatch_agent"}},
-        %{function: %{name: "get_agent_results"}}
+        %{function: %{name: "get_agent_results"}},
+        %{function: %{name: "update_task"}}
       ]
 
       sorted = OpenRouter.sort_tools(tools)
@@ -51,11 +56,16 @@ defmodule Assistant.Orchestrator.ToolSortingTest do
 
       assert names == [
                "cancel_agent",
+               "create_task",
+               "delete_task",
                "dispatch_agent",
                "get_agent_results",
                "get_skill",
+               "get_task",
                "query_subagent",
-               "send_agent_update"
+               "search_tasks",
+               "send_agent_update",
+               "update_task"
              ]
     end
 
@@ -108,8 +118,10 @@ defmodule Assistant.Orchestrator.ToolSortingTest do
       tools = [
         %{type: "function", function: %{name: "send_agent_update"}},
         %{type: "function", function: %{name: "cancel_agent"}},
+        %{type: "function", function: %{name: "create_task"}},
         %{type: "function", function: %{name: "dispatch_agent"}},
         %{type: "function", function: %{name: "get_skill"}},
+        %{type: "function", function: %{name: "get_task"}},
         %{type: "function", function: %{name: "query_subagent"}}
       ]
 
@@ -119,8 +131,10 @@ defmodule Assistant.Orchestrator.ToolSortingTest do
 
       assert names == [
                "cancel_agent",
+               "create_task",
                "dispatch_agent",
                "get_skill",
+               "get_task",
                "query_subagent",
                "send_agent_update"
              ]

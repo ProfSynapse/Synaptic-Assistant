@@ -43,11 +43,16 @@ defmodule Assistant.Orchestrator.LoopRunner do
 
   alias Assistant.Orchestrator.Tools.{
     CancelAgent,
+    CreateTask,
+    DeleteTask,
     DispatchAgent,
     GetAgentResults,
     GetSkill,
+    GetTask,
     QuerySubagent,
-    SendAgentUpdate
+    SearchTasks,
+    SendAgentUpdate,
+    UpdateTask
   }
 
   alias Assistant.Skills.Result, as: SkillResult
@@ -180,6 +185,10 @@ defmodule Assistant.Orchestrator.LoopRunner do
         {:ok, result} = GetSkill.execute(args, nil)
         {:local, result}
 
+      "create_task" ->
+        {:ok, result} = CreateTask.execute(args, loop_state)
+        {:local, result}
+
       "dispatch_agent" ->
         context = build_skill_context(loop_state)
         {:ok, result} = DispatchAgent.execute(args, context)
@@ -201,6 +210,22 @@ defmodule Assistant.Orchestrator.LoopRunner do
           {:wait, mode, timeout_ms, agent_ids} ->
             {:wait, mode, timeout_ms, agent_ids}
         end
+
+      "get_task" ->
+        {:ok, result} = GetTask.execute(args, loop_state)
+        {:local, result}
+
+      "search_tasks" ->
+        {:ok, result} = SearchTasks.execute(args, loop_state)
+        {:local, result}
+
+      "update_task" ->
+        {:ok, result} = UpdateTask.execute(args, loop_state)
+        {:local, result}
+
+      "delete_task" ->
+        {:ok, result} = DeleteTask.execute(args, loop_state)
+        {:local, result}
 
       "send_agent_update" ->
         {:ok, result} = SendAgentUpdate.execute(args, nil)
