@@ -27,6 +27,9 @@ defmodule Assistant.Integrations.LLMRouter do
 
   alias Assistant.Accounts
   alias Assistant.Integrations.{OpenAI, OpenRouter}
+  alias Assistant.SpendingLimits
+
+  require Logger
 
   @type route :: %{
           client: module(),
@@ -77,9 +80,33 @@ defmodule Assistant.Integrations.LLMRouter do
     end
   end
 
+  # TOCTOU note: The budget check runs pre-flight (before the LLM call) while
+  # usage is recorded post-flight (after the call completes in LoopRunner/SubAgent).
+  # This means a user can exceed their budget by one call if they hit the limit
+  # mid-request. This is an accepted trade-off because the actual cost is unknown
+  # until the LLM responds — we cannot deduct before the call. The next call will
+  # be blocked by the pre-flight check.
   @spec chat_completion([map()], keyword(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
   def chat_completion(messages, opts, user_id) when is_list(opts) do
+    if Keyword.get(opts, :skip_spending_check, false) do
+      do_chat_completion(messages, opts, user_id)
+    else
+      case SpendingLimits.Enforcer.check_budget(user_id) do
+        :ok ->
+          do_chat_completion(messages, opts, user_id)
+
+        {:warning, pct} ->
+          Logger.info("User #{user_id} at #{pct}% of spending budget")
+          do_chat_completion(messages, opts, user_id)
+
+        {:error, :over_budget} ->
+          {:error, :over_budget}
+      end
+    end
+  end
+
+  defp do_chat_completion(messages, opts, user_id) do
     model = Keyword.get(opts, :model)
     routing = route(model, user_id)
 

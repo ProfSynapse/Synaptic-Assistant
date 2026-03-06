@@ -87,6 +87,7 @@ defmodule Assistant.Memory.Agent do
   alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
   alias Assistant.Skills.{Context, Registry, Result}
+  alias Assistant.SpendingLimits
 
   require Logger
 
@@ -418,6 +419,17 @@ defmodule Assistant.Memory.Agent do
         record_llm_analytics(gen_state, response, model, :ok)
 
         handle_response(response, context, agent_state, executor_session, gen_state, parent)
+
+      {:error, :over_budget} ->
+        Logger.warning("MemoryAgent skipped — user over spending budget",
+          user_id: gen_state.user_id
+        )
+
+        %{
+          status: :failed,
+          result: SpendingLimits.Enforcer.over_budget_message(),
+          tool_calls_used: agent_state.skill_calls
+        }
 
       {:error, reason} ->
         record_llm_analytics(gen_state, nil, model, :error, reason)

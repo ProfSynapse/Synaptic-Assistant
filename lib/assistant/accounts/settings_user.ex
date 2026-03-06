@@ -7,6 +7,7 @@ defmodule Assistant.Accounts.SettingsUser do
   @model_default_roles ~w(orchestrator sub_agent sentinel compaction)
 
   schema "settings_users" do
+    field :full_name, :string
     field :display_name, :string
     field :timezone, :string, default: "UTC"
     field :email, :string
@@ -53,8 +54,9 @@ defmodule Assistant.Accounts.SettingsUser do
   """
   def profile_changeset(settings_user, attrs) do
     settings_user
-    |> cast(attrs, [:display_name, :email, :timezone])
+    |> cast(attrs, [:full_name, :display_name, :email, :timezone])
     |> validate_required([:email])
+    |> validate_length(:full_name, max: 160)
     |> validate_length(:display_name, max: 160)
     |> validate_length(:timezone, max: 100)
     |> validate_email(validate_changed: false)

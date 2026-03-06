@@ -69,6 +69,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   alias Assistant.Config.{Loader, PromptLoader}
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.LLMRouter
+  alias Assistant.AccessScopes
 
   alias Assistant.Orchestrator.{
     ApprovalGate,
@@ -80,6 +81,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   }
 
   alias Assistant.SkillPermissions
+  alias Assistant.SpendingLimits
   alias Assistant.Skills.{Context, Executor, Registry, Result}
 
   require Logger
@@ -610,6 +612,7 @@ defmodule Assistant.Orchestrator.SubAgent do
     case LLMRouter.chat_completion(context.messages, model_opts, user_id) do
       {:ok, response} ->
         record_llm_analytics(engine_state, response, model, :ok)
+        record_spending(engine_state, response)
 
         handle_response(
           response,
@@ -619,6 +622,14 @@ defmodule Assistant.Orchestrator.SubAgent do
           engine_state,
           genserver_pid
         )
+
+      {:error, :over_budget} ->
+        %{
+          status: :completed,
+          result: SpendingLimits.Enforcer.over_budget_message(),
+          tool_calls_used: agent_state.skill_calls,
+          messages: context.messages
+        }
 
       {:error, reason} ->
         record_llm_analytics(engine_state, nil, model, :error, reason)
@@ -890,6 +901,9 @@ defmodule Assistant.Orchestrator.SubAgent do
     cond do
       is_nil(skill_name) ->
         {tc, "Error: Missing required \"skill\" parameter in use_skill call."}
+
+      not AccessScopes.Enforcer.skill_allowed?(dispatch_params.user_id, skill_name) ->
+        {tc, "This feature is not available with your current access level."}
 
       not SkillPermissions.enabled_for_user?(dispatch_params.user_id, skill_name) ->
         {tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}
@@ -1522,6 +1536,10 @@ defmodule Assistant.Orchestrator.SubAgent do
       cost: usage[:cost] || 0.0,
       metadata: metadata
     })
+  end
+
+  defp record_spending(engine_state, response) do
+    SpendingLimits.Enforcer.record_spending(engine_state, response)
   end
 
   # --- Resume Helpers ---

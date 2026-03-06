@@ -243,6 +243,38 @@ defmodule AssistantWeb.SettingsUserAuth do
     end
   end
 
+  def on_mount({:require_scope, scope_name}, _params, session, socket) do
+    socket = mount_current_scope(socket, session)
+    scope = socket.assigns.current_scope
+
+    cond do
+      is_nil(scope) or is_nil(scope.settings_user) ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
+          |> Phoenix.LiveView.redirect(to: ~p"/settings_users/log-in")
+
+        {:halt, socket}
+
+      scope.admin? ->
+        {:cont, socket}
+
+      scope.privileges == [] ->
+        {:cont, socket}
+
+      scope_name in scope.privileges ->
+        {:cont, socket}
+
+      true ->
+        socket =
+          socket
+          |> Phoenix.LiveView.put_flash(:error, "Access denied.")
+          |> Phoenix.LiveView.redirect(to: ~p"/")
+
+        {:halt, socket}
+    end
+  end
+
   def on_mount(:require_sudo_mode, _params, session, socket) do
     socket = mount_current_scope(socket, session)
 

@@ -26,6 +26,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.OrchestratorSystemPrompt
   alias Assistant.SettingsUserConnectorStates
   alias Assistant.SkillPermissions
+  alias Assistant.SpendingLimits
   alias Assistant.Sync.FileManager
   alias Assistant.Sync.StateStore
   alias Assistant.Sync.Workers.FileSyncWorker
@@ -998,23 +999,50 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("save_allowlist_entry", %{"allowlist_entry" => params}, socket) do
-    case Accounts.upsert_settings_user_allowlist_entry(
-           params,
-           socket.assigns.current_scope.settings_user
-         ) do
-      {:ok, _entry} ->
-        {:noreply,
-         socket
-         |> assign(:creating_new_user, false)
-         |> put_flash(:info, "User added successfully.")
-         |> reload_current_user_scope()
-         |> Loaders.load_admin()}
+    if socket.assigns.creating_new_user do
+      attrs = %{
+        email: Map.get(params, "email"),
+        full_name: Map.get(params, "full_name"),
+        is_admin: Map.get(params, "is_admin") == "true",
+        access_scopes: List.wrap(Map.get(params, "scopes", []))
+      }
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        {:noreply, assign(socket, :allowlist_form, to_form(changeset, as: "allowlist_entry"))}
+      case Accounts.create_settings_user_from_admin(attrs) do
+        {:ok, settings_user} ->
+          socket = maybe_save_spending_limit(socket, settings_user.id, params)
 
-      {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Unable to save allow list entry.")}
+          {:noreply,
+           socket
+           |> assign(:creating_new_user, false)
+           |> put_flash(:info, "User created successfully.")
+           |> reload_current_user_scope()
+           |> Loaders.load_admin()}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply, assign(socket, :allowlist_form, to_form(changeset, as: "allowlist_entry"))}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to create user.")}
+      end
+    else
+      case Accounts.upsert_settings_user_allowlist_entry(
+             params,
+             socket.assigns.current_scope.settings_user
+           ) do
+        {:ok, _entry} ->
+          {:noreply,
+           socket
+           |> assign(:creating_new_user, false)
+           |> put_flash(:info, "User added successfully.")
+           |> reload_current_user_scope()
+           |> Loaders.load_admin()}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply, assign(socket, :allowlist_form, to_form(changeset, as: "allowlist_entry"))}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Unable to save allow list entry.")}
+      end
     end
   end
 
@@ -1351,6 +1379,53 @@ defmodule AssistantWeb.SettingsLive.Events do
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Unable to remove API key.")}
       end
+    end
+  end
+
+  def handle_event("save_spending_limit", %{"user_id" => user_id} = params, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      budget_dollars = params["budget_dollars"] |> to_string() |> String.trim()
+
+      if budget_dollars == "" do
+        SpendingLimits.delete_spending_limit(user_id)
+
+        {:noreply,
+         socket
+         |> put_flash(:info, "Spending limit removed.")
+         |> Loaders.reload_admin_users()}
+      else
+        attrs = %{
+          budget_cents: parse_dollars_to_cents(budget_dollars),
+          hard_cap: params["hard_cap"] == "true",
+          warning_threshold: parse_int(params["warning_threshold"], 80)
+        }
+
+        case SpendingLimits.upsert_spending_limit(user_id, attrs) do
+          {:ok, _limit} ->
+            {:noreply,
+             socket
+             |> put_flash(:info, "Spending limit updated.")
+             |> Loaders.reload_admin_users()}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Unable to save spending limit.")}
+        end
+      end
+    end
+  end
+
+  def handle_event("remove_spending_limit", %{"id" => user_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      SpendingLimits.delete_spending_limit(user_id)
+
+      {:noreply,
+       socket
+       |> put_flash(:info, "Spending limit removed.")
+       |> Loaders.reload_admin_users()}
     end
   end
 
@@ -2886,6 +2961,39 @@ defmodule AssistantWeb.SettingsLive.Events do
       load_model_library(socket)
     else
       socket
+    end
+  end
+
+  defp maybe_save_spending_limit(socket, settings_user_id, params) do
+    budget_dollars = params["budget_dollars"] |> to_string() |> String.trim()
+
+    if budget_dollars != "" do
+      attrs = %{
+        budget_cents: parse_dollars_to_cents(budget_dollars),
+        hard_cap: params["hard_cap"] == "true",
+        warning_threshold: parse_int(params["warning_threshold"], 80)
+      }
+
+      case SpendingLimits.upsert_spending_limit(settings_user_id, attrs) do
+        {:ok, _} -> socket
+        {:error, _} -> put_flash(socket, :error, "User created but spending limit failed to save.")
+      end
+    else
+      socket
+    end
+  end
+
+  defp parse_dollars_to_cents(dollars_str) do
+    case Float.parse(to_string(dollars_str)) do
+      {amount, _} -> round(amount * 100)
+      :error -> 0
+    end
+  end
+
+  defp parse_int(value, default) do
+    case Integer.parse(to_string(value)) do
+      {n, _} -> n
+      :error -> default
     end
   end
 end

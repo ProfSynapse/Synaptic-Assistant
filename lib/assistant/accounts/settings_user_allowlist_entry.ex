@@ -7,6 +7,7 @@ defmodule Assistant.Accounts.SettingsUserAllowlistEntry do
 
   schema "settings_user_allowlist_entries" do
     field :email, :string
+    field :full_name, :string
     field :active, :boolean, default: true
     field :is_admin, :boolean, default: false
     field :scopes, {:array, :string}, default: []
@@ -22,7 +23,7 @@ defmodule Assistant.Accounts.SettingsUserAllowlistEntry do
     allowed_scopes = Keyword.get(opts, :allowed_scopes, [])
 
     entry
-    |> cast(attrs, [:email, :active, :is_admin, :scopes, :notes])
+    |> cast(attrs, [:email, :full_name, :active, :is_admin, :scopes, :notes])
     |> update_change(:email, &normalize_email/1)
     |> validate_required([:email])
     |> validate_format(:email, ~r/^[^@,;\s]+@[^@,;\s]+$/,

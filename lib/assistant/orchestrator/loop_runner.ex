@@ -38,6 +38,7 @@ defmodule Assistant.Orchestrator.LoopRunner do
 
   alias Assistant.Analytics
   alias Assistant.Integrations.LLMRouter
+  alias Assistant.SpendingLimits
   alias Assistant.Orchestrator.{Context, GoogleContext, LLMHelpers}
 
   alias Assistant.Orchestrator.Tools.{
@@ -88,7 +89,11 @@ defmodule Assistant.Orchestrator.LoopRunner do
     case LLMRouter.chat_completion(messages, llm_opts, user_id) do
       {:ok, response} ->
         record_llm_analytics(loop_state, response, model, :ok)
+        record_spending(loop_state, response)
         process_response(response, loop_state)
+
+      {:error, :over_budget} ->
+        {:text, SpendingLimits.Enforcer.over_budget_message(), %{}}
 
       {:error, reason} ->
         record_llm_analytics(loop_state, nil, model, :error, reason)
@@ -290,5 +295,9 @@ defmodule Assistant.Orchestrator.LoopRunner do
       cost: usage[:cost] || 0.0,
       metadata: metadata
     })
+  end
+
+  defp record_spending(loop_state, response) do
+    SpendingLimits.Enforcer.record_spending(loop_state, response)
   end
 end

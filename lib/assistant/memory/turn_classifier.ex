@@ -150,6 +150,12 @@ defmodule Assistant.Memory.TurnClassifier do
       {:ok, %{content: content}} ->
         handle_classification(content, conversation_id, user_id, user_message, assistant_response)
 
+      {:error, :over_budget} ->
+        Logger.warning("Turn classification skipped — user over spending budget",
+          conversation_id: conversation_id,
+          user_id: user_id
+        )
+
       {:error, reason} ->
         Logger.warning("Turn classification failed, skipping",
           conversation_id: conversation_id,

@@ -12,10 +12,10 @@ defmodule AssistantWeb.SettingsLive.AdminIntegrationDetailTest do
       %{conn: conn}
     end
 
-    test "admin section renders per-integration manage links", %{conn: conn} do
+    test "admin section renders per-integration settings links", %{conn: conn} do
       {:ok, _lv, html} = live(conn, ~p"/settings/admin")
 
-      assert html =~ "Manage Integration"
+      # Integration catalog renders cog icon links to detail pages
       assert html =~ "/settings/admin/integrations/hubspot"
       assert html =~ "/settings/admin/integrations/google_chat"
     end

@@ -41,6 +41,15 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
           <div class="sa-detail-grid" style="margin-bottom: 24px;">
             <div class="sa-detail-item">
               <.field
+                type="text"
+                field={@allowlist_form[:full_name]}
+                label="Full Name"
+                placeholder="Jane Smith"
+                no_margin
+              />
+            </div>
+            <div class="sa-detail-item">
+              <.field
                 type="email"
                 field={@allowlist_form[:email]}
                 label="Email"
@@ -117,6 +126,63 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
             </label>
           </div>
 
+          <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0 0 16px 0;">Spending Limit</h3>
+          <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 0 0 12px 0;">
+            Set a monthly budget for this user's LLM usage. Leave blank for no limit.
+          </p>
+
+          <div class="sa-detail-grid" style="margin-bottom: 16px;">
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Monthly Budget ($)
+              </label>
+              <input
+                type="number"
+                name="allowlist_entry[budget_dollars]"
+                placeholder="50.00"
+                step="0.01"
+                min="0"
+                class="sa-input"
+                style="max-width: 200px;"
+              />
+            </div>
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Warning Threshold (%)
+              </label>
+              <input
+                type="number"
+                name="allowlist_entry[warning_threshold]"
+                value="80"
+                min="1"
+                max="100"
+                class="sa-input"
+                style="max-width: 200px;"
+              />
+            </div>
+          </div>
+
+          <div class="sa-row" style="margin-bottom: 24px;">
+            <div>
+              <span style="font-weight: 500;">Hard Cap</span>
+              <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 2px 0 0 0;">
+                Block LLM calls when budget is exceeded.
+              </p>
+            </div>
+            <label class="sa-switch">
+              <input
+                type="checkbox"
+                name="allowlist_entry[hard_cap]"
+                value="true"
+                class="sa-switch-input"
+                role="switch"
+                checked={true}
+                aria-label="Toggle hard cap"
+              />
+              <span class="sa-switch-slider"></span>
+            </label>
+          </div>
+
           <div style="display: flex; gap: 0.75rem;">
             <.button id="save-new-user-btn" phx-disable-with="Saving...">
               Create User
@@ -142,10 +208,15 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
     is_self = assigns.user.id == assigns.current_user_id
     model_defaults_toggle_disabled = assigns.user.is_admin
 
+    spending_limit = assigns.user[:spending_limit]
+    spending_usage = assigns.user[:spending_usage] || %{has_limit: false}
+
     assigns =
       assigns
       |> assign(:is_self, is_self)
       |> assign(:model_defaults_toggle_disabled, model_defaults_toggle_disabled)
+      |> assign(:spending_limit, spending_limit)
+      |> assign(:spending_usage, spending_usage)
 
     ~H"""
     <section class="space-y-6">
@@ -173,6 +244,10 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
         </div>
 
         <div class="sa-detail-grid">
+          <div class="sa-detail-item">
+            <span class="sa-detail-label">Full Name</span>
+            <span class="sa-detail-value">{@user[:full_name] || "Not set"}</span>
+          </div>
           <div class="sa-detail-item">
             <span class="sa-detail-label">Display Name</span>
             <span class="sa-detail-value">{@user.display_name || "Not set"}</span>
@@ -290,6 +365,88 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
             <span class="sa-switch-slider"></span>
           </label>
         </div>
+      </div>
+
+      <div class="sa-card">
+        <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0 0 16px 0;">Spending Limit</h3>
+
+        <.spending_usage_display :if={@spending_usage.has_limit} usage={@spending_usage} />
+
+        <form
+          phx-submit="save_spending_limit"
+          id={"spending-limit-form-#{@user.id}"}
+        >
+          <input type="hidden" name="user_id" value={@user.id} />
+
+          <div class="sa-detail-grid" style="margin-bottom: 16px;">
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Monthly Budget ($)
+              </label>
+              <input
+                type="number"
+                name="budget_dollars"
+                value={spending_budget_dollars(@spending_limit)}
+                placeholder="50.00"
+                step="0.01"
+                min="0"
+                class="sa-input"
+                style="max-width: 200px;"
+              />
+            </div>
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Warning Threshold (%)
+              </label>
+              <input
+                type="number"
+                name="warning_threshold"
+                value={spending_warning_threshold(@spending_limit)}
+                min="1"
+                max="100"
+                class="sa-input"
+                style="max-width: 200px;"
+              />
+            </div>
+          </div>
+
+          <div class="sa-row" style="margin-bottom: 16px;">
+            <div>
+              <span style="font-weight: 500;">Hard Cap</span>
+              <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 2px 0 0 0;">
+                Block LLM calls when budget is exceeded.
+              </p>
+            </div>
+            <label class="sa-switch">
+              <input
+                type="checkbox"
+                name="hard_cap"
+                value="true"
+                class="sa-switch-input"
+                role="switch"
+                checked={spending_hard_cap?(@spending_limit)}
+                aria-label="Toggle hard cap"
+              />
+              <span class="sa-switch-slider"></span>
+            </label>
+          </div>
+
+          <div style="display: flex; gap: 0.75rem;">
+            <button type="submit" class="sa-btn">
+              Save Spending Limit
+            </button>
+            <button
+              :if={@spending_limit}
+              type="button"
+              phx-click="remove_spending_limit"
+              phx-value-id={@user.id}
+              class="sa-btn sa-btn-danger"
+              data-confirm="Remove spending limit for this user?"
+            >
+              Remove Limit
+            </button>
+          </div>
+        </form>
       </div>
 
       <div class="sa-card">
@@ -420,6 +577,50 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
     """
   end
 
+  attr :usage, :map, required: true
+
+  defp spending_usage_display(assigns) do
+    pct = min(assigns.usage.percentage, 100)
+    used_dollars = assigns.usage.used_cents / 100
+    budget_dollars = assigns.usage.budget_cents / 100
+
+    bar_color =
+      cond do
+        pct >= 100 -> "var(--sa-danger, #ef4444)"
+        pct >= assigns.usage.warning_threshold -> "var(--sa-warning, #f59e0b)"
+        true -> "var(--sa-success, #22c55e)"
+      end
+
+    assigns =
+      assigns
+      |> assign(:pct, pct)
+      |> assign(:used_dollars, used_dollars)
+      |> assign(:budget_dollars, budget_dollars)
+      |> assign(:bar_color, bar_color)
+
+    ~H"""
+    <div style="margin-bottom: 20px; padding: 12px; border-radius: 8px; background: var(--sa-surface-alt, #fafafa);">
+      <div class="sa-row" style="margin-bottom: 8px;">
+        <span style="font-weight: 500; font-size: 0.875rem;">Current Period Usage</span>
+        <span style="font-size: 0.875rem; color: var(--sa-text-secondary);">
+          {"$#{:erlang.float_to_binary(@used_dollars, decimals: 2)} / $#{:erlang.float_to_binary(@budget_dollars, decimals: 2)}"}
+        </span>
+      </div>
+      <div style="width: 100%; height: 8px; background: var(--sa-border, #e5e7eb); border-radius: 4px; overflow: hidden;">
+        <div style={"width: #{@pct}%; height: 100%; background: #{@bar_color}; border-radius: 4px; transition: width 0.3s ease;"}></div>
+      </div>
+      <div class="sa-row" style="margin-top: 4px;">
+        <span style="font-size: 0.75rem; color: var(--sa-text-muted, #71717a);">
+          {"#{:erlang.float_to_binary(@usage.percentage, decimals: 1)}% used"}
+        </span>
+        <span :if={@usage.hard_cap} style="font-size: 0.75rem; color: var(--sa-text-muted, #71717a);">
+          Hard cap enabled
+        </span>
+      </div>
+    </div>
+    """
+  end
+
   defp model_defaults_scope_label(%{is_admin: true}), do: "App-wide admin"
 
   defp model_defaults_scope_label(%{can_manage_model_defaults: true, model_defaults: overrides})
@@ -444,4 +645,13 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
       :system -> "System fallback"
     end
   end
+
+  defp spending_budget_dollars(nil), do: ""
+  defp spending_budget_dollars(%{budget_cents: cents}), do: :erlang.float_to_binary(cents / 100, decimals: 2)
+
+  defp spending_warning_threshold(nil), do: "80"
+  defp spending_warning_threshold(%{warning_threshold: threshold}), do: to_string(threshold)
+
+  defp spending_hard_cap?(nil), do: true
+  defp spending_hard_cap?(%{hard_cap: hard_cap}), do: hard_cap
 end

@@ -4,6 +4,7 @@ defmodule AssistantWeb.SettingsLive.State do
   import Phoenix.Component, only: [assign: 3, assign_new: 3, to_form: 2]
   import Phoenix.LiveView, only: [push_navigate: 2, put_flash: 3]
 
+  alias AssistantWeb.Components.SettingsPage.Helpers, as: PageHelpers
   alias AssistantWeb.SettingsLive.Data
   alias AssistantWeb.SettingsLive.Loaders
 
@@ -148,22 +149,32 @@ defmodule AssistantWeb.SettingsLive.State do
         _ -> false
       end
 
-    if section == "admin" and not is_admin do
-      socket
-      |> put_flash(:error, "You do not have permission to access admin.")
-      |> push_navigate(to: "/settings")
-    else
-      help_topic = Map.get(params, "topic")
+    current_scope = socket.assigns[:current_scope]
+    section_scope = section_scope_name(section)
 
-      socket
-      |> assign(:section, section)
-      |> assign(:current_app, nil)
-      |> assign(:current_admin_integration, nil)
-      |> assign(:telegram_connect_url, nil)
-      |> assign(:telegram_bot_username, nil)
-      |> assign(:telegram_connect_expires_at, nil)
-      |> assign(:help_topic, Data.selected_help_article(section, help_topic))
-      |> Loaders.load_section_data(section)
+    cond do
+      section == "admin" and not is_admin ->
+        socket
+        |> put_flash(:error, "You do not have permission to access admin.")
+        |> push_navigate(to: "/settings")
+
+      section_scope && current_scope && not PageHelpers.scope_visible?(section_scope, current_scope) ->
+        socket
+        |> put_flash(:error, "Access denied.")
+        |> push_navigate(to: "/settings")
+
+      true ->
+        help_topic = Map.get(params, "topic")
+
+        socket
+        |> assign(:section, section)
+        |> assign(:current_app, nil)
+        |> assign(:current_admin_integration, nil)
+        |> assign(:telegram_connect_url, nil)
+        |> assign(:telegram_bot_username, nil)
+        |> assign(:telegram_connect_expires_at, nil)
+        |> assign(:help_topic, Data.selected_help_article(section, help_topic))
+        |> Loaders.load_section_data(section)
     end
   end
 
@@ -217,4 +228,6 @@ defmodule AssistantWeb.SettingsLive.State do
         end
     end
   end
+
+  defp section_scope_name(section), do: PageHelpers.section_scope(section)
 end

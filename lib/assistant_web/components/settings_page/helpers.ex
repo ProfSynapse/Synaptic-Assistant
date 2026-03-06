@@ -15,13 +15,56 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
   end
 
   @doc """
-  Returns nav items filtered by user role. Admin tab only shown to admins.
+  Returns nav items filtered by user role and scope privileges.
+  Admin tab only shown to admins. Other sections gated by scope visibility.
   """
-  def nav_items_for(is_admin) do
+  def nav_items_for(current_scope) when is_map(current_scope) do
+    is_admin = current_scope.admin?
+
+    nav_items()
+    |> Enum.filter(fn {section, _label} ->
+      case section do
+        "admin" -> is_admin
+        _ -> scope_visible?(section_scope(section), current_scope)
+      end
+    end)
+  end
+
+  def nav_items_for(is_admin) when is_boolean(is_admin) do
     if is_admin do
       nav_items()
     else
       Enum.reject(nav_items(), fn {section, _label} -> section == "admin" end)
+    end
+  end
+
+  @doc """
+  Returns true if the given scope should be visible to the user.
+  Admins see everything. Empty privileges = unrestricted (backwards compatible).
+  """
+  def scope_visible?(_scope_name, %{admin?: true}), do: true
+
+  def scope_visible?(_scope_name, %{privileges: []}), do: true
+
+  def scope_visible?(nil, _current_scope), do: true
+
+  def scope_visible?(scope_name, %{privileges: privileges}) do
+    scope_name in privileges
+  end
+
+  def scope_visible?(_scope_name, _current_scope), do: true
+
+  @doc """
+  Maps a settings section name to its access scope name.
+  Returns nil for sections that don't require a specific scope.
+  """
+  def section_scope(section) do
+    case section do
+      "analytics" -> "analytics"
+      "memory" -> "memory"
+      "workflows" -> "workflows"
+      "apps" -> "integrations"
+      _ -> nil
     end
   end
 
