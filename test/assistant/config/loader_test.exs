@@ -225,6 +225,61 @@ defmodule Assistant.Config.LoaderTest do
       assert config.request_timeout_ms == 120_000
       assert config.streaming_timeout_ms == 300_000
     end
+
+    test "allows zero retries in HTTP config" do
+      yaml = """
+      defaults:
+        orchestrator: primary
+
+      models:
+        - id: "test/model"
+          tier: primary
+          description: "test"
+          use_cases:
+            - orchestrator
+          supports_tools: true
+          max_context_tokens: 100000
+          cost_tier: low
+
+      http:
+        max_retries: 0
+        base_backoff_ms: 100
+        max_backoff_ms: 1000
+        request_timeout_ms: 5000
+        streaming_timeout_ms: 10000
+
+      limits:
+        context_utilization_target: 0.8
+        compaction_trigger_threshold: 0.7
+        response_reserve_tokens: 1024
+        orchestrator_turn_limit: 10
+        sub_agent_turn_limit: 5
+        cache_ttl_seconds: 60
+        orchestrator_cache_breakpoints: 2
+        sub_agent_cache_breakpoints: 1
+      """
+
+      path =
+        Path.join(System.tmp_dir!(), "http_zero_retry_#{System.unique_integer([:positive])}.yaml")
+
+      File.write!(path, yaml)
+
+      case Process.whereis(Loader) do
+        nil -> :ok
+        pid -> GenServer.stop(pid, :normal, 1_000)
+      end
+
+      if :ets.whereis(:assistant_config) != :undefined do
+        :ets.delete(:assistant_config)
+      end
+
+      {:ok, pid} = Loader.start_link(path: path)
+
+      assert Loader.http_config().max_retries == 0
+
+      GenServer.stop(pid)
+      File.rm(path)
+    end
   end
 
   # ---------------------------------------------------------------
@@ -502,7 +557,12 @@ defmodule Assistant.Config.LoaderTest do
         sub_agent_cache_breakpoints: 1
       """
 
-      tmp_path = Path.join(System.tmp_dir!(), "cascade_fallback_#{System.unique_integer([:positive])}.yaml")
+      tmp_path =
+        Path.join(
+          System.tmp_dir!(),
+          "cascade_fallback_#{System.unique_integer([:positive])}.yaml"
+        )
+
       File.write!(tmp_path, yaml)
       {:ok, _pid} = Loader.start_link(path: tmp_path)
 
@@ -557,7 +617,9 @@ defmodule Assistant.Config.LoaderTest do
         sub_agent_cache_breakpoints: 1
       """
 
-      tmp_path = Path.join(System.tmp_dir!(), "cascade_fast_#{System.unique_integer([:positive])}.yaml")
+      tmp_path =
+        Path.join(System.tmp_dir!(), "cascade_fast_#{System.unique_integer([:positive])}.yaml")
+
       File.write!(tmp_path, yaml)
       {:ok, _pid} = Loader.start_link(path: tmp_path)
 
@@ -602,7 +664,9 @@ defmodule Assistant.Config.LoaderTest do
         sub_agent_cache_breakpoints: 1
       """
 
-      tmp_path = Path.join(System.tmp_dir!(), "cascade_nil_#{System.unique_integer([:positive])}.yaml")
+      tmp_path =
+        Path.join(System.tmp_dir!(), "cascade_nil_#{System.unique_integer([:positive])}.yaml")
+
       File.write!(tmp_path, yaml)
       {:ok, _pid} = Loader.start_link(path: tmp_path)
 

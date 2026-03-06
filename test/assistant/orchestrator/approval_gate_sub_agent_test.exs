@@ -292,12 +292,15 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
         )
 
       # Wait for the sub-agent to hit the gate and pause
-      assert_eventually(fn ->
-        case SubAgent.get_status(agent_id) do
-          {:ok, %{status: :awaiting_orchestrator}} -> true
-          _ -> false
-        end
-      end, 10_000)
+      assert_eventually(
+        fn ->
+          case SubAgent.get_status(agent_id) do
+            {:ok, %{status: :awaiting_orchestrator}} -> true
+            _ -> false
+          end
+        end,
+        10_000
+      )
 
       # Verify the status contains [APPROVAL_REQUIRED] and email details
       {:ok, status} = SubAgent.get_status(agent_id)
@@ -350,12 +353,15 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
         )
 
       # Wait for pause
-      assert_eventually(fn ->
-        case SubAgent.get_status(agent_id) do
-          {:ok, %{status: :awaiting_orchestrator}} -> true
-          _ -> false
-        end
-      end, 10_000)
+      assert_eventually(
+        fn ->
+          case SubAgent.get_status(agent_id) do
+            {:ok, %{status: :awaiting_orchestrator}} -> true
+            _ -> false
+          end
+        end,
+        10_000
+      )
 
       # Resume with approval
       assert :ok = SubAgent.resume(agent_id, %{approved: true})
@@ -363,13 +369,16 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
       # Wait for completion — the skill will fail (no Gmail token) but
       # the important thing is that it TRIED to execute, not that it succeeded.
       # The sub-agent will either complete or fail after skill execution.
-      assert_eventually(fn ->
-        case SubAgent.get_status(agent_id) do
-          {:ok, %{status: s}} when s in [:completed, :failed] -> true
-          {:error, :not_found} -> true
-          _ -> false
-        end
-      end, 15_000)
+      assert_eventually(
+        fn ->
+          case SubAgent.get_status(agent_id) do
+            {:ok, %{status: s}} when s in [:completed, :failed] -> true
+            {:error, :not_found} -> true
+            _ -> false
+          end
+        end,
+        15_000
+      )
 
       # Verify skill was attempted (Bypass got at least 1 call, agent completed/failed)
       assert :counters.get(call_count, 1) >= 1
@@ -414,24 +423,30 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
         )
 
       # Wait for gate
-      assert_eventually(fn ->
-        case SubAgent.get_status(agent_id) do
-          {:ok, %{status: :awaiting_orchestrator}} -> true
-          _ -> false
-        end
-      end, 10_000)
+      assert_eventually(
+        fn ->
+          case SubAgent.get_status(agent_id) do
+            {:ok, %{status: :awaiting_orchestrator}} -> true
+            _ -> false
+          end
+        end,
+        10_000
+      )
 
       # Deny
       assert :ok = SubAgent.resume(agent_id, %{approved: false})
 
       # Wait for completion
-      assert_eventually(fn ->
-        case SubAgent.get_status(agent_id) do
-          {:ok, %{status: s}} when s in [:completed, :failed] -> true
-          {:error, :not_found} -> true
-          _ -> false
-        end
-      end, 15_000)
+      assert_eventually(
+        fn ->
+          case SubAgent.get_status(agent_id) do
+            {:ok, %{status: s}} when s in [:completed, :failed] -> true
+            {:error, :not_found} -> true
+            _ -> false
+          end
+        end,
+        15_000
+      )
 
       if Process.alive?(pid), do: safe_stop(pid)
     end
@@ -472,25 +487,35 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
         )
 
       # Wait for gate
-      assert_eventually(fn ->
-        case SubAgent.get_status(agent_id) do
-          {:ok, %{status: :awaiting_orchestrator}} -> true
-          _ -> false
-        end
-      end, 10_000)
+      assert_eventually(
+        fn ->
+          case SubAgent.get_status(agent_id) do
+            {:ok, %{status: :awaiting_orchestrator}} -> true
+            _ -> false
+          end
+        end,
+        10_000
+      )
 
       # Deny with feedback
-      assert :ok = SubAgent.resume(agent_id, %{approved: false, message: "Change subject to Q2 Update"})
+      assert :ok =
+               SubAgent.resume(agent_id, %{
+                 approved: false,
+                 message: "Change subject to Q2 Update"
+               })
 
       # Wait for the sub-agent to process the denial and continue its loop
-      assert_eventually(fn ->
-        case SubAgent.get_status(agent_id) do
-          {:ok, %{status: s}} when s in [:completed, :failed] -> true
-          {:ok, %{status: :running}} -> true
-          {:error, :not_found} -> true
-          _ -> false
-        end
-      end, 15_000)
+      assert_eventually(
+        fn ->
+          case SubAgent.get_status(agent_id) do
+            {:ok, %{status: s}} when s in [:completed, :failed] -> true
+            {:ok, %{status: :running}} -> true
+            {:error, :not_found} -> true
+            _ -> false
+          end
+        end,
+        15_000
+      )
 
       if Process.alive?(pid), do: safe_stop(pid)
     end

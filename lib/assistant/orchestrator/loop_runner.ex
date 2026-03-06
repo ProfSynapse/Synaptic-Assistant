@@ -39,7 +39,16 @@ defmodule Assistant.Orchestrator.LoopRunner do
   alias Assistant.Analytics
   alias Assistant.Integrations.LLMRouter
   alias Assistant.Orchestrator.{Context, GoogleContext, LLMHelpers}
-  alias Assistant.Orchestrator.Tools.{DispatchAgent, GetAgentResults, GetSkill, SendAgentUpdate}
+
+  alias Assistant.Orchestrator.Tools.{
+    CancelAgent,
+    DispatchAgent,
+    GetAgentResults,
+    GetSkill,
+    QuerySubagent,
+    SendAgentUpdate
+  }
+
   alias Assistant.Skills.Result, as: SkillResult
 
   require Logger
@@ -190,6 +199,14 @@ defmodule Assistant.Orchestrator.LoopRunner do
 
       "send_agent_update" ->
         {:ok, result} = SendAgentUpdate.execute(args, nil)
+        {:local, result}
+
+      "query_subagent" ->
+        {:ok, result} = QuerySubagent.execute(args, loop_state)
+        {:local, result}
+
+      "cancel_agent" ->
+        {:ok, result} = CancelAgent.execute(args, nil)
         {:local, result}
 
       unknown ->

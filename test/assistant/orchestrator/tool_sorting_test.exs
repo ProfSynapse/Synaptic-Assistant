@@ -39,6 +39,8 @@ defmodule Assistant.Orchestrator.ToolSortingTest do
       # These are the actual tool names used in the system
       tools = [
         %{function: %{name: "send_agent_update"}},
+        %{function: %{name: "cancel_agent"}},
+        %{function: %{name: "query_subagent"}},
         %{function: %{name: "get_skill"}},
         %{function: %{name: "dispatch_agent"}},
         %{function: %{name: "get_agent_results"}}
@@ -48,9 +50,11 @@ defmodule Assistant.Orchestrator.ToolSortingTest do
       names = Enum.map(sorted, fn t -> t.function.name end)
 
       assert names == [
+               "cancel_agent",
                "dispatch_agent",
                "get_agent_results",
                "get_skill",
+               "query_subagent",
                "send_agent_update"
              ]
     end
@@ -103,14 +107,23 @@ defmodule Assistant.Orchestrator.ToolSortingTest do
 
       tools = [
         %{type: "function", function: %{name: "send_agent_update"}},
+        %{type: "function", function: %{name: "cancel_agent"}},
         %{type: "function", function: %{name: "dispatch_agent"}},
-        %{type: "function", function: %{name: "get_skill"}}
+        %{type: "function", function: %{name: "get_skill"}},
+        %{type: "function", function: %{name: "query_subagent"}}
       ]
 
       {:ok, body} = OpenRouter.build_request_body(messages, model: "test/model", tools: tools)
 
       names = Enum.map(body.tools, fn t -> t.function.name end)
-      assert names == ["dispatch_agent", "get_skill", "send_agent_update"]
+
+      assert names == [
+               "cancel_agent",
+               "dispatch_agent",
+               "get_skill",
+               "query_subagent",
+               "send_agent_update"
+             ]
     end
 
     test "nil tools list treated as absent" do
