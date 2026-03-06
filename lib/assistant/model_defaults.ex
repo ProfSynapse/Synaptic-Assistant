@@ -16,14 +16,17 @@ defmodule Assistant.ModelDefaults do
 
   @default_rel_path "priv/config/model_defaults.json"
 
-  @role_keys ~w(orchestrator sub_agent sentinel compaction fallback)
+  @role_keys ~w(orchestrator sub_agent sentinel compaction orchestrator_fallback sub_agent_fallback sentinel_fallback compaction_fallback)
 
   @global_setting_keys %{
     "orchestrator" => :model_default_orchestrator,
     "sub_agent" => :model_default_sub_agent,
     "sentinel" => :model_default_sentinel,
     "compaction" => :model_default_compaction,
-    "fallback" => :model_default_fallback
+    "orchestrator_fallback" => :model_default_orchestrator_fallback,
+    "sub_agent_fallback" => :model_default_sub_agent_fallback,
+    "sentinel_fallback" => :model_default_sentinel_fallback,
+    "compaction_fallback" => :model_default_compaction_fallback
   }
 
   @role_atoms Enum.map(@role_keys, &String.to_atom/1)

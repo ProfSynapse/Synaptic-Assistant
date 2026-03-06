@@ -67,11 +67,32 @@ defmodule Assistant.IntegrationSettings.Registry do
           help: "App-wide fallback model for compaction and memory summarization"
         },
         %{
-          key: :model_default_fallback,
+          key: :model_default_orchestrator_fallback,
           secret: false,
           env: "",
-          label: "Fallback Model",
-          help: "App-wide fallback model when no role-specific default is set"
+          label: "Orchestrator Fallback Model",
+          help: "Fallback model when the orchestrator primary is unavailable"
+        },
+        %{
+          key: :model_default_sub_agent_fallback,
+          secret: false,
+          env: "",
+          label: "Sub-Agent Fallback Model",
+          help: "Fallback model when the sub-agent primary is unavailable"
+        },
+        %{
+          key: :model_default_sentinel_fallback,
+          secret: false,
+          env: "",
+          label: "Sentinel Fallback Model",
+          help: "Fallback model when the sentinel primary is unavailable"
+        },
+        %{
+          key: :model_default_compaction_fallback,
+          secret: false,
+          env: "",
+          label: "Memory Fallback Model",
+          help: "Fallback model when the memory primary is unavailable"
         }
       ]
     },

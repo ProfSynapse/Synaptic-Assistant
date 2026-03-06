@@ -502,17 +502,31 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
                 </button>
               </div>
             </div>
-            <div class="sa-model-default-select">
-              <.field
-                type="select"
-                name={"defaults[#{role.key}]"}
-                label={"Default model for #{role.label}"}
-                label_class="sr-only"
-                no_margin={true}
-                options={@model_options}
-                selected={Map.get(@model_defaults, Atom.to_string(role.key))}
-                prompt="Select model"
-              />
+            <div class="sa-model-default-selects" style="display: flex; gap: 0.75rem; flex: 1; min-width: 0;">
+              <div style="flex: 1; min-width: 0;">
+                <.field
+                  type="select"
+                  name={"defaults[#{role.key}]"}
+                  label={"Primary model for #{role.label}"}
+                  label_class="sr-only"
+                  no_margin={true}
+                  options={@model_options}
+                  selected={Map.get(@model_defaults, Atom.to_string(role.key))}
+                  prompt="Primary"
+                />
+              </div>
+              <div style="flex: 1; min-width: 0;">
+                <.field
+                  type="select"
+                  name={"defaults[#{role.fallback_key}]"}
+                  label={"Fallback model for #{role.label}"}
+                  label_class="sr-only"
+                  no_margin={true}
+                  options={@model_options}
+                  selected={Map.get(@model_defaults, Atom.to_string(role.fallback_key))}
+                  prompt="Fallback"
+                />
+              </div>
             </div>
           </div>
         </div>

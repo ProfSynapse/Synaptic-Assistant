@@ -590,28 +590,27 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     [
       %{
         key: :orchestrator,
+        fallback_key: :orchestrator_fallback,
         label: "Orchestrator",
         tooltip: "Top-level coordinator for each user request."
       },
       %{
         key: :sub_agent,
+        fallback_key: :sub_agent_fallback,
         label: "Subagents",
         tooltip: "Worker agents dispatched by the orchestrator."
       },
       %{
         key: :sentinel,
+        fallback_key: :sentinel_fallback,
         label: "Sentinel",
         tooltip: "Guardrail model used for policy and risk checks."
       },
       %{
         key: :compaction,
+        fallback_key: :compaction_fallback,
         label: "Memory",
         tooltip: "Internally mapped to the compaction model role."
-      },
-      %{
-        key: :fallback,
-        label: "Fallback",
-        tooltip: "Only activates when explicitly set by an admin. Used when no role-specific default is configured."
       }
     ]
   end
@@ -622,17 +621,33 @@ defmodule AssistantWeb.SettingsLive.Loaders do
 
     current_defaults =
       Enum.reduce(roles, %{}, fn role, acc ->
-        key = Atom.to_string(role.key)
+        primary_key = Atom.to_string(role.key)
+        fallback_key = Atom.to_string(role.fallback_key)
 
-        value =
-          Map.get(effective_defaults, key) || resolved_default_model_id(role.key, settings_user)
+        primary_value =
+          Map.get(effective_defaults, primary_key) ||
+            resolved_default_model_id(role.key, settings_user)
 
-        Map.put(acc, key, value || "")
+        fallback_value =
+          Map.get(effective_defaults, fallback_key) ||
+            resolved_default_model_id(role.fallback_key, settings_user)
+
+        acc
+        |> Map.put(primary_key, primary_value || "")
+        |> Map.put(fallback_key, fallback_value || "")
       end)
 
     default_sources =
       Enum.reduce(roles, %{}, fn role, acc ->
-        Map.put(acc, Atom.to_string(role.key), ModelDefaults.source_for(settings_user, role.key))
+        acc
+        |> Map.put(
+          Atom.to_string(role.key),
+          ModelDefaults.source_for(settings_user, role.key)
+        )
+        |> Map.put(
+          Atom.to_string(role.fallback_key),
+          ModelDefaults.source_for(settings_user, role.fallback_key)
+        )
       end)
 
     %{
