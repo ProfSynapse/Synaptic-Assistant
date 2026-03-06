@@ -46,11 +46,16 @@ defmodule Assistant.Orchestrator.Context do
 
   alias Assistant.Orchestrator.Tools.{
     CancelAgent,
+    CreateTask,
+    DeleteTask,
     DispatchAgent,
     GetAgentResults,
     GetSkill,
+    GetTask,
     QuerySubagent,
-    SendAgentUpdate
+    SearchTasks,
+    SendAgentUpdate,
+    UpdateTask
   }
 
   alias Assistant.Skills.Registry
@@ -73,11 +78,16 @@ defmodule Assistant.Orchestrator.Context do
   def tool_definitions do
     [
       wrap_function_tool(CancelAgent.tool_definition()),
+      wrap_function_tool(CreateTask.tool_definition()),
+      wrap_function_tool(DeleteTask.tool_definition()),
       wrap_function_tool(DispatchAgent.tool_definition()),
       wrap_function_tool(GetAgentResults.tool_definition()),
       wrap_function_tool(GetSkill.tool_definition()),
+      wrap_function_tool(GetTask.tool_definition()),
       wrap_function_tool(QuerySubagent.tool_definition()),
-      wrap_function_tool(SendAgentUpdate.tool_definition())
+      wrap_function_tool(SearchTasks.tool_definition()),
+      wrap_function_tool(SendAgentUpdate.tool_definition()),
+      wrap_function_tool(UpdateTask.tool_definition())
     ]
     |> OpenRouter.sort_tools()
   end
