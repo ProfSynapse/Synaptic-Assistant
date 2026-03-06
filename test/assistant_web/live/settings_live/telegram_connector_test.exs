@@ -87,7 +87,9 @@ defmodule AssistantWeb.SettingsLive.TelegramConnectorTest do
     Cache.invalidate(:telegram_bot_token)
     Application.put_env(:assistant, :telegram_bot_token, @bot_token)
 
-    Bypass.expect(bypass, "GET", "/bot#{@bot_token}/getMe", fn conn ->
+    # Non-admin users get lightweight connection status (no real API calls),
+    # so stub instead of expect — the getMe endpoint may not be called.
+    Bypass.stub(bypass, "GET", "/bot#{@bot_token}/getMe", fn conn ->
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
       |> Plug.Conn.resp(

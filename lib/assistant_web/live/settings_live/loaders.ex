@@ -367,14 +367,21 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   def load_connection_status(socket) do
     settings_user = Context.current_settings_user(socket)
 
-    user_id =
-      case settings_user do
-        %{user_id: uid} when not is_nil(uid) -> uid
-        _ -> nil
-      end
+    case settings_user do
+      %{is_admin: true, user_id: uid} when not is_nil(uid) ->
+        results = ConnectionValidator.validate_all(uid)
+        assign(socket, :connection_status, results)
 
-    results = ConnectionValidator.validate_all(user_id)
-    assign(socket, :connection_status, results)
+      %{is_admin: true} ->
+        results = ConnectionValidator.validate_all(nil)
+        assign(socket, :connection_status, results)
+
+      _ ->
+        # Non-admins get a lightweight check: configured groups show as
+        # :not_connected (toggle-enabled) instead of running real API handshakes.
+        results = lightweight_connection_status()
+        assign(socket, :connection_status, results)
+    end
   rescue
     e ->
       Logger.warning("Connection validation failed: #{Exception.message(e)}")
@@ -732,6 +739,23 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   defp integration_settings_for_group(group) do
     IntegrationSettings.list_all()
     |> Enum.filter(fn setting -> setting.group == group and setting.group in @non_ai_groups end)
+  end
+
+  # Lightweight connection check for non-admin users: marks groups with any
+  # configured key as :not_connected (enabling the toggle) without making real
+  # API calls. Admins get full validate_all with real handshakes.
+  defp lightweight_connection_status do
+    configured =
+      IntegrationSettings.list_all()
+      |> Enum.filter(fn s -> s.source != :none and s.group in @non_ai_groups end)
+      |> Enum.map(& &1.group)
+      |> MapSet.new()
+
+    @non_ai_groups
+    |> Map.new(fn group ->
+      status = if MapSet.member?(configured, group), do: :not_connected, else: :not_configured
+      {group, status}
+    end)
   end
 
   defp present?(value) when is_binary(value), do: String.trim(value) != ""

@@ -56,17 +56,20 @@ defmodule Assistant.SkillPermissionsUserOverridesTest do
       refute SkillPermissions.enabled_for_user?(user.id, "email.send")
     end
 
-    test "hubspot skills require connector state to be enabled for the user" do
+    test "hubspot skills default to enabled and respect connector toggle" do
       user = chat_user_fixture()
       skill = "hubspot.search_contacts"
 
-      refute SkillPermissions.enabled_for_user?(user.id, skill)
+      # Default: true — hubspot skills enabled without explicit connector state
+      assert SkillPermissions.enabled_for_user?(user.id, skill)
 
+      # Explicit disable blocks the skill
       {:ok, _state} =
         SettingsUserConnectorStates.set_enabled_for_user(user.id, "hubspot", false)
 
       refute SkillPermissions.enabled_for_user?(user.id, skill)
 
+      # Re-enable restores access
       {:ok, _state} =
         SettingsUserConnectorStates.set_enabled_for_user(user.id, "hubspot", true)
 
