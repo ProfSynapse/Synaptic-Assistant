@@ -1984,9 +1984,10 @@ a {
 .sa-drive-manager {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: #fbfdfd;
 }
 
@@ -2347,10 +2348,6 @@ a {
   .sa-drive-manager-modal {
     max-width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
-  }
-
-  .sa-drive-manager {
-    min-height: calc(100vh - 140px);
   }
 
   .sa-drive-manager-intro,
