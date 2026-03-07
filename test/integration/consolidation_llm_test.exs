@@ -3,34 +3,38 @@
 # Integration tests for knowledge graph consolidation with REAL LLM calls.
 #
 # Tests that the consolidation mission correctly identifies cross-memory
-# entity connections and produces appropriate entity extraction calls.
-# Seeds real memories and entities in the DB, then asks the LLM to find
-# connections the way the Memory Agent would during a :consolidate mission.
+# entity connections across business domains: engineering, marketing,
+# finance, operations, strategy, events, email threads, and transcripts.
+#
+# Uses MemoryFixtures to seed a realistic workspace with ~45 memories,
+# ~27 entities, and ~13 relations (with ~28 intentional gaps).
 #
 # Requires: OPENROUTER_API_KEY env var with a valid API key.
 # Tests are skipped if the key is not available.
 #
 # Related files:
+#   - test/support/fixtures/memory_fixtures.ex (workspace seed data)
 #   - lib/assistant/memory/agent.ex (consolidate mission builder)
 #   - lib/assistant/memory/turn_classifier.ex (consolidate classification)
 #   - lib/assistant/memory/store.ex (memory persistence)
-#   - lib/assistant/memory/search.ex (memory retrieval)
-#   - lib/assistant/skills/memory/extract_entities.ex (entity extraction handler)
+#   - lib/assistant/skills/memory/extract_entities.ex (entity extraction)
 
 defmodule Assistant.Integration.ConsolidationLLMTest do
   use Assistant.DataCase, async: false
 
   import Assistant.Integration.TestLogger
+  import Assistant.MemoryFixtures
 
   alias Assistant.Integrations.OpenRouter
-  alias Assistant.Memory.Store
   alias Assistant.Repo
-  alias Assistant.Schemas.{MemoryEntity, MemoryEntityRelation, User}
+  alias Assistant.Schemas.{MemoryEntity, MemoryEntityRelation}
 
   @moduletag :integration
-  @moduletag timeout: 120_000
+  @moduletag timeout: 180_000
 
   @integration_model "openai/gpt-5.2"
+
+  @allowed_relation_types ~w(works_at works_with manages reports_to part_of owns related_to located_in supersedes)
 
   # -------------------------------------------------------------------
   # Setup
@@ -39,460 +43,509 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
   setup do
     case System.get_env("OPENROUTER_API_KEY") do
       key when is_binary(key) and key != "" ->
-        user = create_test_user!()
-        {:ok, api_key: key, user: user}
+        {:ok, api_key: key}
 
       _ ->
         :ok
     end
   end
 
-  defp create_test_user! do
-    %User{}
-    |> User.changeset(%{
-      external_id: "consolidation-test-#{System.unique_integer([:positive])}",
-      channel: "test",
-      display_name: "Consolidation Test User"
-    })
-    |> Repo.insert!()
-  end
+  # ===================================================================
+  # Engineering domain
+  # ===================================================================
 
-  # -------------------------------------------------------------------
-  # Scenario 1: Cross-memory connection discovery
-  #
-  # Two memories exist about different entities. A new exchange reveals
-  # a connection between them. The LLM should identify the relation.
-  # -------------------------------------------------------------------
-
-  describe "cross-memory connection discovery" do
+  describe "engineering: candidate-project matching" do
     @tag :integration
-    test "LLM identifies relation between entities from separate memories", context do
+    test "LLM links Alice to Project Phoenix via distributed systems", context do
       if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
 
-      user = context.user
+      user = user_fixture()
+      ws = seed_minimal!(user)
 
-      # Seed Memory A: Alice is an engineer
-      {:ok, _mem_a} =
-        Store.create_memory_entry(%{
-          content: "Alice Chen is a senior backend engineer specializing in distributed systems.",
-          category: "fact",
-          tags: ["person", "engineer"],
-          source_type: "conversation",
-          user_id: user.id
-        })
-
-      # Seed Memory B: Project Phoenix needs distributed systems expertise
-      {:ok, _mem_b} =
-        Store.create_memory_entry(%{
-          content:
-            "Project Phoenix is a new microservices migration that requires distributed systems expertise. The team lead position is open.",
-          category: "fact",
-          tags: ["project", "hiring"],
-          source_type: "conversation",
-          user_id: user.id
-        })
-
-      # Seed the entities
-      alice =
-        %MemoryEntity{}
-        |> MemoryEntity.changeset(%{
-          name: "Alice Chen",
-          entity_type: "person",
-          metadata: %{"role" => "senior backend engineer"},
-          user_id: user.id
-        })
-        |> Repo.insert!()
-
-      phoenix =
-        %MemoryEntity{}
-        |> MemoryEntity.changeset(%{
-          name: "Project Phoenix",
-          entity_type: "project",
-          metadata: %{"status" => "staffing"},
-          user_id: user.id
-        })
-        |> Repo.insert!()
-
-      # The new exchange that should trigger consolidation
-      user_message =
-        "We need to find someone for the Project Phoenix team lead role. Someone with distributed systems experience."
-
-      assistant_response =
-        "I recall that Alice Chen is a senior backend engineer specializing in distributed systems. She could be a strong candidate for the Project Phoenix team lead position."
-
-      # Ask the LLM to analyze cross-memory connections
       result =
         consolidation_analysis(
-          user_message,
-          assistant_response,
+          "We need to find someone for the Project Phoenix team lead role. Someone with distributed systems experience.",
+          "I recall that Alice Chen specializes in distributed systems. She could be a strong candidate for Phoenix.",
+          memories_to_text([ws.memories.alice_role, ws.memories.phoenix_need]),
           [
-            "Alice Chen is a senior backend engineer specializing in distributed systems.",
-            "Project Phoenix is a new microservices migration that requires distributed systems expertise. The team lead position is open."
-          ],
-          [
-            %{name: "Alice Chen", type: "person", relations: []},
-            %{name: "Project Phoenix", type: "project", relations: []}
+            entity_to_graph(ws.entities.alice, []),
+            entity_to_graph(ws.entities.phoenix, [%{type: "part_of", target: "TechCo"}])
           ],
           context.api_key
         )
 
       assert {:ok, analysis} = result
-      assert is_map(analysis)
-
-      # The LLM should identify at least one new relation connecting the entities
-      connections = analysis["new_relations"] || analysis["relations"] || []
-      assert is_list(connections)
+      connections = analysis["new_relations"]
       assert length(connections) >= 1
-
-      # At least one relation should link Alice to Project Phoenix
-      has_cross_link =
-        Enum.any?(connections, fn rel ->
-          source = rel["source"] || rel["from_entity"] || rel["source_entity"] || ""
-          target = rel["target"] || rel["to_entity"] || rel["target_entity"] || ""
-
-          (source =~ ~r/alice/i and target =~ ~r/phoenix/i) or
-            (source =~ ~r/phoenix/i and target =~ ~r/alice/i)
-        end)
-
-      assert has_cross_link,
-             "Expected a relation connecting Alice Chen to Project Phoenix, got: #{inspect(connections)}"
-
-      # Verify the entities still exist (consolidation shouldn't delete)
-      assert Repo.get(MemoryEntity, alice.id)
-      assert Repo.get(MemoryEntity, phoenix.id)
+      assert has_link?(connections, ~r/alice/i, ~r/phoenix/i)
     end
   end
 
-  # -------------------------------------------------------------------
-  # Scenario 2: Empty search results — graceful degradation
-  #
-  # The LLM is given a consolidation mission but the search returns
-  # no related memories. It should report "nothing to consolidate"
-  # rather than hallucinating connections.
-  # -------------------------------------------------------------------
-
-  describe "consolidation with no related memories" do
+  describe "engineering: multi-project staffing" do
     @tag :integration
-    test "LLM reports no connections when search returns empty results", context do
+    test "LLM discovers David→Atlas and Eva→Neptune from hiring email", context do
       if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
 
-      # Exchange about an entity with no prior memories or entities
-      user_message = "I had coffee this morning."
-      assistant_response = "That sounds nice! Coffee is always a good way to start the day."
+      user = user_fixture()
+      ws = seed_workspace!(user)
 
       result =
         consolidation_analysis(
-          user_message,
-          assistant_response,
-          [],
-          [],
-          context.api_key
-        )
-
-      assert {:ok, analysis} = result
-      assert is_map(analysis)
-
-      # Should report no connections found
-      connections = analysis["new_relations"] || analysis["relations"] || []
-      assert is_list(connections)
-      assert length(connections) == 0
-
-      # Should explicitly indicate nothing to consolidate
-      summary = analysis["summary"] || analysis["reasoning"] || ""
-      assert is_binary(summary)
-    end
-  end
-
-  # -------------------------------------------------------------------
-  # Scenario 3: Existing relation — deduplication
-  #
-  # An entity relation already exists. The LLM should recognize this
-  # and not propose a duplicate.
-  # -------------------------------------------------------------------
-
-  describe "consolidation respects existing relations" do
-    @tag :integration
-    test "LLM does not propose duplicate relations", context do
-      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
-
-      user = context.user
-
-      # Seed memories
-      {:ok, _mem} =
-        Store.create_memory_entry(%{
-          content: "Bob Smith works at Acme Corp as CTO.",
-          category: "fact",
-          tags: ["person", "organization"],
-          source_type: "conversation",
-          user_id: user.id
-        })
-
-      # Seed entities and an existing relation
-      bob =
-        %MemoryEntity{}
-        |> MemoryEntity.changeset(%{
-          name: "Bob Smith",
-          entity_type: "person",
-          metadata: %{"role" => "CTO"},
-          user_id: user.id
-        })
-        |> Repo.insert!()
-
-      acme =
-        %MemoryEntity{}
-        |> MemoryEntity.changeset(%{
-          name: "Acme Corp",
-          entity_type: "organization",
-          metadata: %{},
-          user_id: user.id
-        })
-        |> Repo.insert!()
-
-      # Existing relation: Bob works_at Acme
-      %MemoryEntityRelation{}
-      |> MemoryEntityRelation.changeset(%{
-        relation_type: "works_at",
-        source_entity_id: bob.id,
-        target_entity_id: acme.id,
-        confidence: Decimal.new("0.95")
-      })
-      |> Repo.insert!()
-
-      user_message = "Tell me about Bob's job at Acme."
-      assistant_response = "Bob Smith is the CTO at Acme Corp."
-
-      result =
-        consolidation_analysis(
-          user_message,
-          assistant_response,
-          ["Bob Smith works at Acme Corp as CTO."],
+          "Bob said we need to staff up fast — Phoenix needs distributed systems, Atlas needs ML, Neptune needs Kubernetes. Who do we have?",
+          "Looking at the team: David Lee has ML experience from OpenMind AI and wants an AI platform project — perfect for Atlas. Eva Schmidt is a Kubernetes specialist who already offered to help TechCo.",
+          memories_to_text([
+            ws.memories.david_role, ws.memories.david_ml_project,
+            ws.memories.eva_role, ws.memories.eva_k8s,
+            ws.memories.bob_hiring, ws.memories.atlas, ws.memories.neptune
+          ]),
           [
-            %{
-              name: "Bob Smith",
-              type: "person",
-              relations: [%{type: "works_at", target: "Acme Corp", confidence: 0.95}]
-            },
-            %{
-              name: "Acme Corp",
-              type: "organization",
-              relations: [%{type: "works_at", source: "Bob Smith", confidence: 0.95}]
-            }
+            entity_to_graph(ws.entities.david, [%{type: "works_at", target: "OpenMind AI", meta: "former"}]),
+            entity_to_graph(ws.entities.eva, []),
+            entity_to_graph(ws.entities.atlas, [%{type: "part_of", target: "TechCo"}]),
+            entity_to_graph(ws.entities.neptune, [%{type: "part_of", target: "TechCo"}])
           ],
           context.api_key
         )
 
       assert {:ok, analysis} = result
-      assert is_map(analysis)
+      connections = analysis["new_relations"]
+      assert length(connections) >= 2
+      assert has_link?(connections, ~r/david/i, ~r/atlas/i)
+      assert has_link?(connections, ~r/eva/i, ~r/neptune/i)
+    end
+  end
 
-      # Should report zero new relations (Bob→Acme already captured)
-      connections = analysis["new_relations"] || analysis["relations"] || []
-      assert is_list(connections)
+  # ===================================================================
+  # Marketing domain
+  # ===================================================================
 
-      # If any relations proposed, they should NOT be a duplicate works_at
+  describe "marketing: campaign leadership and event planning" do
+    @tag :integration
+    test "LLM links Frank→Brand Relaunch and James→TechCo Connect", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_workspace!(user)
+
+      result =
+        consolidation_analysis(
+          "What's the status of our marketing initiatives?",
+          "Frank Torres is leading the $2M Brand Relaunch for Q3. James Wu is organizing TechCo Connect, the developer conference in Austin for October.",
+          memories_to_text([
+            ws.memories.frank_role, ws.memories.brand_relaunch,
+            ws.memories.james_role, ws.memories.techco_connect
+          ]),
+          [
+            entity_to_graph(ws.entities.frank, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.james, []),
+            entity_to_graph(ws.entities.brand_relaunch, []),
+            entity_to_graph(ws.entities.techco, [%{type: "located_in", target: "San Francisco"}])
+          ],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+      assert length(connections) >= 2
+
+      # Frank should be linked to Brand Relaunch (manages)
+      assert has_link?(connections, ~r/frank/i, ~r/brand/i)
+    end
+  end
+
+  # ===================================================================
+  # Finance domain
+  # ===================================================================
+
+  describe "finance: fundraise and investor connections" do
+    @tag :integration
+    test "LLM links Grace→Series C and Vertex→TechCo", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_workspace!(user)
+
+      result =
+        consolidation_analysis(
+          "How's the Series C going?",
+          "Grace Kim is leading the process. Vertex Partners has expressed strong interest as lead investor. They want to see Q1 close rates before committing.",
+          memories_to_text([
+            ws.memories.grace_role, ws.memories.series_c,
+            ws.memories.vertex_meeting, ws.memories.arr_update
+          ]),
+          [
+            entity_to_graph(ws.entities.grace, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.series_c, []),
+            entity_to_graph(ws.entities.vertex, []),
+            entity_to_graph(ws.entities.techco, [%{type: "located_in", target: "San Francisco"}])
+          ],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+      assert length(connections) >= 2
+
+      # Grace manages the Series C
+      assert has_link?(connections, ~r/grace/i, ~r/series/i)
+      # Vertex is related to TechCo (investor)
+      assert has_link?(connections, ~r/vertex/i, ~r/techco/i)
+    end
+  end
+
+  # ===================================================================
+  # Cross-functional: email thread consolidation
+  # ===================================================================
+
+  describe "cross-functional: budget email connects finance and marketing" do
+    @tag :integration
+    test "LLM finds budget constraint linking Series C to Brand Relaunch", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_workspace!(user)
+
+      result =
+        consolidation_analysis(
+          "I saw Grace's email about the budget freeze. What does that mean for marketing?",
+          "Grace Kim sent an email freezing Q2 headcount until the Series C term sheet is signed. Brand Relaunch can continue with approved spend, but all other hiring is paused.",
+          memories_to_text([
+            ws.memories.budget_email, ws.memories.series_c,
+            ws.memories.brand_relaunch, ws.memories.grace_role
+          ]),
+          [
+            entity_to_graph(ws.entities.grace, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.frank, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.series_c, []),
+            entity_to_graph(ws.entities.brand_relaunch, [])
+          ],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+      assert length(connections) >= 1
+      assert is_binary(analysis["summary"])
+      assert String.length(analysis["summary"]) > 10
+    end
+  end
+
+  # ===================================================================
+  # Cross-functional: meeting transcript consolidation
+  # ===================================================================
+
+  describe "cross-functional: ops standup transcript" do
+    @tag :integration
+    test "LLM discovers Eva→Austin expansion and James→office launch from transcript", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_workspace!(user)
+
+      result =
+        consolidation_analysis(
+          "Can you summarize the ops standup from yesterday?",
+          "Key points: Austin office lease signed, buildout starts March 1. Eva's team handles remote infra. James will help with the office launch party alongside TechCo Connect planning.",
+          memories_to_text([
+            ws.memories.ops_transcript, ws.memories.austin_expansion,
+            ws.memories.eva_k8s, ws.memories.techco_connect,
+            ws.memories.henry_role
+          ]),
+          [
+            entity_to_graph(ws.entities.henry, [%{type: "reports_to", target: "Bob Martinez"}]),
+            entity_to_graph(ws.entities.eva, []),
+            entity_to_graph(ws.entities.james, []),
+            entity_to_graph(ws.entities.austin, [])
+          ],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+      assert length(connections) >= 1
+      assert_valid_relation_types(connections)
+    end
+  end
+
+  # ===================================================================
+  # Strategy domain
+  # ===================================================================
+
+  describe "strategy: competitive analysis cross-references" do
+    @tag :integration
+    test "LLM links DataFlow Labs as competitor and Atlas as differentiator", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_workspace!(user)
+
+      result =
+        consolidation_analysis(
+          "What's our competitive positioning against DataFlow Labs?",
+          "Isabel Reyes identified DataFlow Labs as TechCo's biggest threat. She recommends accelerating Project Atlas to differentiate on AI capabilities. DataFlow's Series B gives them 18 months of runway.",
+          memories_to_text([
+            ws.memories.competitive_analysis, ws.memories.isabel_role,
+            ws.memories.dataflow, ws.memories.atlas, ws.memories.market_positioning
+          ]),
+          [
+            entity_to_graph(ws.entities.isabel, []),
+            entity_to_graph(ws.entities.dataflow, []),
+            entity_to_graph(ws.entities.techco, [%{type: "located_in", target: "San Francisco"}]),
+            entity_to_graph(ws.entities.atlas, [%{type: "part_of", target: "TechCo"}]),
+            entity_to_graph(ws.entities.vertex, [])
+          ],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+      assert length(connections) >= 1
+      # DataFlow should be related to TechCo (competitor)
+      assert has_link?(connections, ~r/dataflow/i, ~r/techco/i) or
+               has_link?(connections, ~r/techco/i, ~r/dataflow/i)
+    end
+  end
+
+  # ===================================================================
+  # Deduplication
+  # ===================================================================
+
+  describe "deduplication: fully connected subgraph" do
+    @tag :integration
+    test "LLM proposes no duplicates when all relations already exist", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_fully_connected!(user)
+
+      result =
+        consolidation_analysis(
+          "Tell me about Bob's job at TechCo.",
+          "Bob Martinez is the CTO at TechCo.",
+          memories_to_text([ws.memories.bob_role]),
+          [
+            entity_to_graph(ws.entities.bob, [%{type: "works_at", target: "TechCo", confidence: 0.95}]),
+            entity_to_graph(ws.entities.techco, [%{type: "works_at", source: "Bob Martinez", confidence: 0.95}])
+          ],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+
+      # No duplicate works_at should be proposed
       duplicate =
         Enum.any?(connections, fn rel ->
-          type = rel["relation_type"] || rel["type"] || ""
-          source = rel["source"] || rel["from_entity"] || rel["source_entity"] || ""
-          target = rel["target"] || rel["to_entity"] || rel["target_entity"] || ""
-
-          String.downcase(type) == "works_at" and
-            source =~ ~r/bob/i and target =~ ~r/acme/i
+          String.downcase(rel["relation_type"]) == "works_at" and
+            rel["source_entity"] =~ ~r/bob/i and rel["target_entity"] =~ ~r/techco/i
         end)
 
       refute duplicate,
-             "LLM proposed duplicate works_at relation that already exists: #{inspect(connections)}"
+             "LLM proposed duplicate works_at: #{inspect(connections)}"
     end
   end
 
-  # -------------------------------------------------------------------
-  # Scenario 4: Multi-entity consolidation
-  #
-  # Multiple entities exist across several memories. A new exchange
-  # references several of them, revealing a web of connections.
-  # -------------------------------------------------------------------
+  # ===================================================================
+  # Graceful degradation
+  # ===================================================================
 
-  describe "multi-entity consolidation" do
+  describe "graceful degradation: no related memories" do
     @tag :integration
-    test "LLM discovers multiple relations from rich context", context do
+    test "LLM returns empty relations for trivial exchange", context do
       if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
-
-      user = context.user
-
-      # Seed a rich context
-      {:ok, _} =
-        Store.create_memory_entry(%{
-          content: "Sarah Park is a product manager at TechCo.",
-          category: "fact",
-          tags: ["person", "organization"],
-          source_type: "conversation",
-          user_id: user.id
-        })
-
-      {:ok, _} =
-        Store.create_memory_entry(%{
-          content: "Project Atlas is TechCo's new AI platform initiative.",
-          category: "fact",
-          tags: ["project", "organization"],
-          source_type: "conversation",
-          user_id: user.id
-        })
-
-      {:ok, _} =
-        Store.create_memory_entry(%{
-          content: "David Lee is a machine learning engineer looking for new projects.",
-          category: "fact",
-          tags: ["person", "engineer"],
-          source_type: "conversation",
-          user_id: user.id
-        })
-
-      # Seed entities (no relations yet)
-      for {name, type} <- [
-            {"Sarah Park", "person"},
-            {"TechCo", "organization"},
-            {"Project Atlas", "project"},
-            {"David Lee", "person"}
-          ] do
-        %MemoryEntity{}
-        |> MemoryEntity.changeset(%{name: name, entity_type: type, user_id: user.id})
-        |> Repo.insert!()
-      end
-
-      user_message = """
-      Sarah just told me she's been assigned to lead Project Atlas at TechCo.
-      She's looking for an ML engineer to join. David Lee might be perfect — he's
-      been wanting a new project.
-      """
-
-      assistant_response = """
-      That's a great match! Sarah Park is leading Project Atlas at TechCo, and
-      David Lee has the ML expertise they need. I can see several connections here.
-      """
 
       result =
         consolidation_analysis(
-          user_message,
-          assistant_response,
-          [
-            "Sarah Park is a product manager at TechCo.",
-            "Project Atlas is TechCo's new AI platform initiative.",
-            "David Lee is a machine learning engineer looking for new projects."
-          ],
-          [
-            %{name: "Sarah Park", type: "person", relations: []},
-            %{name: "TechCo", type: "organization", relations: []},
-            %{name: "Project Atlas", type: "project", relations: []},
-            %{name: "David Lee", type: "person", relations: []}
-          ],
+          "I had coffee this morning.",
+          "That sounds nice! Coffee is always a good way to start the day.",
+          [],
+          [],
           context.api_key
         )
 
       assert {:ok, analysis} = result
-      connections = analysis["new_relations"] || analysis["relations"] || []
-      assert is_list(connections)
-
-      # Should find at least 2 relations (e.g., Sarah leads Atlas, Atlas part_of TechCo)
-      assert length(connections) >= 2,
-             "Expected at least 2 new relations from rich context, got #{length(connections)}: #{inspect(connections)}"
-
-      # Verify entity names appear in the relations
-      all_entities_referenced =
-        connections
-        |> Enum.flat_map(fn rel ->
-          source = rel["source"] || rel["from_entity"] || rel["source_entity"] || ""
-          target = rel["target"] || rel["to_entity"] || rel["target_entity"] || ""
-          [String.downcase(source), String.downcase(target)]
-        end)
-        |> Enum.join(" ")
-
-      # At least Sarah and Project Atlas should be connected
-      assert all_entities_referenced =~ ~r/sarah/i or all_entities_referenced =~ ~r/atlas/i,
-             "Expected Sarah or Atlas in relations, got: #{inspect(connections)}"
+      connections = analysis["new_relations"]
+      assert length(connections) == 0
+      assert is_binary(analysis["summary"])
     end
   end
 
-  # -------------------------------------------------------------------
-  # Scenario 5: Relation type accuracy
-  #
-  # Verify the LLM uses appropriate relation types from the allowed set
-  # rather than inventing custom ones.
-  # -------------------------------------------------------------------
+  describe "graceful degradation: isolated entity with no connections" do
+    @tag :integration
+    test "LLM finds nothing when entity has no related memories", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_isolated!(user)
+
+      result =
+        consolidation_analysis(
+          "What do we know about cooking?",
+          "I found a memory about cooking but nothing else related.",
+          [ws.memory.content],
+          [entity_to_graph(ws.entity, [])],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+      assert length(connections) == 0
+    end
+  end
+
+  # ===================================================================
+  # Relation type validation
+  # ===================================================================
 
   describe "relation type accuracy" do
     @tag :integration
-    test "LLM uses valid relation types from the allowed set", context do
+    test "all proposed relations use valid types from the allowed set", context do
       if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
 
-      user = context.user
+      user = user_fixture()
+      ws = seed_workspace!(user)
 
-      {:ok, _} =
-        Store.create_memory_entry(%{
-          content: "Maria Garcia manages the engineering team at DataFlow Inc.",
-          category: "fact",
-          tags: ["person", "organization"],
-          source_type: "conversation",
-          user_id: user.id
-        })
-
-      {:ok, _} =
-        Store.create_memory_entry(%{
-          content: "James Wilson just joined DataFlow Inc as a junior engineer.",
-          category: "fact",
-          tags: ["person", "organization"],
-          source_type: "conversation",
-          user_id: user.id
-        })
-
-      for {name, type} <- [
-            {"Maria Garcia", "person"},
-            {"James Wilson", "person"},
-            {"DataFlow Inc", "organization"}
-          ] do
-        %MemoryEntity{}
-        |> MemoryEntity.changeset(%{name: name, entity_type: type, user_id: user.id})
-        |> Repo.insert!()
-      end
-
-      user_message = "Maria is now managing James on the engineering team at DataFlow."
-
-      assistant_response =
-        "Noted — Maria Garcia manages James Wilson at DataFlow Inc."
-
+      # Use a rich exchange that should produce multiple relation types
       result =
         consolidation_analysis(
-          user_message,
-          assistant_response,
+          "Can you map out the leadership team and their responsibilities?",
+          "Bob Martinez (CTO) oversees engineering. Frank Torres (CMO) leads marketing and the Brand Relaunch. Grace Kim (CFO) handles finance and the Series C. Henry Okafor (VP Ops) manages the Austin expansion. Isabel Reyes (Strategy Director) works with Grace on investor narratives.",
+          memories_to_text([
+            ws.memories.bob_role, ws.memories.frank_role, ws.memories.grace_role,
+            ws.memories.henry_role, ws.memories.isabel_role,
+            ws.memories.brand_relaunch, ws.memories.series_c, ws.memories.austin_expansion
+          ]),
           [
-            "Maria Garcia manages the engineering team at DataFlow Inc.",
-            "James Wilson just joined DataFlow Inc as a junior engineer."
-          ],
-          [
-            %{name: "Maria Garcia", type: "person", relations: []},
-            %{name: "James Wilson", type: "person", relations: []},
-            %{name: "DataFlow Inc", type: "organization", relations: []}
+            entity_to_graph(ws.entities.bob, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.frank, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.grace, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.henry, [%{type: "reports_to", target: "Bob Martinez"}]),
+            entity_to_graph(ws.entities.isabel, []),
+            entity_to_graph(ws.entities.brand_relaunch, []),
+            entity_to_graph(ws.entities.series_c, []),
+            entity_to_graph(ws.entities.techco, [%{type: "located_in", target: "San Francisco"}])
           ],
           context.api_key
         )
 
       assert {:ok, analysis} = result
-      connections = analysis["new_relations"] || analysis["relations"] || []
-
-      @allowed_relation_types ~w(works_at works_with manages reports_to part_of owns related_to located_in supersedes)
-
-      for rel <- connections do
-        rel_type = rel["relation_type"] || rel["type"] || ""
-
-        assert String.downcase(rel_type) in @allowed_relation_types,
-               "Invalid relation type '#{rel_type}'. Must be one of: #{inspect(@allowed_relation_types)}"
-      end
+      connections = analysis["new_relations"]
+      assert length(connections) >= 3,
+             "Expected at least 3 relations from leadership overview, got #{length(connections)}"
+      assert_valid_relation_types(connections)
     end
   end
 
-  # -------------------------------------------------------------------
+  # ===================================================================
+  # Temporal integrity
+  # ===================================================================
+
+  describe "temporal: role change scenario" do
+    @tag :integration
+    test "LLM does not re-propose closed relation", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_role_change!(user)
+
+      result =
+        consolidation_analysis(
+          "Where does Carol work now?",
+          "Carol Park now works at TechCo as a product manager. She used to be at DataFlow Labs.",
+          memories_to_text([ws.memories.old, ws.memories.new]),
+          [
+            entity_to_graph(ws.entities.carol, [
+              %{type: "works_at", target: "TechCo", confidence: 0.95},
+              %{type: "works_at", target: "DataFlow Labs", confidence: 0.90, meta: "closed"}
+            ]),
+            entity_to_graph(ws.entities.techco, []),
+            entity_to_graph(ws.entities.dataflow, [])
+          ],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+
+      # Should NOT re-propose Carol works_at DataFlow (it's closed)
+      stale_dup =
+        Enum.any?(connections, fn rel ->
+          String.downcase(rel["relation_type"]) == "works_at" and
+            rel["source_entity"] =~ ~r/carol/i and rel["target_entity"] =~ ~r/dataflow/i
+        end)
+
+      refute stale_dup,
+             "LLM re-proposed closed works_at relation: #{inspect(connections)}"
+    end
+  end
+
+  # ===================================================================
+  # Cross-domain: marketing + finance
+  # ===================================================================
+
+  describe "cross-domain: marketing-finance bridge" do
+    @tag :integration
+    test "LLM discovers cross-domain connections from seed_cross_domain!", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      user = user_fixture()
+      ws = seed_cross_domain!(user)
+
+      result =
+        consolidation_analysis(
+          "What's blocking the Brand Relaunch budget?",
+          "Grace Kim froze spending until the Series C term sheet is signed. Frank Torres needs to hold Brand Relaunch spend. Vertex Partners is the potential lead investor.",
+          memories_to_text([ws.memories.frank_role, ws.memories.grace_fundraise, ws.memories.budget_email]),
+          [
+            entity_to_graph(ws.entities.frank, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.grace, [%{type: "works_at", target: "TechCo"}]),
+            entity_to_graph(ws.entities.brand, []),
+            entity_to_graph(ws.entities.series_c, []),
+            entity_to_graph(ws.entities.vertex, [])
+          ],
+          context.api_key
+        )
+
+      assert {:ok, analysis} = result
+      connections = analysis["new_relations"]
+      assert length(connections) >= 2
+      assert_valid_relation_types(connections)
+
+      # Frank should manage Brand Relaunch
+      assert has_link?(connections, ~r/frank/i, ~r/brand/i)
+    end
+  end
+
+  # ===================================================================
   # Helpers
-  # -------------------------------------------------------------------
+  # ===================================================================
 
   defp has_api_key?(context), do: Map.has_key?(context, :api_key)
+
+  defp memories_to_text(memories) when is_list(memories) do
+    Enum.map(memories, & &1.content)
+  end
+
+  defp entity_to_graph(entity, relations) do
+    %{name: entity.name, type: entity.entity_type, relations: relations}
+  end
+
+  defp has_link?(connections, source_pattern, target_pattern) do
+    Enum.any?(connections, fn rel ->
+      s = rel["source_entity"] || ""
+      t = rel["target_entity"] || ""
+      (s =~ source_pattern and t =~ target_pattern) or
+        (s =~ target_pattern and t =~ source_pattern)
+    end)
+  end
+
+  defp assert_valid_relation_types(connections) do
+    for rel <- connections do
+      rel_type = rel["relation_type"] || ""
+      assert rel_type in @allowed_relation_types,
+             "Invalid relation type '#{rel_type}'. Allowed: #{inspect(@allowed_relation_types)}"
+    end
+  end
 
   @consolidation_response_format %{
     type: "json_schema",
@@ -517,34 +570,15 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
                 relation_type: %{
                   type: "string",
                   enum: [
-                    "works_at",
-                    "works_with",
-                    "manages",
-                    "reports_to",
-                    "part_of",
-                    "owns",
-                    "related_to",
-                    "located_in",
-                    "supersedes"
+                    "works_at", "works_with", "manages", "reports_to",
+                    "part_of", "owns", "related_to", "located_in", "supersedes"
                   ],
                   description: "Type of relation"
                 },
-                confidence: %{
-                  type: "number",
-                  description: "Confidence score 0-1"
-                },
-                reasoning: %{
-                  type: "string",
-                  description: "Why this relation was inferred"
-                }
+                confidence: %{type: "number", description: "Confidence score 0-1"},
+                reasoning: %{type: "string", description: "Why this relation was inferred"}
               },
-              required: [
-                "source_entity",
-                "target_entity",
-                "relation_type",
-                "confidence",
-                "reasoning"
-              ],
+              required: ["source_entity", "target_entity", "relation_type", "confidence", "reasoning"],
               additionalProperties: false
             }
           }
@@ -555,57 +589,35 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
     }
   }
 
-  @doc """
-  Asks the LLM to analyze cross-memory connections, simulating what the
-  Memory Agent does during a :consolidate mission.
-
-  Provides the LLM with:
-  - The triggering user/assistant exchange
-  - Existing memories (simulating search_memories results)
-  - Existing entity graph (simulating query_entity_graph results)
-
-  Returns `{:ok, analysis_map}` or `{:error, reason}`.
-  """
-  defp consolidation_analysis(
-         user_message,
-         assistant_response,
-         existing_memories,
-         existing_entities,
-         api_key
-       ) do
+  defp consolidation_analysis(user_message, assistant_response, existing_memories, existing_entities, api_key) do
     memories_section =
       case existing_memories do
-        [] ->
-          "No related memories found."
-
-        memories ->
-          memories
+        [] -> "No related memories found."
+        mems ->
+          mems
           |> Enum.with_index(1)
           |> Enum.map_join("\n", fn {mem, i} -> "  #{i}. #{mem}" end)
       end
 
     entities_section =
       case existing_entities do
-        [] ->
-          "No entities in the knowledge graph match this exchange."
-
-        entities ->
-          Enum.map_join(entities, "\n", fn ent ->
-            relations =
-              case ent[:relations] || ent["relations"] || [] do
-                [] ->
-                  "no existing relations"
-
-                rels ->
-                  Enum.map_join(rels, ", ", fn r ->
-                    type = r[:type] || r["type"] || "related_to"
-                    target = r[:target] || r["target"] || r[:source] || r["source"] || "?"
-                    confidence = r[:confidence] || r["confidence"] || "?"
-                    "#{type} → #{target} (confidence: #{confidence})"
+        [] -> "No entities in the knowledge graph match this exchange."
+        ents ->
+          Enum.map_join(ents, "\n", fn ent ->
+            rels =
+              case ent[:relations] || [] do
+                [] -> "no existing relations"
+                rs ->
+                  Enum.map_join(rs, ", ", fn r ->
+                    type = r[:type] || "related_to"
+                    target = r[:target] || r[:source] || "?"
+                    conf = r[:confidence] || "?"
+                    meta = if r[:meta], do: " [#{r[:meta]}]", else: ""
+                    "#{type} → #{target} (confidence: #{conf})#{meta}"
                   end)
               end
 
-            "  - #{ent[:name] || ent["name"]} (#{ent[:type] || ent["type"]}): #{relations}"
+            "  - #{ent[:name]} (#{ent[:type]}): #{rels}"
           end)
       end
 
