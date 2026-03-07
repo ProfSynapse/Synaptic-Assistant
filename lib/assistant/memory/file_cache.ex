@@ -3,6 +3,10 @@
 # Summarizes file content via LLM, generates search_queries, and persists as
 # a memory entry with source_type "system" and category "file_cache".
 #
+# Change tracking: when a file is re-read and its content has changed, the
+# previous version's summary + hash are appended to metadata.versions[]
+# before updating. This preserves lineage so we can see how a file evolved.
+#
 # Related files:
 #   - lib/assistant/memory/file_cache_worker.ex (Oban worker, enqueues async)
 #   - lib/assistant/orchestrator/context_files.ex (hook site for file loads)
@@ -22,12 +26,18 @@ defmodule Assistant.Memory.FileCache do
   @max_content_for_summary 12_000
   @file_cache_tag "file_cache"
   @default_importance "0.60"
+  @max_versions 10
 
   @doc """
   Caches a file's content as a memory entry with generated search_queries.
 
   Runs an LLM call to produce a summary and 5-8 hypothetical search queries.
   Deduplicates by checking for an existing memory with the same file path tag.
+
+  When a file has changed since last cache:
+  - The previous summary and hash are archived in `metadata.versions[]`
+  - A new summary is generated that includes awareness of what changed
+  - Version history is capped at #{@max_versions} entries
 
   Returns `{:ok, entry}`, `{:ok, :already_cached}`, or `{:error, reason}`.
   """
@@ -64,7 +74,7 @@ defmodule Assistant.Memory.FileCache do
   defp create_new(user_id, file_path, file_tag, content, content_hash) do
     with {:ok, model} <- resolve_model(user_id),
          {:ok, %{summary: summary, search_queries: queries}} <-
-           summarize_file(model, file_path, content, user_id) do
+           summarize_file(model, file_path, content, user_id, nil) do
       attrs = %{
         user_id: user_id,
         content: summary,
@@ -73,27 +83,52 @@ defmodule Assistant.Memory.FileCache do
         importance: Decimal.new(@default_importance),
         tags: [@file_cache_tag, file_tag],
         search_queries: queries,
-        metadata: %{"file_path" => file_path, "content_hash" => content_hash}
+        metadata: %{
+          "file_path" => file_path,
+          "content_hash" => content_hash,
+          "version" => 1,
+          "versions" => []
+        }
       }
 
       Store.create_memory_entry(attrs)
     end
   end
 
-  # --- Update ---
+  # --- Update with lineage ---
 
   defp update_existing(existing, content, content_hash) do
     user_id = existing.user_id
     file_path = existing.metadata["file_path"]
+    prev_summary = existing.content
+    prev_hash = existing.metadata["content_hash"]
+    prev_version = existing.metadata["version"] || 1
 
     with {:ok, model} <- resolve_model(user_id),
          {:ok, %{summary: summary, search_queries: queries}} <-
-           summarize_file(model, file_path, content, user_id) do
+           summarize_file(model, file_path, content, user_id, prev_summary) do
+      # Archive previous version
+      version_entry = %{
+        "version" => prev_version,
+        "summary" => prev_summary,
+        "content_hash" => prev_hash,
+        "archived_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      }
+
+      prev_versions = existing.metadata["versions"] || []
+      versions = Enum.take([version_entry | prev_versions], @max_versions)
+
+      new_metadata =
+        (existing.metadata || %{})
+        |> Map.put("content_hash", content_hash)
+        |> Map.put("version", prev_version + 1)
+        |> Map.put("versions", versions)
+
       existing
       |> MemoryEntry.changeset(%{
         content: summary,
         search_queries: queries,
-        metadata: Map.put(existing.metadata || %{}, "content_hash", content_hash)
+        metadata: new_metadata
       })
       |> Repo.update()
     end
@@ -108,8 +143,23 @@ defmodule Assistant.Memory.FileCache do
     end
   end
 
-  defp summarize_file(model, file_path, content, user_id) do
+  defp summarize_file(model, file_path, content, user_id, prev_summary) do
     truncated = String.slice(content, 0, @max_content_for_summary)
+
+    change_context =
+      if prev_summary do
+        """
+
+        This file was previously cached with the following summary:
+        ---
+        #{String.slice(prev_summary, 0, 500)}
+        ---
+        The file has been updated. Note any significant changes from the previous version \
+        in your summary (e.g., "Updated from v1: added new config section for X").
+        """
+      else
+        ""
+      end
 
     messages = [
       %{
@@ -121,7 +171,7 @@ defmodule Assistant.Memory.FileCache do
         - "search_queries": An array of 5-8 natural-language questions this file's content \
         would answer. Think about what someone might ask when they need information from this file.
 
-        Respond with ONLY the JSON object, no markdown fencing.
+        Respond with ONLY the JSON object, no markdown fencing.#{change_context}
         """
       },
       %{
