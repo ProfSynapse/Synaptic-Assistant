@@ -30,7 +30,8 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgentTest do
       assert Map.has_key?(defn.parameters["properties"], "agent_id")
       assert Map.has_key?(defn.parameters["properties"], "mission")
       assert Map.has_key?(defn.parameters["properties"], "skills")
-      assert defn.parameters["required"] == ["agent_id", "mission", "skills"]
+      assert defn.parameters["required"] == ["agent_id", "mission", "skills", "context_questions"]
+      assert Map.has_key?(defn.parameters["properties"], "context_questions")
     end
   end
 

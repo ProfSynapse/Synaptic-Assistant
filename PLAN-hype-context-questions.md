@@ -380,19 +380,11 @@ Key design:
 
 ### Step 11d: Note on files.read skill
 
-**File**: `lib/assistant/skills/files/read.ex` — **NO CHANGE for now**
+**File**: `lib/assistant/skills/files/read.ex` — **DONE (separate commit)**
 
-The `files.read` skill currently reads directly from the Drive API, bypassing the sync
-layer. Drive files are already synced to local markdown/csv via the `SyncPollWorker` →
-`FileSyncWorker` → `Converter` pipeline and stored encrypted in `synced_files`.
-
-`context_files.ex` already reads from synced local copies (via `StateStore` +
-`FileManager`), so the `FileCacheWorker` hook in Step 11b covers the primary file
-reading path.
-
-**Future work** (separate PR): Refactor `files.read` to read from synced local copies
-instead of the Drive API. Once that's done, it would naturally go through `context_files`
-and get the caching hook for free.
+`files.read` has been refactored to read from the synced workspace via `FileManager`
+(no Drive API calls). The `FileCacheWorker` hook in Step 11b covers `context_files`
+reads. A similar hook could be added to `files.read` to cache skill-based file reads.
 
 ---
 
@@ -448,7 +440,7 @@ and get the caching hook for free.
 | 12 | `lib/assistant/memory/file_cache.ex` | NEW | Summarize file → memory + search_queries |
 | 13 | `lib/assistant/memory/file_cache_worker.ex` | NEW | Oban worker for async file caching |
 | 14 | `lib/assistant/orchestrator/context_files.ex` | EDIT | Enqueue FileCacheWorker on file load |
-| 15 | `lib/assistant/skills/files/read.ex` | SKIP | Future: refactor to read from synced copies |
+| 15 | `lib/assistant/skills/files/read.ex` | DONE | Refactored to synced workspace (separate commit) |
 | 16 | `test/assistant/memory/prefetch_test.exs` | NEW | Prefetch unit tests |
 | 17 | `test/assistant/memory/file_cache_test.exs` | NEW | File cache unit tests |
 | 18 | `test/integration/context_questions_llm_test.exs` | NEW | E2E integration test |

@@ -15,6 +15,7 @@ defmodule Assistant.Schemas.MemoryEntry do
   schema "memory_entries" do
     field :content, :string
     field :tags, {:array, :string}, default: []
+    field :search_queries, {:array, :string}, default: []
     field :category, :string
     field :source_type, :string
     field :importance, :decimal, default: Decimal.new("0.50")
@@ -39,6 +40,7 @@ defmodule Assistant.Schemas.MemoryEntry do
   @required_fields [:content]
   @optional_fields [
     :tags,
+    :search_queries,
     :category,
     :source_type,
     :importance,

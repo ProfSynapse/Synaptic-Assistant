@@ -28,6 +28,11 @@ parameters:
     type: "string"
     required: false
     description: "UUID of the originating conversation"
+  - name: "search_queries"
+    type: "array"
+    items: "string"
+    required: false
+    description: "3-5 hypothetical questions this memory answers. Used for retrieval matching."
   - name: "source_message_range"
     type: "object"
     required: false
@@ -48,6 +53,7 @@ to verify no duplicate or conflicting entry exists (search-first enforcement).
 | source_type | string | no | Origin: "conversation", "compaction", "manual" (default: "conversation") |
 | confidence | float | no | Confidence level 0.0-1.0 (default: 0.8) |
 | source_conversation_id | string | no | UUID of the originating conversation |
+| search_queries | array[string] | no | 3-5 hypothetical questions this memory answers |
 | source_message_range | object | no | `{start_idx: int, end_idx: int}` for compaction provenance |
 
 ## Response
@@ -69,3 +75,6 @@ Returns a JSON object:
 - Keep content factual and specific — avoid vague or speculative statements.
 - Include all relevant entity names in the content for future graph extraction.
 - Topics should be 2-5 words each, lowercase, describing the subject matter.
+- Always include `search_queries` with 3-5 natural-language questions this memory answers.
+  Example: for "Alice Chen is a senior backend engineer at TechCo specializing in distributed systems",
+  generate: ["Who has distributed systems experience?", "What does Alice Chen do?", "Who works at TechCo?"]

@@ -79,11 +79,16 @@ defmodule Assistant.Skills.Memory.Save do
       source_type: flags["source_type"] || flags["source-type"] || "conversation",
       tags: parse_tags(flags["tags"] || flags["topics"]),
       category: flags["category"],
-      importance: parse_importance(flags["importance"] || flags["confidence"])
+      importance: parse_importance(flags["importance"] || flags["confidence"]),
+      search_queries: parse_search_queries(flags["search_queries"])
     }
     |> Enum.reject(fn {_k, v} -> is_nil(v) end)
     |> Map.new()
   end
+
+  defp parse_search_queries(nil), do: []
+  defp parse_search_queries(queries) when is_list(queries), do: queries
+  defp parse_search_queries(_), do: []
 
   defp parse_tags(nil), do: []
   defp parse_tags(tags) when is_list(tags), do: tags

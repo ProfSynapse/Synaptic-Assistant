@@ -67,6 +67,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   alias Assistant.Analytics
   alias Assistant.Auth.MagicLink
   alias Assistant.Config.{Loader, PromptLoader}
+  alias Assistant.Memory.Prefetch
   alias Assistant.Integrations.Google.Auth, as: GoogleAuth
   alias Assistant.Integrations.LLMRouter
   alias Assistant.AccessScopes
@@ -89,6 +90,7 @@ defmodule Assistant.Orchestrator.SubAgent do
   # Google skill domains that require a per-user OAuth2 token.
   @google_skill_domains ~w(email calendar files)
   @peer_query_skill "agents.query_subagent"
+  @default_memory_read_skills ["memory.search_memories", "memory.query_entity_graph"]
 
   @default_max_tool_calls 5
   @default_timeout_ms 30_000
@@ -1141,11 +1143,16 @@ defmodule Assistant.Orchestrator.SubAgent do
            budget_tokens: compute_context_file_budget(dispatch_params)
          ) do
       {:ok, context_payload} ->
+        prefetch_context =
+          Prefetch.resolve(
+            dispatch_params.user_id,
+            dispatch_params[:context_questions] || []
+          )
+
         system_content =
-          case context_payload.prompt_prefix do
-            "" -> system_prompt
-            prefix -> prefix <> "\n\n" <> system_prompt
-          end
+          [context_payload.prompt_prefix, system_prompt, prefetch_context]
+          |> Enum.reject(&(&1 in [nil, ""]))
+          |> Enum.join("\n\n")
 
         {:ok,
          %{
@@ -1303,11 +1310,12 @@ defmodule Assistant.Orchestrator.SubAgent do
 
   defp effective_skills(dispatch_params) do
     base_skills = dispatch_params.skills || []
+    skills = Enum.uniq(base_skills ++ @default_memory_read_skills)
 
     if peer_query_available?(dispatch_params) do
-      Enum.uniq(base_skills ++ [@peer_query_skill])
+      Enum.uniq(skills ++ [@peer_query_skill])
     else
-      base_skills
+      skills
     end
   end
 

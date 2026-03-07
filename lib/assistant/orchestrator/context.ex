@@ -119,7 +119,8 @@ defmodule Assistant.Orchestrator.Context do
   @spec build(map(), [map()], keyword()) :: map()
   def build(loop_state, messages, opts \\ []) do
     system_prompt = build_system_prompt(loop_state)
-    context_block = build_context_block(loop_state, opts)
+    opts_with_query = maybe_inject_user_query(opts, messages)
+    context_block = build_context_block(loop_state, opts_with_query)
 
     role = loop_state[:role] || :orchestrator
 
@@ -192,6 +193,28 @@ defmodule Assistant.Orchestrator.Context do
       #{custom_prompt}
       """
       |> String.trim()
+    end
+  end
+
+  # If no explicit :query opt was provided, extract the last user message
+  # from the conversation history and use it as the FTS query for memory
+  # context retrieval. This ensures the orchestrator gets memory results
+  # relevant to what the user just said.
+  defp maybe_inject_user_query(opts, messages) do
+    if Keyword.has_key?(opts, :query) do
+      opts
+    else
+      user_query =
+        messages
+        |> List.wrap()
+        |> Enum.reverse()
+        |> Enum.find_value(fn
+          %{role: "user", content: content} when is_binary(content) -> content
+          %{"role" => "user", "content" => content} when is_binary(content) -> content
+          _ -> nil
+        end)
+
+      if user_query, do: Keyword.put(opts, :query, user_query), else: opts
     end
   end
 

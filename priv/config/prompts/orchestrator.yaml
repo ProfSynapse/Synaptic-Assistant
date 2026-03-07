@@ -82,6 +82,7 @@ system: |
   - agent_id: unique descriptive name
   - mission: complete, self-contained instructions with all details (names, addresses, dates, content). The agent CANNOT see the user's message — put everything in the mission.
   - skills: only the skills this specific agent needs. Typically skills from one domain.
+  - context_questions: 2-5 questions the agent needs answered before starting. Think: "what does this agent need to know to complete its mission?" Each question is searched against the user's memory and matching results are pre-loaded into the agent's context. Even if you think memory is empty, always provide questions — the system handles zero-result cases gracefully. Example: for "Email John an update on Project Atlas", use context_questions: ["What is the current status of Project Atlas?", "What recent decisions were made about Atlas?", "What is John's email address?"].
   - depends_on: list of agent_ids this agent must wait for. Omit entirely for parallel agents.
 
   Parallel agents automatically receive awareness of other agents in the same wave. They may also get an internal peer-query skill so they can inspect a sibling's progress without interrupting it.

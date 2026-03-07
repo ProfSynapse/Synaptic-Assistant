@@ -3,6 +3,7 @@ defmodule Assistant.Orchestrator.ContextFiles do
 
   alias Assistant.Config.Loader
   alias Assistant.Integrations.LLMRouter
+  alias Assistant.Memory.FileCacheWorker
   alias Assistant.Sync.{FileManager, StateStore}
 
   require Logger
@@ -35,11 +36,13 @@ defmodule Assistant.Orchestrator.ContextFiles do
     provider = Keyword.get(opts, :provider) || routed_provider(opts)
     model_info = Keyword.get(opts, :model_info)
     budget_tokens = Keyword.fetch!(opts, :budget_tokens)
+    user_id = Keyword.get(opts, :user_id)
 
     loaded =
       Enum.reduce(file_paths, %{texts: [], assets: [], warnings: []}, fn path, acc ->
         case load_entry(path, opts) do
           {:ok, entry} ->
+            maybe_enqueue_file_cache(entry, user_id)
             classify_entry(entry, provider, model_info, acc)
 
           {:warn, warning} ->
@@ -394,4 +397,23 @@ defmodule Assistant.Orchestrator.ContextFiles do
   defp data_url(mime_type, contents) do
     "data:#{mime_type};base64,#{Base.encode64(contents)}"
   end
+
+  # Enqueue async file caching for text files so their content becomes
+  # searchable in the memory system. Fire-and-forget — does not block.
+  defp maybe_enqueue_file_cache(%{local_format: format, path: path, contents: contents}, user_id)
+       when format in @text_formats and is_binary(user_id) do
+    %{user_id: user_id, file_path: path, content: contents}
+    |> FileCacheWorker.new()
+    |> Oban.insert()
+    |> case do
+      {:ok, _job} -> :ok
+      {:error, reason} ->
+        Logger.warning("Failed to enqueue file cache",
+          file_path: path,
+          reason: inspect(reason)
+        )
+    end
+  end
+
+  defp maybe_enqueue_file_cache(_entry, _user_id), do: :ok
 end

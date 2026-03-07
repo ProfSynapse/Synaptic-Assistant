@@ -114,9 +114,20 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
                 "context documents. Files are read and injected at the top of the " <>
                 "prompt for cache efficiency. Paths relative to project root or " <>
                 "absolute. Missing files are skipped with a warning. Optional."
+          },
+          "context_questions" => %{
+            "type" => "array",
+            "items" => %{"type" => "string"},
+            "description" =>
+              "List of natural-language questions this agent needs answered from " <>
+                "memory. Each question is run as an FTS query against the user's " <>
+                "memory store BEFORE the agent starts. Matching memories are " <>
+                "injected into the agent's system prompt as pre-fetched context. " <>
+                "Example: [\"What email provider does the user prefer?\", " <>
+                "\"What is the user's meeting scheduling policy?\"]. Required."
           }
         },
-        "required" => ["agent_id", "mission", "skills"]
+        "required" => ["agent_id", "mission", "skills", "context_questions"]
       }
     }
   end
@@ -241,7 +252,8 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
            depends_on: params["depends_on"] || [],
            max_tool_calls: params["max_tool_calls"] || @default_max_tool_calls,
            model_override: params["model_override"],
-           context_files: params["context_files"] || []
+           context_files: params["context_files"] || [],
+           context_questions: params["context_questions"] || []
          }}
     end
   end
@@ -274,7 +286,8 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
         depends_on: validated.depends_on,
         max_tool_calls: validated.max_tool_calls,
         model_override: validated.model_override,
-        context_files: validated.context_files
+        context_files: validated.context_files,
+        context_questions: validated.context_questions
       },
       status: "pending",
       started_at: DateTime.utc_now()
@@ -298,6 +311,7 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
       max_tool_calls: validated.max_tool_calls,
       model_override: validated.model_override,
       context_files: validated.context_files,
+      context_questions: validated.context_questions,
       execution_log_id: execution_log.id
     }
   end
