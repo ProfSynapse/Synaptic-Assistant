@@ -10,18 +10,44 @@ defmodule Assistant.Repo.Migrations.AddSearchQueriesToMemoryEntries do
     # 2. Drop the existing GIN index on search_text
     execute "DROP INDEX IF EXISTS idx_memory_entries_search"
 
-    # 3. Drop the existing generated search_text column
+    # 3. Drop the existing trigger and trigger function (from create_core_tables)
+    execute "DROP TRIGGER IF EXISTS trg_memory_entries_search_text ON memory_entries"
+    execute "DROP FUNCTION IF EXISTS memory_entries_search_text_trigger()"
+
+    # 4. Drop the existing search_text column
     execute "ALTER TABLE memory_entries DROP COLUMN IF EXISTS search_text"
 
-    # 4. Re-create search_text as a generated tsvector combining content + search_queries
+    # 5. Add search_text as a regular tsvector column (NOT generated)
+    execute "ALTER TABLE memory_entries ADD COLUMN search_text tsvector"
+
+    # 6. Create trigger function combining content + search_queries
     execute """
-    ALTER TABLE memory_entries ADD COLUMN search_text tsvector GENERATED ALWAYS AS (
-      to_tsvector('english', coalesce(content, '')) ||
-      to_tsvector('english', coalesce(array_to_string(search_queries, ' '), ''))
-    ) STORED
+    CREATE FUNCTION memory_entries_search_text_trigger() RETURNS trigger AS $$
+    BEGIN
+      NEW.search_text :=
+        to_tsvector('english', coalesce(NEW.content, '')) ||
+        to_tsvector('english', coalesce(array_to_string(NEW.search_queries, ' '), ''));
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
     """
 
-    # 5. Re-create the GIN index
+    # 7. Create the trigger
+    execute """
+    CREATE TRIGGER trg_memory_entries_search_text
+      BEFORE INSERT OR UPDATE ON memory_entries
+      FOR EACH ROW
+      EXECUTE FUNCTION memory_entries_search_text_trigger()
+    """
+
+    # 8. Backfill existing rows
+    execute """
+    UPDATE memory_entries SET search_text =
+      to_tsvector('english', coalesce(content, '')) ||
+      to_tsvector('english', coalesce(array_to_string(search_queries, ' '), ''))
+    """
+
+    # 9. Re-create the GIN index
     execute "CREATE INDEX idx_memory_entries_search ON memory_entries USING gin(search_text)"
   end
 
@@ -29,14 +55,36 @@ defmodule Assistant.Repo.Migrations.AddSearchQueriesToMemoryEntries do
     # Drop the GIN index
     execute "DROP INDEX IF EXISTS idx_memory_entries_search"
 
-    # Drop the combined search_text column
+    # Drop the combined trigger and function
+    execute "DROP TRIGGER IF EXISTS trg_memory_entries_search_text ON memory_entries"
+    execute "DROP FUNCTION IF EXISTS memory_entries_search_text_trigger()"
+
+    # Drop the search_text column
     execute "ALTER TABLE memory_entries DROP COLUMN IF EXISTS search_text"
 
-    # Re-create the original content-only search_text column
+    # Re-create the original content-only search_text column (trigger-based)
+    execute "ALTER TABLE memory_entries ADD COLUMN search_text tsvector"
+
     execute """
-    ALTER TABLE memory_entries ADD COLUMN search_text tsvector GENERATED ALWAYS AS (
+    CREATE FUNCTION memory_entries_search_text_trigger() RETURNS trigger AS $$
+    BEGIN
+      NEW.search_text := to_tsvector('english', coalesce(NEW.content, ''));
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """
+
+    execute """
+    CREATE TRIGGER trg_memory_entries_search_text
+      BEFORE INSERT OR UPDATE ON memory_entries
+      FOR EACH ROW
+      EXECUTE FUNCTION memory_entries_search_text_trigger()
+    """
+
+    # Backfill with content-only tsvector
+    execute """
+    UPDATE memory_entries SET search_text =
       to_tsvector('english', coalesce(content, ''))
-    ) STORED
     """
 
     # Re-create the GIN index

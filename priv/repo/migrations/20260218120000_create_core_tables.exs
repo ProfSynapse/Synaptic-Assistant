@@ -121,10 +121,34 @@ defmodule Assistant.Repo.Migrations.CreateCoreTables do
                "source_type IS NULL OR source_type IN ('conversation', 'skill_execution', 'user_explicit', 'system')"
            )
 
-    # Generated tsvector column for full-text search
+    # Trigger-populated tsvector column for full-text search
+    # Note: to_tsvector('english', ...) is STABLE not IMMUTABLE, so we use a
+    # trigger instead of GENERATED ALWAYS AS STORED.
     execute(
-      "ALTER TABLE memory_entries ADD COLUMN search_text tsvector GENERATED ALWAYS AS (to_tsvector('english', coalesce(content, ''))) STORED",
+      "ALTER TABLE memory_entries ADD COLUMN search_text tsvector",
       "ALTER TABLE memory_entries DROP COLUMN search_text"
+    )
+
+    execute(
+      """
+      CREATE FUNCTION memory_entries_search_text_trigger() RETURNS trigger AS $$
+      BEGIN
+        NEW.search_text := to_tsvector('english', coalesce(NEW.content, ''));
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+      """,
+      "DROP FUNCTION IF EXISTS memory_entries_search_text_trigger()"
+    )
+
+    execute(
+      """
+      CREATE TRIGGER trg_memory_entries_search_text
+        BEFORE INSERT OR UPDATE ON memory_entries
+        FOR EACH ROW
+        EXECUTE FUNCTION memory_entries_search_text_trigger()
+      """,
+      "DROP TRIGGER IF EXISTS trg_memory_entries_search_text ON memory_entries"
     )
 
     create index(:memory_entries, [:user_id])
@@ -250,15 +274,36 @@ defmodule Assistant.Repo.Migrations.CreateCoreTables do
 
     create constraint(:tasks, :no_self_parent, check: "parent_task_id != id")
 
-    # Generated tsvector column for full-text search on title + description
+    # Trigger-populated tsvector column for full-text search on title + description
+    # Note: to_tsvector('english', ...) is STABLE not IMMUTABLE, so we use a
+    # trigger instead of GENERATED ALWAYS AS STORED.
+    execute(
+      "ALTER TABLE tasks ADD COLUMN search_vector tsvector",
+      "ALTER TABLE tasks DROP COLUMN search_vector"
+    )
+
     execute(
       """
-      ALTER TABLE tasks ADD COLUMN search_vector tsvector GENERATED ALWAYS AS (
-        setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
-        setweight(to_tsvector('english', coalesce(description, '')), 'B')
-      ) STORED
+      CREATE FUNCTION tasks_search_vector_trigger() RETURNS trigger AS $$
+      BEGIN
+        NEW.search_vector :=
+          setweight(to_tsvector('english', coalesce(NEW.title, '')), 'A') ||
+          setweight(to_tsvector('english', coalesce(NEW.description, '')), 'B');
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
       """,
-      "ALTER TABLE tasks DROP COLUMN search_vector"
+      "DROP FUNCTION IF EXISTS tasks_search_vector_trigger()"
+    )
+
+    execute(
+      """
+      CREATE TRIGGER trg_tasks_search_vector
+        BEFORE INSERT OR UPDATE ON tasks
+        FOR EACH ROW
+        EXECUTE FUNCTION tasks_search_vector_trigger()
+      """,
+      "DROP TRIGGER IF EXISTS trg_tasks_search_vector ON tasks"
     )
 
     create unique_index(:tasks, [:short_id])

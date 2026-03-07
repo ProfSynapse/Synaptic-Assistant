@@ -23,7 +23,7 @@ defmodule Assistant.Schemas.MemoryEntry do
     field :decay_factor, :decimal, default: Decimal.new("1.00")
     field :accessed_at, :utc_datetime_usec
 
-    # search_text is a generated tsvector column (read-only in Elixir)
+    # search_text is a trigger-populated tsvector column (read-only in Elixir)
 
     # Progressive disclosure: which message range this memory covers
     field :segment_start_message_id, :binary_id
