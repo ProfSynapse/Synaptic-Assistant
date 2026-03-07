@@ -144,6 +144,29 @@ defmodule Assistant.Memory.AgentTest do
 
       GenServer.stop(pid, :normal, 1_000)
     end
+
+    test "consolidate cast accepted from idle state", %{user_id: user_id} do
+      {:ok, pid} = MemoryAgent.start_link(user_id: user_id)
+
+      GenServer.cast(
+        pid,
+        {:mission, :consolidate,
+         %{
+           conversation_id: "conv-consolidate",
+           user_id: user_id,
+           user_message: "Alice joined Project X as lead engineer",
+           assistant_response: "Noted, Alice is the lead engineer on Project X."
+         }}
+      )
+
+      # Agent eventually returns to idle (LLM fails without real client)
+      wait_for_idle(user_id, 2_000)
+
+      {:ok, status} = MemoryAgent.get_status(user_id)
+      assert status.status == :idle
+
+      GenServer.stop(pid, :normal, 1_000)
+    end
   end
 
   # ---------------------------------------------------------------

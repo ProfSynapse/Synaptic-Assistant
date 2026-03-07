@@ -53,7 +53,7 @@ defmodule Assistant.Integration.MemoryLLMTest do
         properties: %{
           action: %{
             type: "string",
-            enum: ["save_facts", "compact", "nothing"],
+            enum: ["save_facts", "consolidate", "compact", "nothing"],
             description: "Classification action for this conversation turn"
           },
           reason: %{
@@ -131,9 +131,34 @@ defmodule Assistant.Integration.MemoryLLMTest do
       result = classify_turn(user_message, assistant_response, context.api_key)
 
       assert {:ok, action, reason} = result
-      assert action in ["save_facts", "compact", "nothing"]
+      assert action in ["save_facts", "consolidate", "compact", "nothing"]
       assert is_binary(reason)
       assert String.length(reason) > 0
+    end
+
+    @tag :integration
+    test "classifies cross-referencing exchange as consolidate or save_facts", context do
+      if not has_api_key?(context), do: flunk("Skipped: OPENROUTER_API_KEY not set")
+
+      # This exchange references entities that likely exist in prior memory
+      # (Alice from Anthropic was mentioned before). The LLM should classify
+      # this as consolidate (connecting to prior memories) or save_facts.
+      user_message = """
+      Remember how Alice works at Anthropic? She just told me she's now
+      leading the Kubernetes migration project that John from Google mentioned.
+      """
+
+      assistant_response = """
+      Interesting connection! Alice from Anthropic is now leading the same
+      Kubernetes migration project that John Smith from Google mentioned earlier.
+      """
+
+      result = classify_turn(user_message, assistant_response, context.api_key)
+
+      assert {:ok, action, reason} = result
+      # LLM may classify as consolidate (connecting entities) or save_facts (new info)
+      assert action in ["consolidate", "save_facts"]
+      assert is_binary(reason)
     end
 
     @tag :integration
@@ -248,6 +273,7 @@ defmodule Assistant.Integration.MemoryLLMTest do
     Classify this conversation exchange.
 
     save_facts: exchange contains new facts about named entities (people, orgs, projects)
+    consolidate: exchange references entities that may connect to previously stored memories
     compact: clear topic change from what was previously discussed
     nothing: routine exchange, no new memorable facts
 
@@ -308,7 +334,7 @@ defmodule Assistant.Integration.MemoryLLMTest do
 
     case Jason.decode(cleaned) do
       {:ok, %{"action" => action, "reason" => reason}}
-      when action in ["save_facts", "compact", "nothing"] ->
+      when action in ["save_facts", "consolidate", "compact", "nothing"] ->
         {:ok, action, reason}
 
       {:ok, %{"action" => action}} ->

@@ -105,13 +105,19 @@ defmodule Assistant.Memory.TurnClassifierTest do
   # ---------------------------------------------------------------
 
   describe "classification action contracts" do
-    test "save_facts should trigger save_memory + extract_entities" do
+    test "save_facts should trigger save_and_extract + consolidate" do
       # This documents the contract: when classification returns "save_facts",
-      # the TurnClassifier dispatches BOTH :save_memory and :extract_entities
-      actions_for_save_facts = [:save_memory, :extract_entities]
+      # the TurnClassifier dispatches :save_and_extract then :consolidate
+      actions_for_save_facts = [:save_and_extract, :consolidate]
       assert length(actions_for_save_facts) == 2
-      assert :save_memory in actions_for_save_facts
-      assert :extract_entities in actions_for_save_facts
+      assert :save_and_extract in actions_for_save_facts
+      assert :consolidate in actions_for_save_facts
+    end
+
+    test "consolidate should trigger consolidate mission" do
+      actions_for_consolidate = [:consolidate]
+      assert length(actions_for_consolidate) == 1
+      assert :consolidate in actions_for_consolidate
     end
 
     test "compact should trigger compact_conversation" do
@@ -146,6 +152,12 @@ defmodule Assistant.Memory.TurnClassifierTest do
       assert parsed["action"] == "compact"
     end
 
+    test "valid consolidate JSON" do
+      json = ~s({"action": "consolidate", "reason": "Cross-memory entity connections"})
+      assert {:ok, parsed} = Jason.decode(json)
+      assert parsed["action"] == "consolidate"
+    end
+
     test "valid nothing JSON" do
       json = ~s({"action": "nothing", "reason": "Routine greeting"})
       assert {:ok, parsed} = Jason.decode(json)
@@ -173,7 +185,7 @@ defmodule Assistant.Memory.TurnClassifierTest do
     test "valid JSON with invalid action" do
       json = ~s({"action": "delete_everything", "reason": "bad"})
       {:ok, parsed} = Jason.decode(json)
-      assert parsed["action"] not in ["save_facts", "compact", "nothing"]
+      assert parsed["action"] not in ["save_facts", "consolidate", "compact", "nothing"]
     end
   end
 
@@ -199,7 +211,7 @@ defmodule Assistant.Memory.TurnClassifierTest do
 
       case Jason.decode(cleaned) do
         {:ok, %{"action" => action, "reason" => reason}}
-        when action in ["save_facts", "compact", "nothing"] ->
+        when action in ["save_facts", "consolidate", "compact", "nothing"] ->
           {:ok, action, reason}
 
         {:ok, %{"action" => action}} ->
@@ -220,6 +232,11 @@ defmodule Assistant.Memory.TurnClassifierTest do
     test "parses compact action" do
       json = ~s({"action": "compact", "reason": "Topic change detected"})
       assert {:ok, "compact", "Topic change detected"} = parse_classification(json)
+    end
+
+    test "parses consolidate action" do
+      json = ~s({"action": "consolidate", "reason": "Entities connect to prior memories"})
+      assert {:ok, "consolidate", "Entities connect to prior memories"} = parse_classification(json)
     end
 
     test "parses nothing action" do
