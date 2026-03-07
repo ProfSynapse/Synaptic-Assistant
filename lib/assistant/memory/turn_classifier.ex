@@ -8,7 +8,7 @@
 #
 # Related files:
 #   - lib/assistant/orchestrator/engine.ex (publishes :turn_completed events)
-#   - lib/assistant/memory/agent.ex (receives save_memory/compact missions)
+#   - lib/assistant/memory/agent.ex (receives save_memory/compact/consolidate missions)
 #   - lib/assistant/integrations/openrouter.ex (LLM client for classification)
 #   - lib/assistant/config/loader.ex (model selection for sentinel/fast tier)
 #   - lib/assistant/application.ex (supervision tree)
@@ -21,7 +21,9 @@ defmodule Assistant.Memory.TurnClassifier do
   makes a cheap LLM classification call (sentinel-tier model) to decide:
 
     * `save_facts` — Exchange contains new facts about named entities.
-      Dispatches `save_memory` + `extract_entities` to the memory agent.
+      Dispatches `save_and_extract` + `consolidate` to the memory agent.
+    * `consolidate` — Exchange references entities that may connect to
+      previously stored memories. Dispatches `consolidate` to the memory agent.
     * `compact` — Clear topic change detected. Dispatches
       `compact_conversation` to the memory agent.
     * `nothing` — Routine exchange, no action needed.
@@ -41,6 +43,7 @@ defmodule Assistant.Memory.TurnClassifier do
   Classify this conversation exchange.
 
   save_facts: exchange contains new facts about named entities (people, orgs, projects)
+  consolidate: exchange references entities that may connect to previously stored memories
   compact: clear topic change from what was previously discussed
   nothing: routine exchange, no new memorable facts
 
@@ -58,7 +61,7 @@ defmodule Assistant.Memory.TurnClassifier do
         properties: %{
           action: %{
             type: "string",
-            enum: ["save_facts", "compact", "nothing"],
+            enum: ["save_facts", "consolidate", "compact", "nothing"],
             description: "Classification action for this conversation turn"
           },
           reason: %{
@@ -182,6 +185,33 @@ defmodule Assistant.Memory.TurnClassifier do
           classification_reason: reason
         })
 
+        # Follow up with consolidation to find cross-memory connections.
+        # If the agent is busy with save_and_extract, the consolidate mission
+        # is gracefully dropped — it will get another chance on the next turn.
+        dispatch_to_memory_agent(user_id, :consolidate, %{
+          conversation_id: conversation_id,
+          user_id: user_id,
+          user_message: user_message,
+          assistant_response: assistant_response,
+          trigger: :turn_classifier_post_save,
+          classification_reason: reason
+        })
+
+      {:ok, "consolidate", reason} ->
+        Logger.info("Turn classified as consolidate",
+          conversation_id: conversation_id,
+          reason: reason
+        )
+
+        dispatch_to_memory_agent(user_id, :consolidate, %{
+          conversation_id: conversation_id,
+          user_id: user_id,
+          user_message: user_message,
+          assistant_response: assistant_response,
+          trigger: :turn_classifier,
+          classification_reason: reason
+        })
+
       {:ok, "compact", reason} ->
         Logger.info("Turn classified as compact (topic change)",
           conversation_id: conversation_id,
@@ -220,7 +250,7 @@ defmodule Assistant.Memory.TurnClassifier do
 
     case Jason.decode(cleaned) do
       {:ok, %{"action" => action, "reason" => reason}}
-      when action in ["save_facts", "compact", "nothing"] ->
+      when action in ["save_facts", "consolidate", "compact", "nothing"] ->
         {:ok, action, reason}
 
       {:ok, %{"action" => action}} ->

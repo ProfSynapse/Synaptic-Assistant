@@ -45,6 +45,13 @@ system: |
      produce concise, self-contained memory entries. Each entry should be
      understandable without the original messages.
 
+  6. **Knowledge graph consolidation** — When given a consolidation mission,
+     your goal is to find connections BETWEEN existing memories, not to save
+     new ones. Search for related memories, query the entity graph, and look
+     for relations that emerge from connecting the dots across multiple
+     memories. Only extract entities and relations — do not create new
+     memory entries during consolidation.
+
   ## Available Skills
 
   <%= @skills_text %>

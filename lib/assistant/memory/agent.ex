@@ -912,6 +912,33 @@ defmodule Assistant.Memory.Agent do
     """
   end
 
+  defp build_mission_text(:consolidate, params) do
+    user_msg = params[:user_message] || ""
+    assistant_msg = params[:assistant_response] || ""
+
+    """
+    Consolidate the knowledge graph based on the following exchange.
+
+    User message: #{String.slice(user_msg, 0, 2000)}
+
+    Assistant response: #{String.slice(assistant_msg, 0, 2000)}
+
+    Steps:
+    1. Search existing memories for entities and topics mentioned in this exchange.
+    2. Query the entity graph for each entity found to see existing relations.
+    3. Look for cross-memory connections: do any previously stored memories relate
+       to each other in ways that weren't captured as entity relations?
+       For example: Memory A says "Alice is an engineer", Memory B says
+       "Project X needs engineers" → relation: Alice — candidate_for — Project X.
+    4. For each new connection discovered, extract the entities and relations
+       using the standard entity extraction format.
+    5. For entities whose attributes have changed based on new information,
+       close the old relations and open updated ones.
+    6. Do NOT re-save memories. Only update the entity graph with new or
+       changed relations between existing entities.
+    """
+  end
+
   defp build_mission_text(:extract_entities, params) do
     user_msg = params[:user_message] || ""
     assistant_msg = params[:assistant_response] || ""
