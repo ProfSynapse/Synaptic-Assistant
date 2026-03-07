@@ -1,8 +1,8 @@
 # lib/assistant/skills/files/search.ex — Handler for files.search skill.
 #
-# Searches the local SyncedFile database directly for matched files.
+# Searches the local SyncedFile database for matched files.
 # Supports text query (matching file name or local path),
-# MIME type filtering, folder scoping (via parent checking), and result limiting.
+# MIME type filtering, folder scoping (via path matching), and result limiting.
 #
 # Related files:
 #   - lib/assistant/skills/handler.ex (behaviour)
@@ -10,7 +10,7 @@
 
 defmodule Assistant.Skills.Files.Search do
   @moduledoc """
-  Skill handler for searching synced Google Drive files locally.
+  Skill handler for searching synced files in the workspace.
 
   Builds a local database query from CLI flags (query text, type, folder) and returns
   a formatted list of matching files for LLM context.
@@ -23,7 +23,19 @@ defmodule Assistant.Skills.Files.Search do
   alias Assistant.Schemas.SyncedFile
   alias Assistant.Skills.Helpers, as: SkillsHelpers
   alias Assistant.Skills.Result
-  alias Assistant.Integrations.Google.Drive
+
+  @type_to_mime %{
+    "doc" => "application/vnd.google-apps.document",
+    "document" => "application/vnd.google-apps.document",
+    "sheet" => "application/vnd.google-apps.spreadsheet",
+    "spreadsheet" => "application/vnd.google-apps.spreadsheet",
+    "slides" => "application/vnd.google-apps.presentation",
+    "presentation" => "application/vnd.google-apps.presentation",
+    "pdf" => "application/pdf",
+    "folder" => "application/vnd.google-apps.folder",
+    "image" => "image/",
+    "video" => "video/"
+  }
 
   @default_limit 20
   @max_limit 100
@@ -44,30 +56,29 @@ defmodule Assistant.Skills.Files.Search do
   defp do_execute(flags, user_id) do
     query_text = Map.get(flags, "query")
     type = Map.get(flags, "type")
-    # For a folder flag, we might not have a reliable way to query a parent locally
-    # unless we store `parent_id` on SyncedFile or match via local_path logic.
-    # Currently local_path contains parent structure (e.g. Folders/File)
     folder = Map.get(flags, "folder")
     limit = SkillsHelpers.parse_limit(Map.get(flags, "limit"), @default_limit, @max_limit)
 
-    files = search_files_local(user_id, query_text, type, folder, limit)
+    with :ok <- validate_type(type) do
+      files = search_files_local(user_id, query_text, type, folder, limit)
 
-    if Enum.empty?(files) do
-      {:ok,
-       %Result{
-         status: :ok,
-         content: "No files found matching the given criteria.",
-         metadata: %{count: 0}
-       }}
-    else
-      content = format_file_list(files)
+      if Enum.empty?(files) do
+        {:ok,
+         %Result{
+           status: :ok,
+           content: "No files found matching the given criteria.",
+           metadata: %{count: 0}
+         }}
+      else
+        content = format_file_list(files)
 
-      {:ok,
-       %Result{
-         status: :ok,
-         content: content,
-         metadata: %{count: length(files)}
-       }}
+        {:ok,
+         %Result{
+           status: :ok,
+           content: content,
+           metadata: %{count: length(files)}
+         }}
+      end
     end
   rescue
     e in _ ->
@@ -76,6 +87,15 @@ defmodule Assistant.Skills.Files.Search do
          status: :error,
          content: "Local search failed: #{Exception.message(e)}"
        }}
+  end
+
+  defp validate_type(nil), do: :ok
+
+  defp validate_type(type) do
+    case resolve_type(type) do
+      {:ok, _mime} -> :ok
+      {:error, message} -> {:ok, %Result{status: :error, content: message}}
+    end
   end
 
   defp search_files_local(user_id, query_text, type, folder, limit) do
@@ -127,7 +147,7 @@ defmodule Assistant.Skills.Files.Search do
   defp resolve_type(nil), do: :skip
 
   defp resolve_type(type) do
-    case Drive.type_to_mime(type) do
+    case Map.fetch(@type_to_mime, String.downcase(type)) do
       {:ok, mime} ->
         {:ok, mime}
 

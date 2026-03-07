@@ -1,117 +1,113 @@
 # lib/assistant/skills/files/read.ex — Handler for files.read skill.
 #
-# Reads a Google Drive file's content by ID. For Google Workspace files
-# (Docs, Sheets, etc.), exports to text/plain. For regular files, downloads
-# the binary content. Truncates at 8000 chars to preserve LLM context.
+# Reads a file from the user's synced workspace by local path (or Drive
+# file ID lookup). All content is served from the local encrypted store —
+# no Drive API calls are made.
 #
 # Related files:
-#   - lib/assistant/integrations/google/drive.ex (Drive API client)
-#   - lib/assistant/skills/handler.ex (behaviour)
+#   - lib/assistant/sync/file_manager.ex (local read)
+#   - lib/assistant/sync/state_store.ex (path/ID lookup)
 #   - priv/skills/files/read.md (skill definition)
 
 defmodule Assistant.Skills.Files.Read do
   @moduledoc """
-  Skill handler for reading Google Drive file content.
+  Skill handler for reading file content from the synced workspace.
 
-  Fetches file metadata first to determine the file type, then either
-  exports (Google Workspace) or downloads (regular files) the content.
-  Output is truncated at 8000 characters to protect LLM context budgets.
+  Looks up the file by local path (preferred) or Drive file ID, then
+  reads the decrypted content from the database. Output is truncated at
+  8 000 characters to protect LLM context budgets.
   """
 
   @behaviour Assistant.Skills.Handler
 
   alias Assistant.Skills.Result
-  alias Assistant.Integrations.Google.Drive
+  alias Assistant.Sync.{FileManager, StateStore}
 
   @max_content_length 8_000
 
   @impl true
   def execute(flags, context) do
-    case Map.get(context.integrations, :drive) do
-      nil ->
-        {:ok, %Result{status: :error, content: "Drive integration not configured."}}
+    user_id = context.user_id
+    file_manager = Map.get(context.integrations, :file_manager) || FileManager
+    state_store = Map.get(context.integrations, :state_store) || StateStore
 
-      drive ->
-        case context.metadata[:google_token] do
-          nil ->
-            {:ok,
-             %Result{
-               status: :error,
-               content: "Google authentication required. Please connect your Google account."
-             }}
-
-          token ->
-            do_execute(flags, drive, token)
-        end
+    if is_nil(user_id) do
+      {:ok, %Result{status: :error, content: "User context is required to read files."}}
+    else
+      do_execute(flags, user_id, file_manager, state_store)
     end
   end
 
-  defp do_execute(flags, drive, token) do
+  defp do_execute(flags, user_id, file_manager, state_store) do
+    path = Map.get(flags, "path")
     file_id = Map.get(flags, "id")
-    format = Map.get(flags, "format")
 
-    cond do
-      is_nil(file_id) || file_id == "" ->
-        {:ok, %Result{status: :error, content: "Missing required parameter: --id (file ID)."}}
+    case resolve_path(path, file_id, user_id, state_store) do
+      {:ok, local_path, file_name} ->
+        read_and_format(file_manager, user_id, local_path, file_name)
 
-      true ->
-        read_and_format(drive, token, file_id, format)
+      {:error, message} ->
+        {:ok, %Result{status: :error, content: message}}
     end
   end
 
-  defp read_and_format(drive, token, file_id, format) do
-    opts = if format, do: [export_mime_type: format], else: []
+  defp resolve_path(path, _file_id, _user_id, _state_store)
+       when is_binary(path) and path != "" do
+    {:ok, path, Path.basename(path)}
+  end
 
-    case drive.read_file(token, file_id, opts) do
-      {:ok, content} when is_binary(content) ->
+  defp resolve_path(_path, file_id, user_id, state_store)
+       when is_binary(file_id) and file_id != "" do
+    case state_store.get_synced_file(user_id, file_id) do
+      nil ->
+        {:error, "File not found: no synced file with Drive ID '#{file_id}'."}
+
+      synced_file ->
+        name = synced_file.drive_file_name || Path.basename(synced_file.local_path)
+        {:ok, synced_file.local_path, name}
+    end
+  end
+
+  defp resolve_path(_path, _file_id, _user_id, _state_store) do
+    {:error, "Missing required parameter: --path (workspace file path) or --id (Drive file ID)."}
+  end
+
+  defp read_and_format(file_manager, user_id, local_path, file_name) do
+    case file_manager.read_file(user_id, local_path) do
+      {:ok, content} ->
         {display_content, truncated?} = maybe_truncate(content)
-
-        header = build_header(drive, token, file_id)
 
         truncation_note =
           if truncated?,
             do:
-              "\n\n...content truncated at #{@max_content_length} characters. Full file available in Drive.",
+              "\n\n...content truncated at #{@max_content_length} characters. Full file available in workspace.",
             else: ""
 
         {:ok,
          %Result{
            status: :ok,
-           content: header <> display_content <> truncation_note,
+           content: "## #{file_name}\n\n#{display_content}#{truncation_note}",
            metadata: %{
-             file_id: file_id,
+             path: local_path,
              content_length: byte_size(content),
              truncated: truncated?
            }
          }}
 
-      {:error, :not_found} ->
+      {:error, :enoent} ->
         {:ok,
          %Result{
            status: :error,
            content:
-             "File not found: #{file_id}. Check the file ID and ensure the service account has access."
+             "File not found at path '#{local_path}'. Use files.search to find available files."
          }}
+
+      {:error, :path_not_allowed} ->
+        {:ok, %Result{status: :error, content: "Invalid path: directory traversal is not allowed."}}
 
       {:error, reason} ->
         {:ok,
-         %Result{
-           status: :error,
-           content: "Failed to read file #{file_id}: #{inspect(reason)}"
-         }}
-    end
-  end
-
-  defp build_header(drive, token, file_id) do
-    case drive.get_file(token, file_id) do
-      {:ok, metadata} ->
-        type_label =
-          if Drive.google_workspace_type?(metadata.mime_type), do: " (exported as text)", else: ""
-
-        "## #{metadata.name}#{type_label}\n\n"
-
-      {:error, _} ->
-        ""
+         %Result{status: :error, content: "Failed to read '#{local_path}': #{inspect(reason)}"}}
     end
   end
 

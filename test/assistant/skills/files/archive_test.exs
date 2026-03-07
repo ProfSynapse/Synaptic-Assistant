@@ -1,98 +1,119 @@
 defmodule Assistant.Skills.Files.ArchiveTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias Assistant.Skills.Files.Archive
   alias Assistant.Skills.Result
 
-  defmodule FakeDrive do
-    def get_file(_token, file_id) do
-      {:ok,
-       %{
-         id: file_id,
-         name: "Example.txt",
-         modified_time: "2026-03-04T10:00:00Z",
-         md5_checksum: "abc123",
-         version: "42"
-       }}
-    end
+  defmodule FakeFileManager do
+    def delete_file(_user_id, path) do
+      send(self(), {:delete_file, path})
 
-    def move_file(_token, file_id, archive_id) do
-      send(self(), {:move3, file_id, archive_id})
-      {:ok, %{id: file_id, parents: [archive_id]}}
-    end
-
-    def move_file(_token, file_id, archive_id, _remove_parents, opts) do
-      send(self(), {:move5, file_id, archive_id, opts})
-
-      case Process.get(:fake_drive_mode) do
-        :conflict -> {:error, :conflict}
-        _ -> {:ok, %{id: file_id, parents: [archive_id]}}
+      case Process.get(:fake_fm_mode) do
+        :path_not_allowed -> {:error, :path_not_allowed}
+        _ -> :ok
       end
     end
+  end
+
+  defmodule FakeStateStore do
+    def get_synced_file_by_local_path(user_id, path) do
+      send(self(), {:get_by_path, user_id, path})
+
+      case Process.get(:fake_synced_file) do
+        nil -> nil
+        file -> file
+      end
+    end
+
+    def get_synced_file(user_id, drive_file_id) do
+      send(self(), {:get_by_id, user_id, drive_file_id})
+
+      case Process.get(:fake_synced_file) do
+        nil -> nil
+        file -> file
+      end
+    end
+  end
+
+  defp build_context do
+    %{
+      user_id: "user-1",
+      integrations: %{file_manager: FakeFileManager, state_store: FakeStateStore},
+      metadata: %{}
+    }
+  end
+
+  defp fake_synced_file(overrides \\ %{}) do
+    Map.merge(
+      %{
+        id: "sf-1",
+        local_path: "docs/example.md",
+        drive_file_id: "drive-file-1",
+        drive_file_name: "Example.md"
+      },
+      overrides
+    )
   end
 
   setup do
-    prev_flag = Application.get_env(:assistant, :google_write_conflict_protection)
-    Process.delete(:fake_drive_mode)
-
-    on_exit(fn ->
-      if prev_flag == nil do
-        Application.delete_env(:assistant, :google_write_conflict_protection)
-      else
-        Application.put_env(:assistant, :google_write_conflict_protection, prev_flag)
-      end
-
-      Process.delete(:fake_drive_mode)
-    end)
-
+    Process.delete(:fake_fm_mode)
+    Process.delete(:fake_synced_file)
     :ok
   end
 
-  test "uses legacy move path when conflict protection flag is off" do
-    Application.put_env(:assistant, :google_write_conflict_protection, false)
-
-    context = %{
-      integrations: %{drive: FakeDrive},
-      metadata: %{google_token: "token", enabled_drives: []}
-    }
+  test "archives file by path — deletes locally and enqueues upstream trash" do
+    Process.put(:fake_synced_file, fake_synced_file())
 
     {:ok, %Result{status: :ok} = result} =
-      Archive.execute(%{"id" => "file-1", "folder" => "archive-1"}, context)
+      Archive.execute(%{"path" => "docs/example.md"}, build_context())
 
-    assert result.content =~ "Archived 'Example.txt'"
-    assert_received {:move3, "file-1", "archive-1"}
-    refute_received {:move5, _, _, _}
+    assert result.content =~ "Archived 'Example.md'"
+    assert result.side_effects == [:file_archived]
+    assert_received {:get_by_path, "user-1", "docs/example.md"}
+    assert_received {:delete_file, "docs/example.md"}
   end
 
-  test "passes move preconditions when conflict protection flag is on" do
-    Application.put_env(:assistant, :google_write_conflict_protection, true)
+  test "archives file by Drive file ID" do
+    Process.put(:fake_synced_file, fake_synced_file())
 
-    context = %{
-      integrations: %{drive: FakeDrive},
-      metadata: %{google_token: "token", enabled_drives: []}
-    }
+    {:ok, %Result{status: :ok} = result} =
+      Archive.execute(%{"id" => "drive-file-1"}, build_context())
 
-    {:ok, %Result{status: :ok}} =
-      Archive.execute(%{"id" => "file-1", "folder" => "archive-1"}, context)
-
-    assert_received {:move5, "file-1", "archive-1", opts}
-    assert opts[:expected_modified_time] == "2026-03-04T10:00:00Z"
-    assert opts[:expected_checksum] == "abc123"
-    assert opts[:expected_version] == "42"
+    assert result.content =~ "Archived 'Example.md'"
+    assert_received {:get_by_id, "user-1", "drive-file-1"}
+    assert_received {:delete_file, "docs/example.md"}
   end
 
-  test "returns conflict-safe error message when move conflict occurs" do
-    Application.put_env(:assistant, :google_write_conflict_protection, true)
-    Process.put(:fake_drive_mode, :conflict)
+  test "returns error when file not found by path" do
+    {:ok, %Result{status: :error, content: content}} =
+      Archive.execute(%{"path" => "missing.md"}, build_context())
 
-    context = %{
-      integrations: %{drive: FakeDrive},
-      metadata: %{google_token: "token", enabled_drives: []}
-    }
+    assert content =~ "File not found"
+  end
+
+  test "returns error when neither path nor id is provided" do
+    {:ok, %Result{status: :error, content: content}} =
+      Archive.execute(%{}, build_context())
+
+    assert content =~ "Missing required parameter"
+  end
+
+  test "returns error when user_id is nil" do
+    context = %{user_id: nil, integrations: %{}, metadata: %{}}
 
     {:ok, %Result{status: :error, content: content}} =
-      Archive.execute(%{"id" => "file-1", "folder" => "archive-1"}, context)
+      Archive.execute(%{"path" => "docs/example.md"}, context)
 
-    assert content =~ "This file changed while I was archiving it"
+    assert content =~ "User context is required"
+  end
+
+  test "returns error for path traversal" do
+    Process.put(:fake_synced_file, fake_synced_file())
+    Process.put(:fake_fm_mode, :path_not_allowed)
+
+    {:ok, %Result{status: :error, content: content}} =
+      Archive.execute(%{"path" => "docs/example.md"}, build_context())
+
+    assert content =~ "directory traversal"
   end
 end

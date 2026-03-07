@@ -1,47 +1,49 @@
 ---
 name: "files.archive"
-description: "Move a file to the Archive folder in Google Drive."
+description: "Archive a file from the synced workspace."
 handler: "Assistant.Skills.Files.Archive"
 requires_approval: true
 tags:
   - files
   - archive
-  - drive
+  - workspace
 parameters:
-  - name: "id"
-    type: "string"
-    required: true
-    description: "The Drive file ID to archive"
-  - name: "folder"
+  - name: "path"
     type: "string"
     required: false
-    description: "Archive folder ID (default: auto-detect or create \"Archive\")"
+    description: "Local workspace path (e.g., \"reports/q1-report.md\")"
+  - name: "id"
+    type: "string"
+    required: false
+    description: "Drive file ID — resolved to local path via synced files"
 ---
 
 # files.archive
 
-Move a file to an Archive folder in Google Drive. If no archive folder ID is
-specified, searches for a root-level folder named "Archive" and creates one
-if it does not exist.
+Archive a file from the synced workspace. The file's local content is removed
+and the file is trashed in Google Drive asynchronously.
 
 ## Parameters
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | yes | The Drive file ID to archive |
-| folder | string | no | Archive folder ID (default: auto-detect or create "Archive") |
+| path | string | yes* | Local workspace path (e.g., "reports/q1-report.md") |
+| id | string | yes* | Drive file ID — resolved to local path via synced files |
+
+*One of `path` or `id` is required.
 
 ## Response
 
-Returns confirmation that the file was moved:
+Returns confirmation that the file was archived:
 
 ```
-Archived 'quarterly-report.txt' to Archive folder.
+Archived 'quarterly-report.md'. It will be trashed in Google Drive shortly.
 ```
 
 ## Usage Notes
 
-- The `id` parameter is the Drive file ID (not the file name).
-- When `--folder` is omitted, the skill looks for a root-level folder named "Archive".
-- If no "Archive" folder exists, one is created automatically.
-- The file is removed from its current parent folder(s) and placed in the archive folder.
+- Use `--path` with the workspace-relative path (found via files.search).
+- Use `--id` with a Drive file ID as a fallback — it resolves to the synced local copy.
+- The file's local content is cleared immediately (soft delete).
+- The file is trashed in Google Drive asynchronously via the upstream sync worker.
+- This action requires approval before execution.

@@ -1,27 +1,27 @@
 ---
 name: "files.read"
-description: "Read the content of a Google Drive file by its ID."
+description: "Read the content of a file from the synced workspace."
 handler: "Assistant.Skills.Files.Read"
 tags:
   - files
   - read
-  - drive
+  - workspace
 parameters:
-  - name: "id"
-    type: "string"
-    required: true
-    description: "The Google Drive file ID"
-  - name: "format"
+  - name: "path"
     type: "string"
     required: false
-    description: "Export MIME type for Workspace files (default: \"text/plain\")"
+    description: "Local workspace path (e.g., \"reports/q1-report.md\")"
+  - name: "id"
+    type: "string"
+    required: false
+    description: "Drive file ID — resolved to local path via synced files"
 ---
 
 # files.read
 
-Read the content of a Google Drive file. For Google Workspace files (Docs,
-Sheets, Slides), the content is automatically exported as plain text. For
-regular files (PDF, text, etc.), the raw content is downloaded.
+Read the content of a file from the synced workspace. Files are identified
+by their local workspace path (preferred) or by Drive file ID (resolved to
+the local synced copy).
 
 Content is truncated at 8,000 characters to protect LLM context budgets.
 
@@ -29,15 +29,17 @@ Content is truncated at 8,000 characters to protect LLM context budgets.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| id | string | yes | The Google Drive file ID |
-| format | string | no | Export MIME type for Workspace files (default: "text/plain") |
+| path | string | yes* | Local workspace path (e.g., "reports/q1-report.md") |
+| id | string | yes* | Drive file ID — resolved to local path via synced files |
+
+*One of `path` or `id` is required.
 
 ## Response
 
 Returns the file content with a header:
 
 ```
-## Q1 Report (exported as text)
+## q1-report.md
 
 This is the quarterly report for Q1 2026...
 ```
@@ -45,17 +47,16 @@ This is the quarterly report for Q1 2026...
 If the content exceeds 8,000 characters:
 
 ```
-## Q1 Report (exported as text)
+## q1-report.md
 
 This is the quarterly report...
 
-...content truncated at 8000 characters. Full file available in Drive.
+...content truncated at 8000 characters. Full file available in workspace.
 ```
 
 ## Usage Notes
 
-- The `id` parameter is the Google Drive file ID (found via files.search or from a Drive URL).
-- Google Workspace files (Docs, Sheets, Slides) are exported to plain text by default.
-- Use `--format "text/csv"` to export a Google Sheet as CSV instead of plain text.
-- Regular binary files (images, videos) will return raw bytes which may not display well as text.
+- Use `--path` with the workspace-relative path (found via files.search).
+- Use `--id` with a Drive file ID as a fallback — it resolves to the synced local copy.
+- All content is read from the local encrypted workspace, not from Google Drive directly.
 - The 8,000 character limit prevents large files from consuming too much LLM context.
