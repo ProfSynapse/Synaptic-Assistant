@@ -1984,7 +1984,7 @@ a {
 .sa-drive-manager {
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
