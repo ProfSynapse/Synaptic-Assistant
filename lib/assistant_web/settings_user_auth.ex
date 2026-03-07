@@ -41,6 +41,47 @@ defmodule AssistantWeb.SettingsUserAuth do
   end
 
   @doc """
+  Starts impersonating the given settings_user.
+
+  Stores the admin's session token so it can be restored later.
+  The admin must be authenticated and have is_admin == true.
+  The target user must not be disabled and must not be the admin themselves.
+  """
+  def impersonate_user(conn, target_settings_user) do
+    admin_token = get_session(conn, :settings_user_token)
+    target_token = Accounts.generate_settings_user_session_token(target_settings_user)
+
+    conn
+    |> put_session(:settings_user_token, target_token)
+    |> put_session(:admin_impersonator_token, admin_token)
+    |> put_session(:live_socket_id, settings_user_session_topic(target_token))
+    |> redirect(to: ~p"/settings")
+  end
+
+  @doc """
+  Stops impersonating and restores the admin's original session.
+  """
+  def stop_impersonating(conn) do
+    admin_token = get_session(conn, :admin_impersonator_token)
+
+    if admin_token do
+      # Delete the impersonation session token
+      impersonated_token = get_session(conn, :settings_user_token)
+      impersonated_token && Accounts.delete_settings_user_session_token(impersonated_token)
+
+      conn
+      |> put_session(:settings_user_token, admin_token)
+      |> delete_session(:admin_impersonator_token)
+      |> put_session(:live_socket_id, settings_user_session_topic(admin_token))
+      |> redirect(to: ~p"/settings/admin")
+    else
+      conn
+      |> put_flash(:error, "Not currently impersonating any user.")
+      |> redirect(to: ~p"/settings")
+    end
+  end
+
+  @doc """
   Logs the settings_user out.
 
   It clears all session data for safety. See renew_session.
@@ -67,8 +108,25 @@ defmodule AssistantWeb.SettingsUserAuth do
   def fetch_current_scope_for_settings_user(conn, _opts) do
     with {token, conn} <- ensure_settings_user_token(conn),
          {settings_user, token_inserted_at} <- Accounts.get_settings_user_by_session_token(token) do
+      scope = Scope.for_settings_user(settings_user)
+      admin_token = get_session(conn, :admin_impersonator_token)
+
+      scope =
+        if admin_token do
+          case Accounts.get_settings_user_by_session_token(admin_token) do
+            {admin_user, _} when admin_user.is_admin == true ->
+              %{scope | impersonating?: true, real_admin: admin_user}
+
+            _ ->
+              # Admin token is invalid/expired — clear impersonation
+              scope
+          end
+        else
+          scope
+        end
+
       conn
-      |> assign(:current_scope, Scope.for_settings_user(settings_user))
+      |> assign(:current_scope, scope)
       |> maybe_reissue_settings_user_session_token(settings_user, token_inserted_at)
     else
       nil -> assign(conn, :current_scope, Scope.for_settings_user(nil))
@@ -297,7 +355,21 @@ defmodule AssistantWeb.SettingsUserAuth do
           Accounts.get_settings_user_by_session_token(settings_user_token)
         end || {nil, nil}
 
-      Scope.for_settings_user(settings_user)
+      scope = Scope.for_settings_user(settings_user)
+
+      admin_token = session["admin_impersonator_token"]
+
+      if scope && admin_token do
+        case Accounts.get_settings_user_by_session_token(admin_token) do
+          {admin_user, _} when admin_user.is_admin == true ->
+            %{scope | impersonating?: true, real_admin: admin_user}
+
+          _ ->
+            scope
+        end
+      else
+        scope
+      end
     end)
   end
 

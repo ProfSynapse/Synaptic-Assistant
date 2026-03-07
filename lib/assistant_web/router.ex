@@ -120,6 +120,9 @@ defmodule AssistantWeb.Router do
     end
 
     post "/settings_users/update-password", SettingsUserSessionController, :update_password
+
+    post "/settings_users/impersonate", ImpersonationController, :create
+    delete "/settings_users/impersonate", ImpersonationController, :delete
   end
 
   scope "/", AssistantWeb do

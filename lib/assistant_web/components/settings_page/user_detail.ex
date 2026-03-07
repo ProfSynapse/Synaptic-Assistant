@@ -238,10 +238,27 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
               {@user.email}
             </span>
           </div>
-          <div style="display: flex; gap: 4px;">
+          <div style="display: flex; gap: 4px; align-items: center;">
             <span :if={@user.is_admin} class="sa-badge sa-badge-info">Admin</span>
             <span :if={@user.disabled_at} class="sa-badge sa-badge-danger">Disabled</span>
             <span :if={@user.has_linked_user} class="sa-badge sa-badge-success">Linked</span>
+            <form
+              :if={!@is_self && !@user.disabled_at}
+              method="post"
+              action={~p"/settings_users/impersonate"}
+              style="margin: 0;"
+            >
+              <input type="hidden" name="id" value={@user.id} />
+              <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+              <button
+                type="submit"
+                class="sa-btn secondary"
+                style="font-size: 0.8rem; padding: 4px 10px;"
+                title={"View settings as #{@user.email}"}
+              >
+                <.icon name="hero-eye" class="h-3.5 w-3.5" /> View as User
+              </button>
+            </form>
           </div>
         </div>
 

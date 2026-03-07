@@ -60,6 +60,18 @@ defmodule AssistantWeb.Components.SettingsPage.UserCards do
             </div>
 
             <div class="sa-icon-row">
+              <form
+                :if={!is_self?(user, @current_user_id) && !user.disabled_at}
+                method="post"
+                action={~p"/settings_users/impersonate"}
+                style="margin: 0; display: inline;"
+              >
+                <input type="hidden" name="id" value={user.id} />
+                <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+                <button type="submit" class="sa-icon-btn" title={"View as #{user.email}"}>
+                  <.icon name="hero-eye" class="h-4 w-4" />
+                </button>
+              </form>
               <button
                 type="button"
                 class="sa-icon-btn"

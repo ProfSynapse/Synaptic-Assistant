@@ -18,7 +18,7 @@ defmodule Assistant.Accounts.Scope do
 
   alias Assistant.Accounts.SettingsUser
 
-  defstruct settings_user: nil, admin?: false, privileges: []
+  defstruct settings_user: nil, admin?: false, privileges: [], impersonating?: false, real_admin: nil
 
   @doc """
   Creates a scope for the given settings_user.

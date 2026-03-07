@@ -7,6 +7,7 @@ defmodule AssistantWeb.Layouts do
 
   def app(assigns) do
     ~H"""
+    <.impersonation_banner :if={@current_scope && @current_scope.impersonating?} current_scope={@current_scope} />
     <.flash_group flash={@flash} />
     <main class="sa-main">
       {render_slot(@inner_block)}
@@ -39,6 +40,49 @@ defmodule AssistantWeb.Layouts do
         <script defer src={~p"/assets/app.js?v=accordion1"}></script>
       </body>
     </html>
+    """
+  end
+
+  attr :current_scope, :map, required: true
+
+  defp impersonation_banner(assigns) do
+    ~H"""
+    <div
+      style="
+        position: sticky; top: 0; z-index: 9999;
+        background: var(--sa-warning-bg, #fef3c7);
+        border-bottom: 2px solid var(--sa-warning-border, #f59e0b);
+        padding: 8px 16px;
+        display: flex; align-items: center; justify-content: center; gap: 12px;
+        font-size: 0.875rem; font-weight: 500;
+        color: var(--sa-warning-text, #92400e);
+      "
+      role="alert"
+    >
+      <.icon name="hero-eye" class="h-4 w-4" />
+      <span>
+        Viewing as <strong>{@current_scope.settings_user.email}</strong>
+      </span>
+      <form method="post" action={~p"/settings_users/impersonate"} style="margin: 0;">
+        <input type="hidden" name="_method" value="delete" />
+        <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+        <button
+          type="submit"
+          style="
+            background: var(--sa-warning-border, #f59e0b);
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+          "
+        >
+          Return to Admin
+        </button>
+      </form>
+    </div>
     """
   end
 
