@@ -1953,6 +1953,7 @@ a {
 
 .sa-drive-manager-modal {
   max-width: min(1100px, calc(100vw - 64px));
+  height: min(84vh, 980px);
   max-height: min(84vh, 980px);
   display: flex;
   flex-direction: column;
@@ -1972,6 +1973,8 @@ a {
 }
 
 .sa-drive-manager-modal .pc-modal__content {
+  display: flex;
+  flex-direction: column;
   padding: 0;
   flex: 1 1 auto;
   overflow: hidden;
@@ -1981,7 +1984,6 @@ a {
 .sa-drive-manager {
   display: flex;
   flex-direction: column;
-  min-height: min(72vh, 780px);
   height: 100%;
   min-width: 0;
   min-height: 0;
