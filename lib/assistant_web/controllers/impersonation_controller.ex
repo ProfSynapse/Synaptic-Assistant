@@ -6,6 +6,7 @@ defmodule AssistantWeb.ImpersonationController do
 
   @doc """
   Starts impersonating the target user. Admin-only.
+  Super admins can impersonate anyone; team admins can only impersonate users in their team.
   """
   def create(conn, %{"id" => target_user_id}) do
     admin = conn.assigns.current_scope.settings_user
@@ -29,14 +30,21 @@ defmodule AssistantWeb.ImpersonationController do
             |> redirect(to: ~p"/settings/admin")
 
           target_user ->
-            if Accounts.settings_user_disabled?(target_user) do
-              conn
-              |> put_flash(:error, "Cannot impersonate a disabled user.")
-              |> redirect(to: ~p"/settings/admin")
-            else
-              conn
-              |> put_flash(:info, "Now viewing as #{target_user.email}.")
-              |> SettingsUserAuth.impersonate_user(target_user)
+            cond do
+              Accounts.settings_user_disabled?(target_user) ->
+                conn
+                |> put_flash(:error, "Cannot impersonate a disabled user.")
+                |> redirect(to: ~p"/settings/admin")
+
+              not admin.is_super_admin and admin.team_id != target_user.team_id ->
+                conn
+                |> put_flash(:error, "You can only impersonate users in your team.")
+                |> redirect(to: ~p"/settings/admin")
+
+              true ->
+                conn
+                |> put_flash(:info, "Now viewing as #{target_user.email}.")
+                |> SettingsUserAuth.impersonate_user(target_user)
             end
         end
     end

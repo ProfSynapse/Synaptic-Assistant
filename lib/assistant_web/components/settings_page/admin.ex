@@ -37,11 +37,7 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
       <nav class="sa-admin-tabs" role="tablist">
         <button
           :for={
-            {tab_id, tab_label} <- [
-              {"integrations", "Integrations"},
-              {"models", "Models"},
-              {"users", "Users"}
-            ]
+            {tab_id, tab_label} <- admin_tabs(@current_scope)
           }
           type="button"
           role="tab"
@@ -118,6 +114,8 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
           :if={@current_admin_user}
           user={@current_admin_user}
           current_user_id={@current_scope.settings_user.id}
+          current_scope={@current_scope}
+          teams={@teams}
         />
 
         <.user_create_section
@@ -170,7 +168,8 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
                   <td>{user.email}</td>
                   <td>{user.display_name || "—"}</td>
                   <td>
-                    <span :if={user.is_admin} class="sa-badge sa-badge-info">Admin</span>
+                    <span :if={user[:is_super_admin]} class="sa-badge sa-badge-warning">Super Admin</span>
+                    <span :if={user.is_admin && !user[:is_super_admin]} class="sa-badge sa-badge-info">Admin</span>
                     <span :if={!user.is_admin}>User</span>
                   </td>
                   <td>
@@ -226,8 +225,73 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
           </div>
         </div>
       </div>
+      <div :if={@admin_tab == "teams" && @current_scope.super_admin?} class="space-y-6">
+        <div class="sa-card">
+          <div class="sa-row" style="margin-bottom: 1rem;">
+            <h2>Teams</h2>
+            <button type="button" class="sa-btn secondary" phx-click="start_create_team">
+              <.icon name="hero-plus" class="h-4 w-4" /> Create Team
+            </button>
+          </div>
+
+          <div :if={@creating_team} class="sa-card" style="margin-bottom: 1rem; border: 1px solid var(--sa-border);">
+            <.form for={@team_form} id="create-team-form" phx-submit="save_team">
+              <div style="display: flex; gap: 0.75rem; align-items: flex-end;">
+                <div style="flex: 1;">
+                  <.field type="text" field={@team_form[:name]} label="Team Name" placeholder="e.g. Marketing" required no_margin />
+                </div>
+                <div style="flex: 1;">
+                  <.field type="text" field={@team_form[:description]} label="Description" placeholder="Optional description" no_margin />
+                </div>
+                <button type="submit" class="sa-btn">Create</button>
+                <button type="button" class="sa-btn secondary" phx-click="cancel_create_team">Cancel</button>
+              </div>
+            </.form>
+          </div>
+
+          <div :if={@teams == []} style="text-align: center; padding: 2rem; color: var(--sa-text-secondary);">
+            No teams yet. Create a team to organize users.
+          </div>
+
+          <div :if={@teams != []} class="sa-model-table-shell">
+            <table class="sa-table sa-table-zebra">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Description</th>
+                  <th>Members</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={team <- @teams} id={"team-row-#{team.id}"}>
+                  <td style="font-weight: 500;">{team.name}</td>
+                  <td>{team.description || "—"}</td>
+                  <td>{team_member_count(team, @filtered_admin_users)}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="sa-icon-btn danger"
+                      title="Delete Team"
+                      phx-click="delete_team"
+                      phx-value-id={team.id}
+                      data-confirm={"Delete team '#{team.name}'? Members will be unassigned."}
+                    >
+                      <.icon name="hero-trash" class="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </section>
     """
+  end
+
+  defp team_member_count(team, users) do
+    Enum.count(users, fn u -> u[:team_id] == team.id end)
   end
 
   def admin_integration_detail_section(assigns) do
@@ -526,6 +590,20 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
   end
 
   defp managed_integration_catalog(_), do: []
+
+  defp admin_tabs(current_scope) do
+    base = [
+      {"integrations", "Integrations"},
+      {"models", "Models"},
+      {"users", "Users"}
+    ]
+
+    if current_scope.super_admin? do
+      base ++ [{"teams", "Teams"}]
+    else
+      base
+    end
+  end
 
   defp google_chat_service_account_fields do
     [

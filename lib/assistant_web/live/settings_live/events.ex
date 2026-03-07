@@ -45,7 +45,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("switch_admin_tab", %{"tab" => tab}, socket)
-      when tab in ~w(integrations models users) do
+      when tab in ~w(integrations models users teams) do
     {:noreply, assign(socket, :admin_tab, tab)}
   end
 
@@ -1316,12 +1316,14 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("toggle_admin_status", %{"id" => user_id, "is-admin" => is_admin}, socket) do
-    unless socket.assigns.current_scope.settings_user.is_admin do
-      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    actor = socket.assigns.current_scope.settings_user
+
+    unless actor.is_super_admin do
+      {:noreply, put_flash(socket, :error, "Only super admins can change admin status.")}
     else
       is_admin? = is_admin == "true"
 
-      case Accounts.toggle_admin_status(user_id, is_admin?) do
+      case Accounts.toggle_admin_status(user_id, is_admin?, actor) do
         {:ok, _user} ->
           {:noreply,
            socket
@@ -1330,6 +1332,9 @@ defmodule AssistantWeb.SettingsLive.Events do
 
         {:error, :last_admin} ->
           {:noreply, put_flash(socket, :error, "Cannot demote the last active admin.")}
+
+        {:error, :cannot_modify_super_admin} ->
+          {:noreply, put_flash(socket, :error, "Cannot modify super admin status.")}
 
         {:error, :not_found} ->
           {:noreply, put_flash(socket, :error, "User not found.")}
@@ -2996,6 +3001,83 @@ defmodule AssistantWeb.SettingsLive.Events do
     case Integer.parse(to_string(value)) do
       {n, _} -> n
       :error -> default
+    end
+  end
+
+  # ──────────────────────────────────────────────
+  # Team management (super_admin only)
+  # ──────────────────────────────────────────────
+
+  def handle_event("start_create_team", _params, socket) do
+    form = Accounts.change_team(%Accounts.Team{}) |> to_form(as: "team")
+    {:noreply, socket |> assign(:creating_team, true) |> assign(:team_form, form)}
+  end
+
+  def handle_event("cancel_create_team", _params, socket) do
+    {:noreply, assign(socket, :creating_team, false)}
+  end
+
+  def handle_event("save_team", %{"team" => team_params}, socket) do
+    unless socket.assigns.current_scope.super_admin? do
+      {:noreply, put_flash(socket, :error, "Only super admins can manage teams.")}
+    else
+      case Accounts.create_team(team_params) do
+        {:ok, _team} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "Team created.")
+           |> assign(:creating_team, false)
+           |> assign(:teams, Accounts.list_teams())}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> assign(:team_form, to_form(changeset, as: "team"))
+           |> put_flash(:error, "Failed to create team.")}
+      end
+    end
+  end
+
+  def handle_event("delete_team", %{"id" => team_id}, socket) do
+    unless socket.assigns.current_scope.super_admin? do
+      {:noreply, put_flash(socket, :error, "Only super admins can manage teams.")}
+    else
+      case Accounts.get_team(team_id) do
+        nil ->
+          {:noreply, put_flash(socket, :error, "Team not found.")}
+
+        team ->
+          case Accounts.delete_team(team) do
+            {:ok, _} ->
+              {:noreply,
+               socket
+               |> put_flash(:info, "Team deleted.")
+               |> assign(:teams, Accounts.list_teams())
+               |> Loaders.reload_admin_users()}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Failed to delete team.")}
+          end
+      end
+    end
+  end
+
+  def handle_event("assign_user_team", %{"id" => user_id, "team_id" => team_id}, socket) do
+    unless socket.assigns.current_scope.settings_user.is_admin do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      team_id = if team_id == "", do: nil, else: team_id
+
+      case Accounts.assign_user_to_team(user_id, team_id) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> put_flash(:info, "User team updated.")
+           |> Loaders.reload_admin_users()}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "Failed to assign team.")}
+      end
     end
   end
 end

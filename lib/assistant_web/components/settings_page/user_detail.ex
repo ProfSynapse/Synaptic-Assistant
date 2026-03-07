@@ -205,10 +205,13 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
 
   attr :user, :map, required: true
   attr :current_user_id, :string, required: true
+  attr :current_scope, :map, default: nil
+  attr :teams, :list, default: []
 
   def user_detail_section(assigns) do
     is_self = assigns.user.id == assigns.current_user_id
     model_defaults_toggle_disabled = assigns.user.is_admin
+    is_super_admin_viewer = assigns.current_scope && assigns.current_scope.super_admin?
 
     spending_limit = assigns.user[:spending_limit]
     spending_usage = assigns.user[:spending_usage] || %{has_limit: false}
@@ -216,6 +219,7 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
     assigns =
       assigns
       |> assign(:is_self, is_self)
+      |> assign(:is_super_admin_viewer, is_super_admin_viewer)
       |> assign(:model_defaults_toggle_disabled, model_defaults_toggle_disabled)
       |> assign(:spending_limit, spending_limit)
       |> assign(:spending_usage, spending_usage)
@@ -239,9 +243,11 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
             </span>
           </div>
           <div style="display: flex; gap: 4px; align-items: center;">
-            <span :if={@user.is_admin} class="sa-badge sa-badge-info">Admin</span>
+            <span :if={@user[:is_super_admin]} class="sa-badge sa-badge-warning">Super Admin</span>
+            <span :if={@user.is_admin && !@user[:is_super_admin]} class="sa-badge sa-badge-info">Admin</span>
             <span :if={@user.disabled_at} class="sa-badge sa-badge-danger">Disabled</span>
             <span :if={@user.has_linked_user} class="sa-badge sa-badge-success">Linked</span>
+            <span :if={@user[:team_name]} class="sa-badge" style="background: var(--sa-bg-muted, #e5e7eb); color: var(--sa-text-main);">{@user[:team_name]}</span>
             <form
               :if={!@is_self && !@user.disabled_at}
               method="post"
@@ -311,14 +317,14 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
       <div class="sa-card">
         <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0 0 16px 0;">Account Controls</h3>
 
-        <div class="sa-row" style="margin-bottom: 16px;">
+        <div :if={@is_super_admin_viewer} class="sa-row" style="margin-bottom: 16px;">
           <div>
             <span style="font-weight: 500;">Admin Status</span>
             <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 2px 0 0 0;">
-              Grant or revoke admin privileges.
+              Grant or revoke admin privileges. Only super admins can change this.
             </p>
           </div>
-          <label class={["sa-switch", @is_self && "sa-switch-disabled"]}>
+          <label class={["sa-switch", (@is_self || @user[:is_super_admin]) && "sa-switch-disabled"]}>
             <input
               type="checkbox"
               checked={@user.is_admin}
@@ -329,10 +335,31 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
               phx-click="toggle_admin_status"
               phx-value-id={@user.id}
               phx-value-is-admin={to_string(!@user.is_admin)}
-              disabled={@is_self}
+              disabled={@is_self || @user[:is_super_admin]}
             />
             <span class="sa-switch-slider"></span>
           </label>
+        </div>
+
+        <div :if={@is_super_admin_viewer && @teams != []} class="sa-row" style="margin-bottom: 16px;">
+          <div>
+            <span style="font-weight: 500;">Team</span>
+            <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 2px 0 0 0;">
+              Assign this user to a team.
+            </p>
+          </div>
+          <select
+            style="max-width: 200px;"
+            class="sa-input"
+            phx-change="assign_user_team"
+            phx-value-id={@user.id}
+            name="team_id"
+          >
+            <option value="">No team</option>
+            <option :for={team <- @teams} value={team.id} selected={@user[:team_id] == team.id}>
+              {team.name}
+            </option>
+          </select>
         </div>
 
         <div class="sa-row" style="margin-bottom: 16px;">

@@ -11,7 +11,8 @@ defmodule Assistant.Accounts do
     SettingsUser,
     SettingsUserAllowlistEntry,
     SettingsUserNotifier,
-    SettingsUserToken
+    SettingsUserToken,
+    Team
   }
 
   @managed_access_scopes [
@@ -54,8 +55,12 @@ defmodule Assistant.Accounts do
                  settings_user,
                  transaction?: false
                ),
-             {:ok, synced_user} <- sync_settings_user_access_from_allowlist(settings_user) do
-          {:ok, synced_user}
+             {:ok, synced_user} <- sync_settings_user_access_from_allowlist(settings_user),
+             {:ok, super_admin} <-
+               synced_user
+               |> Ecto.Changeset.change(is_super_admin: true)
+               |> Repo.update() do
+          {:ok, super_admin}
         else
           {:error, _} = error -> error
         end
@@ -125,20 +130,96 @@ defmodule Assistant.Accounts do
              settings_user,
              transaction?: false
            ),
-         {:ok, synced_user} <- sync_settings_user_access_from_allowlist(settings_user) do
-      {:ok, synced_user}
+         {:ok, synced_user} <- sync_settings_user_access_from_allowlist(settings_user),
+         {:ok, super_admin} <-
+           synced_user
+           |> Ecto.Changeset.change(is_super_admin: true)
+           |> Repo.update() do
+      {:ok, super_admin}
+    end
+  end
+
+  ## Teams
+
+  @doc """
+  Lists all teams.
+  """
+  def list_teams do
+    Repo.all(from(t in Team, order_by: [asc: t.name]))
+  end
+
+  @doc """
+  Gets a team by ID.
+  """
+  def get_team(id) when is_binary(id), do: Repo.get(Team, id)
+  def get_team(_), do: nil
+
+  @doc """
+  Creates a team.
+  """
+  def create_team(attrs) do
+    %Team{}
+    |> Team.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Updates a team.
+  """
+  def update_team(%Team{} = team, attrs) do
+    team
+    |> Team.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a team. Users in the team will have team_id set to nil.
+  """
+  def delete_team(%Team{} = team) do
+    Repo.delete(team)
+  end
+
+  @doc """
+  Returns a changeset for a team.
+  """
+  def change_team(%Team{} = team, attrs \\ %{}) do
+    Team.changeset(team, attrs)
+  end
+
+  @doc """
+  Assigns a settings_user to a team.
+  """
+  def assign_user_to_team(settings_user_id, team_id)
+      when is_binary(settings_user_id) do
+    case Repo.get(SettingsUser, settings_user_id) do
+      nil -> {:error, :not_found}
+      user ->
+        user
+        |> Ecto.Changeset.change(team_id: team_id)
+        |> Repo.update()
     end
   end
 
   @doc """
   Lists all settings users for the admin UI.
+  Super admins see all users; team admins see only users in their team.
   """
-  def list_admin_settings_users do
-    Repo.all(
+  def list_admin_settings_users(opts \\ []) do
+    team_id = Keyword.get(opts, :team_id)
+
+    query =
       from(su in SettingsUser,
-        order_by: [desc: su.is_admin, asc: su.email]
+        order_by: [desc: su.is_super_admin, desc: su.is_admin, asc: su.email]
       )
-    )
+
+    query =
+      if team_id do
+        from(su in query, where: su.team_id == ^team_id)
+      else
+        query
+      end
+
+    Repo.all(query)
   end
 
   @doc """
@@ -231,11 +312,14 @@ defmodule Assistant.Accounts do
             nil ->
               full_name = Map.get(attrs, :full_name) || Map.get(attrs, "full_name")
 
+              team_id = Map.get(attrs, :team_id) || Map.get(attrs, "team_id")
+
               %SettingsUser{}
               |> SettingsUser.email_changeset(%{email: email}, validate_changed: false)
               |> Ecto.Changeset.change(
                 hashed_password: nil,
                 full_name: full_name,
+                team_id: team_id,
                 confirmed_at: nil
               )
               |> Repo.insert()
@@ -924,22 +1008,37 @@ defmodule Assistant.Accounts do
   :has_openrouter_key (boolean), and :has_linked_user (boolean).
   The actual API key value is never exposed.
   """
-  def list_settings_users_for_admin do
-    from(su in SettingsUser,
-      order_by: [asc: su.email],
-      select: %{
-        id: su.id,
-        email: su.email,
-        display_name: su.display_name,
-        is_admin: su.is_admin,
-        disabled_at: su.disabled_at,
-        can_manage_model_defaults: su.can_manage_model_defaults,
-        has_openrouter_key: not is_nil(su.openrouter_api_key),
-        has_openai_key: not is_nil(su.openai_api_key),
-        has_linked_user: not is_nil(su.user_id)
-      }
-    )
-    |> Repo.all()
+  def list_settings_users_for_admin(opts \\ []) do
+    team_id = Keyword.get(opts, :team_id)
+
+    query =
+      from(su in SettingsUser,
+        left_join: t in assoc(su, :team),
+        order_by: [asc: su.email],
+        select: %{
+          id: su.id,
+          email: su.email,
+          display_name: su.display_name,
+          is_admin: su.is_admin,
+          is_super_admin: su.is_super_admin,
+          team_id: su.team_id,
+          team_name: t.name,
+          disabled_at: su.disabled_at,
+          can_manage_model_defaults: su.can_manage_model_defaults,
+          has_openrouter_key: not is_nil(su.openrouter_api_key),
+          has_openai_key: not is_nil(su.openai_api_key),
+          has_linked_user: not is_nil(su.user_id)
+        }
+      )
+
+    query =
+      if team_id do
+        from(su in query, where: su.team_id == ^team_id)
+      else
+        query
+      end
+
+    Repo.all(query)
   end
 
   @doc """
@@ -995,6 +1094,14 @@ defmodule Assistant.Accounts do
         {:error, :not_found}
 
       %SettingsUser{} = su ->
+        team_name =
+          if su.team_id do
+            case Repo.get(Team, su.team_id) do
+              %Team{name: name} -> name
+              _ -> nil
+            end
+          end
+
         {:ok,
          %{
            id: su.id,
@@ -1002,6 +1109,9 @@ defmodule Assistant.Accounts do
            full_name: su.full_name,
            display_name: su.display_name,
            is_admin: su.is_admin,
+           is_super_admin: su.is_super_admin,
+           team_id: su.team_id,
+           team_name: team_name,
            disabled_at: su.disabled_at,
            has_openrouter_key: is_binary(su.openrouter_api_key),
            has_openai_key: is_binary(su.openai_api_key),
@@ -1139,23 +1249,37 @@ defmodule Assistant.Accounts do
   Guards:
   - Cannot demote the last active admin (`:last_admin`)
   """
-  def toggle_admin_status(settings_user_id, is_admin)
-      when is_binary(settings_user_id) and is_boolean(is_admin) do
-    Repo.transact(fn ->
-      case Repo.get(SettingsUser, settings_user_id) do
-        nil ->
-          {:error, :not_found}
+  @doc """
+  Toggles admin status for a user. Only super_admins may call this.
+  Cannot demote the last active admin or change super_admin status through this function.
+  """
+  def toggle_admin_status(settings_user_id, is_admin, actor \\ nil)
 
-        %SettingsUser{} = settings_user ->
-          if not is_admin and settings_user.is_admin and last_active_admin?() do
-            {:error, :last_admin}
-          else
-            settings_user
-            |> Ecto.Changeset.change(is_admin: is_admin)
-            |> Repo.update()
-          end
-      end
-    end)
+  def toggle_admin_status(settings_user_id, is_admin, actor)
+      when is_binary(settings_user_id) and is_boolean(is_admin) do
+    # Guard: only super_admins can assign/revoke admin
+    if actor && not (actor.is_super_admin == true) do
+      {:error, :not_authorized}
+    else
+      Repo.transact(fn ->
+        case Repo.get(SettingsUser, settings_user_id) do
+          nil ->
+            {:error, :not_found}
+
+          %SettingsUser{is_super_admin: true} ->
+            {:error, :cannot_modify_super_admin}
+
+          %SettingsUser{} = settings_user ->
+            if not is_admin and settings_user.is_admin and last_active_admin?() do
+              {:error, :last_admin}
+            else
+              settings_user
+              |> Ecto.Changeset.change(is_admin: is_admin)
+              |> Repo.update()
+            end
+        end
+      end)
+    end
   end
 
   # Returns true when there is exactly one active (non-disabled) admin.

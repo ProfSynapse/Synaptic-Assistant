@@ -28,7 +28,7 @@ defmodule AssistantWeb.ImpersonationControllerTest do
   end
 
   describe "POST /settings_users/impersonate" do
-    test "admin can impersonate another user", %{conn: conn} do
+    test "super admin can impersonate any user", %{conn: conn} do
       target = create_target_user(%{email: "target@example.com"})
 
       conn = post(conn, ~p"/settings_users/impersonate", %{"id" => target.id})
@@ -80,18 +80,70 @@ defmodule AssistantWeb.ImpersonationControllerTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Not authorized"
     end
 
+    test "team admin cannot impersonate user outside their team", %{conn: _conn} do
+      {:ok, team_a} = Accounts.create_team(%{name: "TeamA"})
+      {:ok, team_b} = Accounts.create_team(%{name: "TeamB"})
+
+      # Create a team admin (non-super)
+      team_admin = create_target_user(%{email: "teamadmin@example.com"})
+
+      team_admin =
+        team_admin
+        |> Ecto.Changeset.change(is_admin: true, team_id: team_a.id)
+        |> Assistant.Repo.update!()
+
+      # Create user in different team
+      other_user = create_target_user(%{email: "otherteam@example.com"})
+
+      other_user
+      |> Ecto.Changeset.change(team_id: team_b.id)
+      |> Assistant.Repo.update!()
+
+      conn =
+        build_conn()
+        |> log_in_settings_user(team_admin)
+        |> post(~p"/settings_users/impersonate", %{"id" => other_user.id})
+
+      assert redirected_to(conn) == ~p"/settings/admin"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "only impersonate users in your team"
+    end
+
+    test "team admin can impersonate user in their team", %{conn: _conn} do
+      {:ok, team} = Accounts.create_team(%{name: "SameTeam"})
+
+      team_admin = create_target_user(%{email: "sameteamadmin@example.com"})
+
+      team_admin =
+        team_admin
+        |> Ecto.Changeset.change(is_admin: true, team_id: team.id)
+        |> Assistant.Repo.update!()
+
+      teammate = create_target_user(%{email: "teammate@example.com"})
+
+      teammate
+      |> Ecto.Changeset.change(team_id: team.id)
+      |> Assistant.Repo.update!()
+
+      conn =
+        build_conn()
+        |> log_in_settings_user(team_admin)
+        |> post(~p"/settings_users/impersonate", %{"id" => teammate.id})
+
+      assert redirected_to(conn) == ~p"/settings"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "teammate@example.com"
+    end
+
     test "impersonation sets admin_impersonator_token in session", %{conn: conn} do
       target = create_target_user(%{email: "session-test@example.com"})
 
       conn = post(conn, ~p"/settings_users/impersonate", %{"id" => target.id})
 
-      # Follow the redirect and check the session has impersonation token
       assert get_session(conn, :admin_impersonator_token) != nil
     end
   end
 
   describe "DELETE /settings_users/impersonate" do
-    test "admin can stop impersonating and return to their session", %{conn: conn, admin: admin} do
+    test "admin can stop impersonating and return to their session", %{conn: conn} do
       target = create_target_user(%{email: "stop-test@example.com"})
 
       # Start impersonation
@@ -103,7 +155,6 @@ defmodule AssistantWeb.ImpersonationControllerTest do
       assert redirected_to(conn) == ~p"/settings/admin"
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Returned to your admin account"
 
-      # The admin token should now be the main session token
       assert get_session(conn, :admin_impersonator_token) == nil
     end
 

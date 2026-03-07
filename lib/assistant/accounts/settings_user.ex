@@ -12,6 +12,7 @@ defmodule Assistant.Accounts.SettingsUser do
     field :timezone, :string, default: "UTC"
     field :email, :string
     field :is_admin, :boolean, default: false
+    field :is_super_admin, :boolean, default: false
     field :access_scopes, {:array, :string}, default: []
     field :model_defaults, :map, default: %{}
     field :can_manage_model_defaults, :boolean, default: false
@@ -28,6 +29,7 @@ defmodule Assistant.Accounts.SettingsUser do
     field :disabled_at, :utc_datetime
 
     belongs_to :user, Assistant.Schemas.User
+    belongs_to :team, Assistant.Accounts.Team
 
     timestamps(type: :utc_datetime)
   end

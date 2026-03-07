@@ -34,11 +34,13 @@ defmodule AssistantWeb.Components.SettingsPage.UserCards do
             </p>
 
             <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
-              <span :if={user.is_admin} class="sa-badge sa-badge-info">Admin</span>
+              <span :if={user[:is_super_admin]} class="sa-badge sa-badge-warning">Super Admin</span>
+              <span :if={user.is_admin && !user[:is_super_admin]} class="sa-badge sa-badge-info">Admin</span>
               <span :if={user.disabled_at} class="sa-badge sa-badge-danger">Disabled</span>
               <span :if={user.has_linked_user} class="sa-badge sa-badge-success">Linked</span>
               <span :if={user.has_openrouter_key} class="sa-badge sa-badge-success">OR Key</span>
               <span :if={user.has_openai_key} class="sa-badge sa-badge-success">OAI Key</span>
+              <span :if={user[:team_name]} class="sa-badge" style="background: var(--sa-bg-muted, #e5e7eb); color: var(--sa-text-main);">{user[:team_name]}</span>
             </div>
 
             <div class="sa-row" style="margin-bottom: 8px;">

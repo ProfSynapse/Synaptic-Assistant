@@ -218,6 +218,9 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     can_bootstrap = Accounts.admin_bootstrap_available?()
 
     if settings_user && settings_user.is_admin do
+      is_super = settings_user.is_super_admin == true
+      user_list_opts = if is_super, do: [], else: [team_id: settings_user.team_id]
+
       blank_form =
         %SettingsUserAllowlistEntry{}
         |> Accounts.change_settings_user_allowlist_entry(%{
@@ -227,7 +230,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         })
         |> to_form(as: "allowlist_entry")
 
-      all_users = Accounts.list_settings_users_for_admin()
+      all_users = Accounts.list_settings_users_for_admin(user_list_opts)
       search = socket.assigns[:admin_user_search] || ""
 
       socket
@@ -236,10 +239,11 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         can_bootstrap_admin: can_bootstrap,
         allowlist_form: blank_form,
         allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
-        admin_settings_users: Accounts.list_admin_settings_users(),
+        admin_settings_users: Accounts.list_admin_settings_users(user_list_opts),
         admin_users_with_keys: all_users,
         filtered_admin_users: filter_admin_users(all_users, search),
-        integration_settings: IntegrationSettings.list_all()
+        integration_settings: IntegrationSettings.list_all(),
+        teams: Accounts.list_teams()
       )
       |> load_admin_model_data()
       |> load_models()
@@ -253,7 +257,8 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         admin_settings_users: [],
         admin_users_with_keys: [],
         filtered_admin_users: [],
-        integration_settings: []
+        integration_settings: [],
+        teams: []
       )
     end
   end
@@ -285,12 +290,16 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   end
 
   def reload_admin_users(socket) do
-    all_users = Accounts.list_settings_users_for_admin()
+    settings_user = Context.current_settings_user(socket)
+    is_super = settings_user && settings_user.is_super_admin == true
+    user_list_opts = if is_super, do: [], else: [team_id: settings_user && settings_user.team_id]
+
+    all_users = Accounts.list_settings_users_for_admin(user_list_opts)
     search = socket.assigns[:admin_user_search] || ""
 
     socket
     |> assign(:admin_users_with_keys, all_users)
-    |> assign(:admin_settings_users, Accounts.list_admin_settings_users())
+    |> assign(:admin_settings_users, Accounts.list_admin_settings_users(user_list_opts))
     |> assign(:filtered_admin_users, filter_admin_users(all_users, search))
     |> maybe_refresh_current_admin_user()
   end

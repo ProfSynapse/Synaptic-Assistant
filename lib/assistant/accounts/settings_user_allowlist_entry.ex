@@ -13,6 +13,7 @@ defmodule Assistant.Accounts.SettingsUserAllowlistEntry do
     field :scopes, {:array, :string}, default: []
     field :notes, :string
 
+    belongs_to :team, Assistant.Accounts.Team
     belongs_to :created_by_settings_user, Assistant.Accounts.SettingsUser
     belongs_to :updated_by_settings_user, Assistant.Accounts.SettingsUser
 
@@ -23,7 +24,7 @@ defmodule Assistant.Accounts.SettingsUserAllowlistEntry do
     allowed_scopes = Keyword.get(opts, :allowed_scopes, [])
 
     entry
-    |> cast(attrs, [:email, :full_name, :active, :is_admin, :scopes, :notes])
+    |> cast(attrs, [:email, :full_name, :active, :is_admin, :scopes, :notes, :team_id])
     |> update_change(:email, &normalize_email/1)
     |> validate_required([:email])
     |> validate_format(:email, ~r/^[^@,;\s]+@[^@,;\s]+$/,

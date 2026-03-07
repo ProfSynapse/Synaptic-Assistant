@@ -1780,6 +1780,11 @@ a {
   color: #1d4ed8;
 }
 
+.sa-badge-warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
 /* Search input */
 
 .sa-search-input {
