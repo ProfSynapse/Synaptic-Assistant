@@ -378,23 +378,21 @@ Key design:
 - `max_attempts: 2` — LLM call may fail, one retry is fine
 - The content is passed in the job args (not re-read) so the worker is self-contained
 
-### Step 11d: Hook into files.read skill
+### Step 11d: Note on files.read skill
 
-**File**: `lib/assistant/skills/files/read.ex`
+**File**: `lib/assistant/skills/files/read.ex` — **NO CHANGE for now**
 
-**What**:
-- After successfully reading a Drive file, also enqueue the cache worker:
-  ```elixir
-  # After successful read, before returning Result:
-  if context.user_id do
-    FileCacheWorker.new(%{
-      user_id: context.user_id,
-      file_path: "drive://#{file_id}",
-      content: truncated_content
-    }) |> Oban.insert()
-  end
-  ```
-- Drive files use `"drive://#{file_id}"` as the path tag for dedup
+The `files.read` skill currently reads directly from the Drive API, bypassing the sync
+layer. Drive files are already synced to local markdown/csv via the `SyncPollWorker` →
+`FileSyncWorker` → `Converter` pipeline and stored encrypted in `synced_files`.
+
+`context_files.ex` already reads from synced local copies (via `StateStore` +
+`FileManager`), so the `FileCacheWorker` hook in Step 11b covers the primary file
+reading path.
+
+**Future work** (separate PR): Refactor `files.read` to read from synced local copies
+instead of the Drive API. Once that's done, it would naturally go through `context_files`
+and get the caching hook for free.
 
 ---
 
@@ -450,7 +448,7 @@ Key design:
 | 12 | `lib/assistant/memory/file_cache.ex` | NEW | Summarize file → memory + search_queries |
 | 13 | `lib/assistant/memory/file_cache_worker.ex` | NEW | Oban worker for async file caching |
 | 14 | `lib/assistant/orchestrator/context_files.ex` | EDIT | Enqueue FileCacheWorker on file load |
-| 15 | `lib/assistant/skills/files/read.ex` | EDIT | Enqueue FileCacheWorker on Drive file read |
+| 15 | `lib/assistant/skills/files/read.ex` | SKIP | Future: refactor to read from synced copies |
 | 16 | `test/assistant/memory/prefetch_test.exs` | NEW | Prefetch unit tests |
 | 17 | `test/assistant/memory/file_cache_test.exs` | NEW | File cache unit tests |
 | 18 | `test/integration/context_questions_llm_test.exs` | NEW | E2E integration test |
