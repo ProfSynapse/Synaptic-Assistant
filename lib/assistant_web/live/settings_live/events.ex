@@ -2210,13 +2210,42 @@ defmodule AssistantWeb.SettingsLive.Events do
   defp drive_folder?("application/vnd.google-apps.folder"), do: true
   defp drive_folder?(_), do: false
 
-  defp drive_file_kind("application/vnd.google-apps.document"), do: "doc"
-  defp drive_file_kind("application/vnd.google-apps.spreadsheet"), do: "sheet"
-  defp drive_file_kind("application/vnd.google-apps.presentation"), do: "slides"
-  defp drive_file_kind("application/pdf"), do: "pdf"
+  @doc_mime_types [
+    "application/vnd.google-apps.document",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.oasis.opendocument.text",
+    "application/rtf",
+    "text/rtf"
+  ]
+
+  @sheet_mime_types [
+    "application/vnd.google-apps.spreadsheet",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "text/csv",
+    "application/csv",
+    "text/tab-separated-values"
+  ]
+
+  @slides_mime_types [
+    "application/vnd.google-apps.presentation",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.oasis.opendocument.presentation"
+  ]
 
   defp drive_file_kind(mime_type) when is_binary(mime_type) do
-    if String.starts_with?(mime_type, "image/"), do: "image", else: "file"
+    cond do
+      mime_type in @sheet_mime_types -> "sheet"
+      mime_type in @slides_mime_types -> "slides"
+      mime_type == "application/pdf" -> "pdf"
+      String.starts_with?(mime_type, "image/") -> "image"
+      mime_type in @doc_mime_types -> "doc"
+      String.starts_with?(mime_type, "text/") -> "doc"
+      true -> "file"
+    end
   end
 
   defp drive_file_kind(_), do: "file"

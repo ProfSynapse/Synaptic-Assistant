@@ -150,7 +150,7 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
         on_cancel={Phoenix.LiveView.JS.push("close_drive_scope_manager")}
       >
         <div class="sa-drive-manager">
-          <div id="drive-manager-scroll" class="sa-drive-manager-scroll" phx-hook="DriveModalDebug">
+          <div class="sa-drive-manager-scroll">
             <div class="sa-drive-manager-intro">
               <div>
                 <p class="sa-drive-manager-kicker">Scoped Drive Access</p>
@@ -564,13 +564,13 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
   defp checkbox_aria_state(:checked), do: "true"
   defp checkbox_aria_state(_), do: "false"
 
-  defp node_icon(%{node_type: "folder"}, true), do: "hero-folder-open"
+  defp node_icon(%{node_type: "folder"}, true), do: "hero-folder"
   defp node_icon(%{node_type: "folder"}, false), do: "hero-folder"
-  defp node_icon(%{file_kind: "doc"}, _expanded?), do: "hero-document-duplicate"
-  defp node_icon(%{file_kind: "sheet"}, _expanded?), do: "hero-document-duplicate"
-  defp node_icon(%{file_kind: "slides"}, _expanded?), do: "hero-document-duplicate"
-  defp node_icon(%{file_kind: "pdf"}, _expanded?), do: "hero-document-duplicate"
-  defp node_icon(%{file_kind: "image"}, _expanded?), do: "hero-document-duplicate"
+  defp node_icon(%{file_kind: "doc"}, _expanded?), do: "hero-document-text"
+  defp node_icon(%{file_kind: "sheet"}, _expanded?), do: "hero-document-chart-bar"
+  defp node_icon(%{file_kind: "slides"}, _expanded?), do: "hero-clipboard-document-list"
+  defp node_icon(%{file_kind: "pdf"}, _expanded?), do: "hero-document-check"
+  defp node_icon(%{file_kind: "image"}, _expanded?), do: "hero-photo"
   defp node_icon(_node, _expanded?), do: "hero-document-duplicate"
 
   defp node_avatar_class(%{node_type: "folder"}), do: "is-folder"
@@ -595,9 +595,9 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
   defp file_badge_label("image"), do: "IMG"
   defp file_badge_label(_), do: "FILE"
 
-  defp file_kind_text("doc"), do: "Google Doc"
-  defp file_kind_text("sheet"), do: "Google Sheet"
-  defp file_kind_text("slides"), do: "Google Slides"
+  defp file_kind_text("doc"), do: "Document"
+  defp file_kind_text("sheet"), do: "Spreadsheet"
+  defp file_kind_text("slides"), do: "Presentation"
   defp file_kind_text("pdf"), do: "PDF"
   defp file_kind_text("image"), do: "Image"
   defp file_kind_text(_), do: "File"
