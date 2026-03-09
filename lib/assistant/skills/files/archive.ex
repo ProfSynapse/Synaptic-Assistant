@@ -53,8 +53,11 @@ defmodule Assistant.Skills.Files.Archive do
   defp resolve_file(path, _file_id, user_id, state_store)
        when is_binary(path) and path != "" do
     case state_store.get_synced_file_by_local_path(user_id, path) do
-      nil -> {:error, "File not found at path '#{path}'. Use files.search to find available files."}
-      synced_file -> {:ok, synced_file}
+      nil ->
+        {:error, "File not found at path '#{path}'. Use files.search to find available files."}
+
+      synced_file ->
+        {:ok, synced_file}
     end
   end
 
@@ -86,7 +89,8 @@ defmodule Assistant.Skills.Files.Archive do
          }}
 
       {:error, :path_not_allowed} ->
-        {:ok, %Result{status: :error, content: "Invalid path: directory traversal is not allowed."}}
+        {:ok,
+         %Result{status: :error, content: "Invalid path: directory traversal is not allowed."}}
 
       {:error, reason} ->
         {:ok,

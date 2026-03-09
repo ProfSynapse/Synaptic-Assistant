@@ -159,12 +159,4 @@ defmodule Assistant.Skills.Memory.HandlersTest do
     })
     |> Repo.insert!()
   end
-
-  defp insert_test_conversation(user_id) do
-    alias Assistant.Schemas.Conversation
-
-    %Conversation{}
-    |> Conversation.changeset(%{channel: "test", user_id: user_id})
-    |> Repo.insert!()
-  end
 end

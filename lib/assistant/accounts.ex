@@ -223,7 +223,8 @@ defmodule Assistant.Accounts do
           notes: "Created by admin"
         }
 
-        with {:ok, _entry} <- upsert_settings_user_allowlist_entry(allowlist_attrs, nil, transaction?: false) do
+        with {:ok, _entry} <-
+               upsert_settings_user_allowlist_entry(allowlist_attrs, nil, transaction?: false) do
           case get_settings_user_by_email(email) do
             %SettingsUser{} = existing ->
               {:ok, existing}
@@ -764,7 +765,8 @@ defmodule Assistant.Accounts do
 
       needs_update =
         settings_user.is_admin != desired.is_admin or
-          Enum.sort(List.wrap(settings_user.access_scopes)) != Enum.sort(desired[:access_scopes] || []) or
+          Enum.sort(List.wrap(settings_user.access_scopes)) !=
+            Enum.sort(desired[:access_scopes] || []) or
           (Map.has_key?(desired, :full_name) and settings_user.full_name != desired.full_name)
 
       if needs_update do

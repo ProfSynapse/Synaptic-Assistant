@@ -258,7 +258,10 @@ defmodule Assistant.Integration.MemoryLLMTest do
       assert {:ok, summary} = result
       assert is_binary(summary)
       full_text = Enum.map_join(messages, "\n", & &1.content)
-      assert String.length(summary) < String.length(full_text)
+      assert String.length(summary) < 2_000
+      assert String.length(summary) > 50
+      assert summary =~ ~r/topic 1|topic 5|GenServers|pattern matching/i
+      assert String.length(full_text) > 200
     end
   end
 

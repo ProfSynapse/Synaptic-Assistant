@@ -13,7 +13,6 @@ defmodule Assistant.Integration.Skills.MemoryTest do
   use Assistant.DataCase, async: false
 
   import Assistant.Integration.Helpers
-
   @moduletag :integration
   @moduletag timeout: 60_000
 

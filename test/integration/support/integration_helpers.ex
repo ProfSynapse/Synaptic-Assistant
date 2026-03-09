@@ -180,6 +180,7 @@ defmodule Assistant.Integration.Helpers do
       [
         model: @integration_model,
         tools: tools,
+        tool_choice: "required",
         temperature: 0.0
       ] ++ Keyword.take(opts, [:api_key])
 
@@ -225,10 +226,13 @@ defmodule Assistant.Integration.Helpers do
 
     """
     You are a focused execution agent. Complete the user's request by calling
-    the use_skill tool with the appropriate skill and arguments.
+    exactly one available skill tool with the appropriate arguments.
 
-    IMPORTANT: You MUST call use_skill to execute the appropriate skill.
+    IMPORTANT: You MUST call one skill tool to execute the appropriate skill.
     Do NOT respond with text — always use the tool.
+    The tool payload MUST strictly follow the declared schema.
+    Use the exact parameter names from the skill definition.
+    Do not invent aliases, wrapper objects, positional fields, or extra keys.
 
     Available skills:
     #{Enum.join(skill_names, ", ")}
@@ -240,51 +244,38 @@ defmodule Assistant.Integration.Helpers do
   end
 
   defp build_tools(skill_names) do
-    skill_defs =
-      skill_names
-      |> Enum.sort()
-      |> Enum.map(fn name ->
-        case Registry.lookup(name) do
-          {:ok, skill_def} ->
-            %{name: skill_def.name, description: skill_def.description}
-
-          {:error, :not_found} ->
-            %{name: name, description: "(skill not found)"}
-        end
-      end)
-
-    skills_desc =
-      Enum.map_join(skill_defs, "\n", fn sd ->
-        "  - #{sd.name}: #{sd.description}"
-      end)
-
-    [
-      %{
-        type: "function",
-        function: %{
-          name: "use_skill",
-          description: """
-          Execute a skill. Available skills:\n#{skills_desc}\n\n\
-          Call with the skill name and arguments as a JSON object.\
-          """,
-          parameters: %{
-            "type" => "object",
-            "properties" => %{
-              "skill" => %{
-                "type" => "string",
-                "enum" => Enum.map(skill_defs, & &1.name),
-                "description" => "The skill to execute"
-              },
-              "arguments" => %{
-                "type" => "object",
-                "description" => "Arguments for the skill as key-value pairs"
-              }
-            },
-            "required" => ["skill", "arguments"]
+    skill_names
+    |> Enum.sort()
+    |> Enum.map(fn name ->
+      case Registry.lookup(name) do
+        {:ok, skill_def} ->
+          %{
+            type: "function",
+            function: %{
+              name: tool_name_for_skill(skill_def.name),
+              description: skill_def.description,
+              strict: true,
+              parameters: build_parameters_schema(skill_def)
+            }
           }
-        }
-      }
-    ]
+
+        {:error, :not_found} ->
+          %{
+            type: "function",
+            function: %{
+              name: tool_name_for_skill(name),
+              description: "(skill not found)",
+              strict: true,
+              parameters: %{
+                "type" => "object",
+                "properties" => %{},
+                "required" => [],
+                "additionalProperties" => false
+              }
+            }
+          }
+      end
+    end)
   end
 
   defp parse_llm_response(response) do
@@ -309,26 +300,16 @@ defmodule Assistant.Integration.Helpers do
               %{}
           end
 
-        case name do
-          "use_skill" ->
-            skill_name = args["skill"]
+        case skill_name_from_tool_name(name) do
+          {:ok, skill_name} ->
+            if is_map(args) do
+              {:tool_call, skill_name, args}
+            else
+              {:error, {:invalid_tool_payload, args}}
+            end
 
-            # The LLM may nest skill arguments in "arguments" or flatten them
-            # alongside "skill". Handle both cases.
-            skill_args =
-              case args["arguments"] do
-                nested when is_map(nested) and map_size(nested) > 0 ->
-                  nested
-
-                _ ->
-                  # Flatten: all keys except "skill" are the skill's arguments
-                  Map.delete(args, "skill")
-              end
-
-            {:tool_call, skill_name, skill_args}
-
-          other ->
-            {:error, {:unexpected_tool, other}}
+          :error ->
+            {:error, {:unexpected_tool, name}}
         end
 
       is_binary(response.content) and response.content != "" ->
@@ -338,6 +319,73 @@ defmodule Assistant.Integration.Helpers do
         {:error, :empty_response}
     end
   end
+
+  defp build_parameters_schema(skill_def) do
+    parameters = Map.get(skill_def, :parameters, [])
+
+    properties =
+      parameters
+      |> Enum.map(fn param -> {param.name, param_to_json_schema(param)} end)
+      |> Map.new()
+
+    required =
+      parameters
+      |> Enum.filter(&Map.get(&1, :required, false))
+      |> Enum.map(& &1.name)
+
+    %{
+      "type" => "object",
+      "properties" => properties,
+      "required" => required,
+      "additionalProperties" => false
+    }
+  end
+
+  defp param_to_json_schema(param) do
+    base = %{"description" => param.description}
+
+    case param.type do
+      "string" ->
+        Map.put(base, "type", "string")
+
+      "integer" ->
+        Map.put(base, "type", "integer")
+
+      "float" ->
+        Map.put(base, "type", "number")
+
+      "boolean" ->
+        Map.put(base, "type", "boolean")
+
+      "flag" ->
+        Map.put(base, "type", "boolean")
+
+      "array" ->
+        items_type = Map.get(param, :items, "string")
+
+        base
+        |> Map.put("type", "array")
+        |> Map.put("items", %{"type" => items_type})
+
+      "object" ->
+        base
+        |> Map.put("type", "object")
+        |> Map.put("additionalProperties", true)
+
+      _other ->
+        Map.put(base, "type", "string")
+    end
+  end
+
+  defp tool_name_for_skill(skill_name) do
+    "skill__" <> String.replace(skill_name, ".", "__")
+  end
+
+  defp skill_name_from_tool_name("skill__" <> rest) do
+    {:ok, String.replace(rest, "__", ".")}
+  end
+
+  defp skill_name_from_tool_name(_), do: :error
 
   # -------------------------------------------------------------------
   # Skill Execution

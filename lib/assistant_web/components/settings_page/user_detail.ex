@@ -649,7 +649,9 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
   end
 
   defp spending_budget_dollars(nil), do: ""
-  defp spending_budget_dollars(%{budget_cents: cents}), do: :erlang.float_to_binary(cents / 100, decimals: 2)
+
+  defp spending_budget_dollars(%{budget_cents: cents}),
+    do: :erlang.float_to_binary(cents / 100, decimals: 2)
 
   defp spending_warning_threshold(nil), do: "80"
   defp spending_warning_threshold(%{warning_threshold: threshold}), do: to_string(threshold)

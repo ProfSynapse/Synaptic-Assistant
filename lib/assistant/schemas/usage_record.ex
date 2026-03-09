@@ -23,7 +23,12 @@ defmodule Assistant.Schemas.UsageRecord do
   @type t :: %__MODULE__{}
 
   @required_fields [:settings_user_id, :period_start, :period_end]
-  @optional_fields [:total_cost_cents, :total_prompt_tokens, :total_completion_tokens, :call_count]
+  @optional_fields [
+    :total_cost_cents,
+    :total_prompt_tokens,
+    :total_completion_tokens,
+    :call_count
+  ]
 
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(usage_record, attrs) do

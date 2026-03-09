@@ -62,7 +62,15 @@ defmodule Assistant.Skills.Files.Update do
       true ->
         case resolve_file(path, file_id, user_id, state_store) do
           {:ok, synced_file} ->
-            do_update(file_manager, state_store, user_id, synced_file, search, replace, replace_all?)
+            do_update(
+              file_manager,
+              state_store,
+              user_id,
+              synced_file,
+              search,
+              replace,
+              replace_all?
+            )
 
           {:error, message} ->
             {:ok, %Result{status: :error, content: message}}
@@ -73,8 +81,11 @@ defmodule Assistant.Skills.Files.Update do
   defp resolve_file(path, _file_id, user_id, state_store)
        when is_binary(path) and path != "" do
     case state_store.get_synced_file_by_local_path(user_id, path) do
-      nil -> {:error, "File not found at path '#{path}'. Use files.search to find available files."}
-      synced_file -> {:ok, synced_file}
+      nil ->
+        {:error, "File not found at path '#{path}'. Use files.search to find available files."}
+
+      synced_file ->
+        {:ok, synced_file}
     end
   end
 
@@ -98,7 +109,15 @@ defmodule Assistant.Skills.Files.Update do
             {:ok, %Result{status: :ok, content: "No changes made (pattern not found)."}}
 
           {:changed, updated, count} ->
-            write_and_sync(file_manager, state_store, user_id, synced_file, updated, search, count)
+            write_and_sync(
+              file_manager,
+              state_store,
+              user_id,
+              synced_file,
+              updated,
+              search,
+              count
+            )
         end
 
       {:error, :enoent} ->

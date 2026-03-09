@@ -193,10 +193,17 @@ defmodule Assistant.SpendingLimits.EnforcerTest do
       {user, settings_user} = create_linked_settings_user()
       create_spending_limit(settings_user)
 
-      assert :ok = Enforcer.record_usage(user.id, %{cost: 0.50, prompt_tokens: 1000, completion_tokens: 500})
+      assert :ok =
+               Enforcer.record_usage(user.id, %{
+                 cost: 0.50,
+                 prompt_tokens: 1000,
+                 completion_tokens: 500
+               })
 
       {period_start, _} = current_period_dates(1)
-      record = Repo.get_by(UsageRecord, settings_user_id: settings_user.id, period_start: period_start)
+
+      record =
+        Repo.get_by(UsageRecord, settings_user_id: settings_user.id, period_start: period_start)
 
       assert record.total_cost_cents == 50
       assert record.call_count == 1

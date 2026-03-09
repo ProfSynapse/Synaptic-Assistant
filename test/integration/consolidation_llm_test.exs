@@ -94,12 +94,18 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
           "Bob said we need to staff up fast — Phoenix needs distributed systems, Atlas needs ML, Neptune needs Kubernetes. Who do we have?",
           "Looking at the team: David Lee has ML experience from OpenMind AI and wants an AI platform project — perfect for Atlas. Eva Schmidt is a Kubernetes specialist who already offered to help TechCo.",
           memories_to_text([
-            ws.memories.david_role, ws.memories.david_ml_project,
-            ws.memories.eva_role, ws.memories.eva_k8s,
-            ws.memories.bob_hiring, ws.memories.atlas, ws.memories.neptune
+            ws.memories.david_role,
+            ws.memories.david_ml_project,
+            ws.memories.eva_role,
+            ws.memories.eva_k8s,
+            ws.memories.bob_hiring,
+            ws.memories.atlas,
+            ws.memories.neptune
           ]),
           [
-            entity_to_graph(ws.entities.david, [%{type: "works_at", target: "OpenMind AI", meta: "former"}]),
+            entity_to_graph(ws.entities.david, [
+              %{type: "works_at", target: "OpenMind AI", meta: "former"}
+            ]),
             entity_to_graph(ws.entities.eva, []),
             entity_to_graph(ws.entities.atlas, [%{type: "part_of", target: "TechCo"}]),
             entity_to_graph(ws.entities.neptune, [%{type: "part_of", target: "TechCo"}])
@@ -132,8 +138,10 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
           "What's the status of our marketing initiatives?",
           "Frank Torres is leading the $2M Brand Relaunch for Q3. James Wu is organizing TechCo Connect, the developer conference in Austin for October.",
           memories_to_text([
-            ws.memories.frank_role, ws.memories.brand_relaunch,
-            ws.memories.james_role, ws.memories.techco_connect
+            ws.memories.frank_role,
+            ws.memories.brand_relaunch,
+            ws.memories.james_role,
+            ws.memories.techco_connect
           ]),
           [
             entity_to_graph(ws.entities.frank, [%{type: "works_at", target: "TechCo"}]),
@@ -170,8 +178,10 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
           "How's the Series C going?",
           "Grace Kim is leading the process. Vertex Partners has expressed strong interest as lead investor. They want to see Q1 close rates before committing.",
           memories_to_text([
-            ws.memories.grace_role, ws.memories.series_c,
-            ws.memories.vertex_meeting, ws.memories.arr_update
+            ws.memories.grace_role,
+            ws.memories.series_c,
+            ws.memories.vertex_meeting,
+            ws.memories.arr_update
           ]),
           [
             entity_to_graph(ws.entities.grace, [%{type: "works_at", target: "TechCo"}]),
@@ -210,8 +220,10 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
           "I saw Grace's email about the budget freeze. What does that mean for marketing?",
           "Grace Kim sent an email freezing Q2 headcount until the Series C term sheet is signed. Brand Relaunch can continue with approved spend, but all other hiring is paused.",
           memories_to_text([
-            ws.memories.budget_email, ws.memories.series_c,
-            ws.memories.brand_relaunch, ws.memories.grace_role
+            ws.memories.budget_email,
+            ws.memories.series_c,
+            ws.memories.brand_relaunch,
+            ws.memories.grace_role
           ]),
           [
             entity_to_graph(ws.entities.grace, [%{type: "works_at", target: "TechCo"}]),
@@ -247,8 +259,10 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
           "Can you summarize the ops standup from yesterday?",
           "Key points: Austin office lease signed, buildout starts March 1. Eva's team handles remote infra. James will help with the office launch party alongside TechCo Connect planning.",
           memories_to_text([
-            ws.memories.ops_transcript, ws.memories.austin_expansion,
-            ws.memories.eva_k8s, ws.memories.techco_connect,
+            ws.memories.ops_transcript,
+            ws.memories.austin_expansion,
+            ws.memories.eva_k8s,
+            ws.memories.techco_connect,
             ws.memories.henry_role
           ]),
           [
@@ -284,8 +298,11 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
           "What's our competitive positioning against DataFlow Labs?",
           "Isabel Reyes identified DataFlow Labs as TechCo's biggest threat. She recommends accelerating Project Atlas to differentiate on AI capabilities. DataFlow's Series B gives them 18 months of runway.",
           memories_to_text([
-            ws.memories.competitive_analysis, ws.memories.isabel_role,
-            ws.memories.dataflow, ws.memories.atlas, ws.memories.market_positioning
+            ws.memories.competitive_analysis,
+            ws.memories.isabel_role,
+            ws.memories.dataflow,
+            ws.memories.atlas,
+            ws.memories.market_positioning
           ]),
           [
             entity_to_graph(ws.entities.isabel, []),
@@ -324,8 +341,12 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
           "Bob Martinez is the CTO at TechCo.",
           memories_to_text([ws.memories.bob_role]),
           [
-            entity_to_graph(ws.entities.bob, [%{type: "works_at", target: "TechCo", confidence: 0.95}]),
-            entity_to_graph(ws.entities.techco, [%{type: "works_at", source: "Bob Martinez", confidence: 0.95}])
+            entity_to_graph(ws.entities.bob, [
+              %{type: "works_at", target: "TechCo", confidence: 0.95}
+            ]),
+            entity_to_graph(ws.entities.techco, [
+              %{type: "works_at", source: "Bob Martinez", confidence: 0.95}
+            ])
           ],
           context.api_key
         )
@@ -411,9 +432,14 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
           "Can you map out the leadership team and their responsibilities?",
           "Bob Martinez (CTO) oversees engineering. Frank Torres (CMO) leads marketing and the Brand Relaunch. Grace Kim (CFO) handles finance and the Series C. Henry Okafor (VP Ops) manages the Austin expansion. Isabel Reyes (Strategy Director) works with Grace on investor narratives.",
           memories_to_text([
-            ws.memories.bob_role, ws.memories.frank_role, ws.memories.grace_role,
-            ws.memories.henry_role, ws.memories.isabel_role,
-            ws.memories.brand_relaunch, ws.memories.series_c, ws.memories.austin_expansion
+            ws.memories.bob_role,
+            ws.memories.frank_role,
+            ws.memories.grace_role,
+            ws.memories.henry_role,
+            ws.memories.isabel_role,
+            ws.memories.brand_relaunch,
+            ws.memories.series_c,
+            ws.memories.austin_expansion
           ]),
           [
             entity_to_graph(ws.entities.bob, [%{type: "works_at", target: "TechCo"}]),
@@ -430,8 +456,10 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
 
       assert {:ok, analysis} = result
       connections = analysis["new_relations"]
+
       assert length(connections) >= 3,
              "Expected at least 3 relations from leadership overview, got #{length(connections)}"
+
       assert_valid_relation_types(connections)
     end
   end
@@ -495,7 +523,11 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
         consolidation_analysis(
           "What's blocking the Brand Relaunch budget?",
           "Grace Kim froze spending until the Series C term sheet is signed. Frank Torres needs to hold Brand Relaunch spend. Vertex Partners is the potential lead investor.",
-          memories_to_text([ws.memories.frank_role, ws.memories.grace_fundraise, ws.memories.budget_email]),
+          memories_to_text([
+            ws.memories.frank_role,
+            ws.memories.grace_fundraise,
+            ws.memories.budget_email
+          ]),
           [
             entity_to_graph(ws.entities.frank, [%{type: "works_at", target: "TechCo"}]),
             entity_to_graph(ws.entities.grace, [%{type: "works_at", target: "TechCo"}]),
@@ -534,6 +566,7 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
     Enum.any?(connections, fn rel ->
       s = rel["source_entity"] || ""
       t = rel["target_entity"] || ""
+
       (s =~ source_pattern and t =~ target_pattern) or
         (s =~ target_pattern and t =~ source_pattern)
     end)
@@ -542,6 +575,7 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
   defp assert_valid_relation_types(connections) do
     for rel <- connections do
       rel_type = rel["relation_type"] || ""
+
       assert rel_type in @allowed_relation_types,
              "Invalid relation type '#{rel_type}'. Allowed: #{inspect(@allowed_relation_types)}"
     end
@@ -570,15 +604,28 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
                 relation_type: %{
                   type: "string",
                   enum: [
-                    "works_at", "works_with", "manages", "reports_to",
-                    "part_of", "owns", "related_to", "located_in", "supersedes"
+                    "works_at",
+                    "works_with",
+                    "manages",
+                    "reports_to",
+                    "part_of",
+                    "owns",
+                    "related_to",
+                    "located_in",
+                    "supersedes"
                   ],
                   description: "Type of relation"
                 },
                 confidence: %{type: "number", description: "Confidence score 0-1"},
                 reasoning: %{type: "string", description: "Why this relation was inferred"}
               },
-              required: ["source_entity", "target_entity", "relation_type", "confidence", "reasoning"],
+              required: [
+                "source_entity",
+                "target_entity",
+                "relation_type",
+                "confidence",
+                "reasoning"
+              ],
               additionalProperties: false
             }
           }
@@ -589,10 +636,18 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
     }
   }
 
-  defp consolidation_analysis(user_message, assistant_response, existing_memories, existing_entities, api_key) do
+  defp consolidation_analysis(
+         user_message,
+         assistant_response,
+         existing_memories,
+         existing_entities,
+         api_key
+       ) do
     memories_section =
       case existing_memories do
-        [] -> "No related memories found."
+        [] ->
+          "No related memories found."
+
         mems ->
           mems
           |> Enum.with_index(1)
@@ -601,12 +656,16 @@ defmodule Assistant.Integration.ConsolidationLLMTest do
 
     entities_section =
       case existing_entities do
-        [] -> "No entities in the knowledge graph match this exchange."
+        [] ->
+          "No entities in the knowledge graph match this exchange."
+
         ents ->
           Enum.map_join(ents, "\n", fn ent ->
             rels =
               case ent[:relations] || [] do
-                [] -> "no existing relations"
+                [] ->
+                  "no existing relations"
+
                 rs ->
                   Enum.map_join(rs, ", ", fn r ->
                     type = r[:type] || "related_to"

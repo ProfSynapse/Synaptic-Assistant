@@ -236,7 +236,9 @@ defmodule Assistant.Memory.TurnClassifierTest do
 
     test "parses consolidate action" do
       json = ~s({"action": "consolidate", "reason": "Entities connect to prior memories"})
-      assert {:ok, "consolidate", "Entities connect to prior memories"} = parse_classification(json)
+
+      assert {:ok, "consolidate", "Entities connect to prior memories"} =
+               parse_classification(json)
     end
 
     test "parses nothing action" do

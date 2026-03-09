@@ -158,7 +158,8 @@ defmodule AssistantWeb.SettingsLive.State do
         |> put_flash(:error, "You do not have permission to access admin.")
         |> push_navigate(to: "/settings")
 
-      section_scope && current_scope && not PageHelpers.scope_visible?(section_scope, current_scope) ->
+      section_scope && current_scope &&
+          not PageHelpers.scope_visible?(section_scope, current_scope) ->
         socket
         |> put_flash(:error, "Access denied.")
         |> push_navigate(to: "/settings")

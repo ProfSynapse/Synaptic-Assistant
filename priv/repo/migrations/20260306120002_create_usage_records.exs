@@ -5,8 +5,8 @@ defmodule Assistant.Repo.Migrations.CreateUsageRecords do
     create table(:usage_records, primary_key: false) do
       add :id, :binary_id, primary_key: true
 
-      add :settings_user_id, references(:settings_users, type: :binary_id, on_delete: :delete_all),
-        null: false
+      add :settings_user_id,
+          references(:settings_users, type: :binary_id, on_delete: :delete_all), null: false
 
       add :period_start, :date, null: false
       add :period_end, :date, null: false

@@ -406,7 +406,9 @@ defmodule Assistant.Orchestrator.ContextFiles do
     |> FileCacheWorker.new()
     |> Oban.insert()
     |> case do
-      {:ok, _job} -> :ok
+      {:ok, _job} ->
+        :ok
+
       {:error, reason} ->
         Logger.warning("Failed to enqueue file cache",
           file_path: path,

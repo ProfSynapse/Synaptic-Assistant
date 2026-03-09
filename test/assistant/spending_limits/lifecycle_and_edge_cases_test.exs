@@ -122,7 +122,12 @@ defmodule Assistant.SpendingLimits.LifecycleAndEdgeCasesTest do
 
       # Step 4: Accumulate more usage to cross warning threshold (85%)
       # We already have 5000, so add 3500 more = 8500 total = 85%
-      assert :ok = SpendingLimits.record_usage(user.id, %{cost: 35.0, prompt_tokens: 5000, completion_tokens: 2500})
+      assert :ok =
+               SpendingLimits.record_usage(user.id, %{
+                 cost: 35.0,
+                 prompt_tokens: 5000,
+                 completion_tokens: 2500
+               })
 
       assert {:warning, 85.0} = SpendingLimits.check_budget(user.id)
       usage = SpendingLimits.current_usage(user.id)
@@ -130,7 +135,12 @@ defmodule Assistant.SpendingLimits.LifecycleAndEdgeCasesTest do
       assert usage.percentage == 85.0
 
       # Step 5: Push usage to exactly the budget limit (100%)
-      assert :ok = SpendingLimits.record_usage(user.id, %{cost: 15.0, prompt_tokens: 2000, completion_tokens: 1000})
+      assert :ok =
+               SpendingLimits.record_usage(user.id, %{
+                 cost: 15.0,
+                 prompt_tokens: 2000,
+                 completion_tokens: 1000
+               })
 
       assert {:error, :over_budget} = SpendingLimits.check_budget(user.id)
       usage = SpendingLimits.current_usage(user.id)
@@ -186,12 +196,22 @@ defmodule Assistant.SpendingLimits.LifecycleAndEdgeCasesTest do
       {period_start, period_end} = current_period_dates(1)
 
       # Set initial budget and accumulate usage to cap
-      assert {:ok, _} = SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 5_000, hard_cap: true})
+      assert {:ok, _} =
+               SpendingLimits.upsert_spending_limit(user.id, %{
+                 budget_cents: 5_000,
+                 hard_cap: true
+               })
+
       insert_usage(user.id, period_start, period_end, 5_000)
       assert {:error, :over_budget} = SpendingLimits.check_budget(user.id)
 
       # Admin increases budget — same usage now under budget
-      assert {:ok, _} = SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 10_000, hard_cap: true})
+      assert {:ok, _} =
+               SpendingLimits.upsert_spending_limit(user.id, %{
+                 budget_cents: 10_000,
+                 hard_cap: true
+               })
+
       assert :ok = SpendingLimits.check_budget(user.id)
       usage = SpendingLimits.current_usage(user.id)
       assert usage.percentage == 50.0
@@ -308,7 +328,12 @@ defmodule Assistant.SpendingLimits.LifecycleAndEdgeCasesTest do
       insert_usage(user.id, past_start, past_end, 8_000)
 
       # Record usage for current period via the context function
-      assert :ok = SpendingLimits.record_usage(user.id, %{cost: 2.50, prompt_tokens: 200, completion_tokens: 100})
+      assert :ok =
+               SpendingLimits.record_usage(user.id, %{
+                 cost: 2.50,
+                 prompt_tokens: 200,
+                 completion_tokens: 100
+               })
 
       # Should have separate records for each period
       records = Repo.all(from u in UsageRecord, where: u.settings_user_id == ^user.id)
@@ -361,7 +386,10 @@ defmodule Assistant.SpendingLimits.LifecycleAndEdgeCasesTest do
       assert :ok = Enforcer.record_spending(state, response)
 
       {period_start, _} = current_period_dates(1)
-      record = Repo.get_by(UsageRecord, settings_user_id: settings_user.id, period_start: period_start)
+
+      record =
+        Repo.get_by(UsageRecord, settings_user_id: settings_user.id, period_start: period_start)
+
       assert record.total_cost_cents == 25
       assert record.total_prompt_tokens == 500
       assert record.total_completion_tokens == 250
@@ -499,11 +527,19 @@ defmodule Assistant.SpendingLimits.LifecycleAndEdgeCasesTest do
       create_spending_limit(settings_user)
 
       # Record usage via chat user_id
-      assert :ok = Enforcer.record_usage(user.id, %{cost: 1.00, prompt_tokens: 500, completion_tokens: 250})
+      assert :ok =
+               Enforcer.record_usage(user.id, %{
+                 cost: 1.00,
+                 prompt_tokens: 500,
+                 completion_tokens: 250
+               })
 
       # Verify it was recorded against the settings_user
       {period_start, _} = current_period_dates(1)
-      record = Repo.get_by(UsageRecord, settings_user_id: settings_user.id, period_start: period_start)
+
+      record =
+        Repo.get_by(UsageRecord, settings_user_id: settings_user.id, period_start: period_start)
+
       assert record.total_cost_cents == 100
     end
 

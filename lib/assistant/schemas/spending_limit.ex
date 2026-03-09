@@ -32,7 +32,10 @@ defmodule Assistant.Schemas.SpendingLimit do
     |> validate_number(:budget_cents, greater_than: 0)
     |> validate_inclusion(:period, ["monthly"])
     |> validate_number(:reset_day, greater_than_or_equal_to: 1, less_than_or_equal_to: 28)
-    |> validate_number(:warning_threshold, greater_than_or_equal_to: 1, less_than_or_equal_to: 100)
+    |> validate_number(:warning_threshold,
+      greater_than_or_equal_to: 1,
+      less_than_or_equal_to: 100
+    )
     |> foreign_key_constraint(:settings_user_id)
     |> unique_constraint(:settings_user_id)
   end

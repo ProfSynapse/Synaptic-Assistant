@@ -46,7 +46,9 @@ defmodule Assistant.SpendingLimits do
       %SpendingLimit{} = limit ->
         {period_start, _period_end} = current_period(limit)
         used_cents = current_period_usage_cents(settings_user_id, period_start)
-        percentage = if limit.budget_cents > 0, do: used_cents / limit.budget_cents * 100, else: 0.0
+
+        percentage =
+          if limit.budget_cents > 0, do: used_cents / limit.budget_cents * 100, else: 0.0
 
         cond do
           limit.hard_cap and used_cents >= limit.budget_cents ->
@@ -147,7 +149,9 @@ defmodule Assistant.SpendingLimits do
       %SpendingLimit{} = limit ->
         {period_start, period_end} = current_period(limit)
         used_cents = current_period_usage_cents(settings_user_id, period_start)
-        percentage = if limit.budget_cents > 0, do: used_cents / limit.budget_cents * 100, else: 0.0
+
+        percentage =
+          if limit.budget_cents > 0, do: used_cents / limit.budget_cents * 100, else: 0.0
 
         %{
           has_limit: true,
@@ -177,7 +181,8 @@ defmodule Assistant.SpendingLimits do
   @doc """
   Creates or updates a spending limit for a settings_user.
   """
-  @spec upsert_spending_limit(String.t(), map()) :: {:ok, SpendingLimit.t()} | {:error, Ecto.Changeset.t()}
+  @spec upsert_spending_limit(String.t(), map()) ::
+          {:ok, SpendingLimit.t()} | {:error, Ecto.Changeset.t()}
   def upsert_spending_limit(settings_user_id, attrs) when is_binary(settings_user_id) do
     case get_spending_limit(settings_user_id) do
       nil ->

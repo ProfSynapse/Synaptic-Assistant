@@ -191,7 +191,13 @@ defmodule Assistant.SpendingLimitsTest do
   describe "record_usage/2" do
     test "returns :ok when no spending limit configured (no-op)" do
       user = settings_user_fixture()
-      assert :ok = SpendingLimits.record_usage(user.id, %{cost: 0.05, prompt_tokens: 100, completion_tokens: 50})
+
+      assert :ok =
+               SpendingLimits.record_usage(user.id, %{
+                 cost: 0.05,
+                 prompt_tokens: 100,
+                 completion_tokens: 50
+               })
     end
 
     test "returns :ok for non-binary settings_user_id" do
@@ -203,7 +209,12 @@ defmodule Assistant.SpendingLimitsTest do
       user = settings_user_fixture()
       create_spending_limit(user)
 
-      assert :ok = SpendingLimits.record_usage(user.id, %{cost: 0.50, prompt_tokens: 1000, completion_tokens: 500})
+      assert :ok =
+               SpendingLimits.record_usage(user.id, %{
+                 cost: 0.50,
+                 prompt_tokens: 1000,
+                 completion_tokens: 500
+               })
 
       {period_start, _} = current_period_dates(1)
       record = Repo.get_by(UsageRecord, settings_user_id: user.id, period_start: period_start)
@@ -218,8 +229,19 @@ defmodule Assistant.SpendingLimitsTest do
       user = settings_user_fixture()
       create_spending_limit(user)
 
-      assert :ok = SpendingLimits.record_usage(user.id, %{cost: 0.50, prompt_tokens: 1000, completion_tokens: 500})
-      assert :ok = SpendingLimits.record_usage(user.id, %{cost: 0.30, prompt_tokens: 600, completion_tokens: 300})
+      assert :ok =
+               SpendingLimits.record_usage(user.id, %{
+                 cost: 0.50,
+                 prompt_tokens: 1000,
+                 completion_tokens: 500
+               })
+
+      assert :ok =
+               SpendingLimits.record_usage(user.id, %{
+                 cost: 0.30,
+                 prompt_tokens: 600,
+                 completion_tokens: 300
+               })
 
       {period_start, _} = current_period_dates(1)
       record = Repo.get_by(UsageRecord, settings_user_id: user.id, period_start: period_start)
@@ -234,7 +256,8 @@ defmodule Assistant.SpendingLimitsTest do
       user = settings_user_fixture()
       create_spending_limit(user)
 
-      assert :ok = SpendingLimits.record_usage(user.id, %{prompt_tokens: 100, completion_tokens: 50})
+      assert :ok =
+               SpendingLimits.record_usage(user.id, %{prompt_tokens: 100, completion_tokens: 50})
 
       {period_start, _} = current_period_dates(1)
       record = Repo.get_by(UsageRecord, settings_user_id: user.id, period_start: period_start)
@@ -326,7 +349,10 @@ defmodule Assistant.SpendingLimitsTest do
       create_spending_limit(user, %{budget_cents: 10_000})
 
       assert {:ok, %SpendingLimit{} = updated} =
-               SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 20_000, hard_cap: false})
+               SpendingLimits.upsert_spending_limit(user.id, %{
+                 budget_cents: 20_000,
+                 hard_cap: false
+               })
 
       assert updated.budget_cents == 20_000
       assert updated.hard_cap == false
@@ -335,24 +361,38 @@ defmodule Assistant.SpendingLimitsTest do
     test "validates budget_cents > 0" do
       user = settings_user_fixture()
 
-      assert {:error, changeset} = SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 0})
+      assert {:error, changeset} =
+               SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 0})
+
       assert errors_on(changeset).budget_cents
     end
 
     test "validates reset_day range 1..28" do
       user = settings_user_fixture()
 
-      assert {:error, changeset} = SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 1000, reset_day: 29})
+      assert {:error, changeset} =
+               SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 1000, reset_day: 29})
+
       assert errors_on(changeset).reset_day
     end
 
     test "validates warning_threshold range 1..100" do
       user = settings_user_fixture()
 
-      assert {:error, changeset} = SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 1000, warning_threshold: 0})
+      assert {:error, changeset} =
+               SpendingLimits.upsert_spending_limit(user.id, %{
+                 budget_cents: 1000,
+                 warning_threshold: 0
+               })
+
       assert errors_on(changeset).warning_threshold
 
-      assert {:error, changeset} = SpendingLimits.upsert_spending_limit(user.id, %{budget_cents: 1000, warning_threshold: 101})
+      assert {:error, changeset} =
+               SpendingLimits.upsert_spending_limit(user.id, %{
+                 budget_cents: 1000,
+                 warning_threshold: 101
+               })
+
       assert errors_on(changeset).warning_threshold
     end
   end
@@ -450,13 +490,17 @@ defmodule Assistant.SpendingLimitsTest do
     end
 
     test "validates period inclusion" do
-      changeset = SpendingLimit.changeset(%SpendingLimit{}, %{budget_cents: 1000, period: "weekly"})
+      changeset =
+        SpendingLimit.changeset(%SpendingLimit{}, %{budget_cents: 1000, period: "weekly"})
+
       refute changeset.valid?
       assert errors_on(changeset).period
     end
 
     test "accepts monthly period" do
-      changeset = SpendingLimit.changeset(%SpendingLimit{}, %{budget_cents: 1000, period: "monthly"})
+      changeset =
+        SpendingLimit.changeset(%SpendingLimit{}, %{budget_cents: 1000, period: "monthly"})
+
       assert changeset.valid?
     end
   end

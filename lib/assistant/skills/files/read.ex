@@ -103,7 +103,8 @@ defmodule Assistant.Skills.Files.Read do
          }}
 
       {:error, :path_not_allowed} ->
-        {:ok, %Result{status: :error, content: "Invalid path: directory traversal is not allowed."}}
+        {:ok,
+         %Result{status: :error, content: "Invalid path: directory traversal is not allowed."}}
 
       {:error, reason} ->
         {:ok,

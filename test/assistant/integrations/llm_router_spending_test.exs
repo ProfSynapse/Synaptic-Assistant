@@ -192,7 +192,13 @@ defmodule Assistant.Integrations.LLMRouterSpendingTest do
 
     test "soft cap does not block call even when over budget" do
       {user, settings_user} = create_linked_pair()
-      create_spending_limit(settings_user, %{budget_cents: 1_000, hard_cap: false, warning_threshold: 80})
+
+      create_spending_limit(settings_user, %{
+        budget_cents: 1_000,
+        hard_cap: false,
+        warning_threshold: 80
+      })
+
       insert_usage(settings_user.id, 2_000)
 
       # Soft cap: over budget but no block — just warning logged.

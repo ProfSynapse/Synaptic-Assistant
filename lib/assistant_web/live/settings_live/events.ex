@@ -2977,8 +2977,11 @@ defmodule AssistantWeb.SettingsLive.Events do
       }
 
       case SpendingLimits.upsert_spending_limit(settings_user_id, attrs) do
-        {:ok, _} -> socket
-        {:error, _} -> put_flash(socket, :error, "User created but spending limit failed to save.")
+        {:ok, _} ->
+          socket
+
+        {:error, _} ->
+          put_flash(socket, :error, "User created but spending limit failed to save.")
       end
     else
       socket
