@@ -269,7 +269,6 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
                     </span>
                     <span class="sa-drive-tree-label-wrap">
                       <span class="sa-drive-tree-label">{row.node.name}</span>
-                      <span class="sa-drive-tree-subtitle">{file_kind_text(row.node.file_kind)}</span>
                     </span>
                     <span class="sa-drive-tree-tail">
                       <span class={["sa-drive-file-badge", file_badge_class(row.node.file_kind)]}>
@@ -595,10 +594,4 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
   defp file_badge_label("image"), do: "IMG"
   defp file_badge_label(_), do: "FILE"
 
-  defp file_kind_text("doc"), do: "Document"
-  defp file_kind_text("sheet"), do: "Spreadsheet"
-  defp file_kind_text("slides"), do: "Presentation"
-  defp file_kind_text("pdf"), do: "PDF"
-  defp file_kind_text("image"), do: "Image"
-  defp file_kind_text(_), do: "File"
 end
