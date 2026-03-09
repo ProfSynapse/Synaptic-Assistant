@@ -1977,7 +1977,8 @@ a {
   display: flex;
   flex-direction: column;
   padding: 0;
-  flex: 1 1 auto;
+  flex: 1 1 0%;
+  height: 0;
   overflow: hidden;
   min-height: 0;
 }
@@ -1985,7 +1986,8 @@ a {
 .sa-drive-manager {
   display: flex;
   flex-direction: column;
-  flex: 1 1 auto;
+  flex: 1 1 0%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1996,6 +1998,7 @@ a {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-shrink: 0;
   gap: 1rem;
   padding: 1.25rem 1.35rem 0;
 }
@@ -2032,6 +2035,7 @@ a {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-shrink: 0;
   gap: 1rem;
   padding: 1rem 1.35rem 1.15rem;
   border-top: 1px solid #e4edef;
