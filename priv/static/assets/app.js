@@ -577,6 +577,58 @@
     },
   }
 
+  Hooks.DriveModalDebug = {
+    mounted() {
+      this.logMetrics = (reason) => {
+        const targets = [
+          ["scroll", this.el],
+          ["body", this.el.querySelector(".sa-drive-manager-body")],
+          ["manager", this.el.closest(".sa-drive-manager")],
+          ["content", this.el.closest(".pc-modal__content")],
+          ["box", this.el.closest(".pc-modal__box")],
+          ["wrapper", this.el.closest(".pc-modal__wrapper")],
+        ]
+
+        const metrics = targets
+          .filter(([, node]) => node instanceof HTMLElement)
+          .map(([label, node]) => {
+            const style = window.getComputedStyle(node)
+
+            return {
+              label,
+              clientHeight: node.clientHeight,
+              scrollHeight: node.scrollHeight,
+              offsetHeight: node.offsetHeight,
+              scrollTop: node.scrollTop,
+              overflowY: style.overflowY,
+              minHeight: style.minHeight,
+              height: style.height,
+              display: style.display,
+            }
+          })
+
+        console.log("[DriveModalDebug]", reason, metrics)
+      }
+
+      this.onWheel = () => this.logMetrics("wheel")
+      this.onScroll = () => this.logMetrics("scroll")
+
+      this.el.addEventListener("wheel", this.onWheel, { passive: true })
+      this.el.addEventListener("scroll", this.onScroll, { passive: true })
+
+      requestAnimationFrame(() => this.logMetrics("mounted"))
+    },
+
+    updated() {
+      requestAnimationFrame(() => this.logMetrics("updated"))
+    },
+
+    destroyed() {
+      this.el.removeEventListener("wheel", this.onWheel)
+      this.el.removeEventListener("scroll", this.onScroll)
+    },
+  }
+
   Hooks.WorkspaceComposer = {
     mounted() {
       this.handleKeydown = (event) => {

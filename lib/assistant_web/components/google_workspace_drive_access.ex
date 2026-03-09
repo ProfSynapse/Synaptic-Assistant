@@ -150,7 +150,7 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
         on_cancel={Phoenix.LiveView.JS.push("close_drive_scope_manager")}
       >
         <div class="sa-drive-manager">
-          <div class="sa-drive-manager-scroll">
+          <div id="drive-manager-scroll" class="sa-drive-manager-scroll" phx-hook="DriveModalDebug">
             <div class="sa-drive-manager-intro">
               <div>
                 <p class="sa-drive-manager-kicker">Scoped Drive Access</p>
