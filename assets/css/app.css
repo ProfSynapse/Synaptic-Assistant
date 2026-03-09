@@ -1955,9 +1955,10 @@ a {
   max-width: min(1100px, calc(100vw - 64px));
   height: min(84vh, 980px);
   max-height: min(84vh, 980px);
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
   border-radius: 24px;
 }
@@ -1974,27 +1975,18 @@ a {
 }
 
 .sa-drive-manager-modal .pc-modal__content {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
+  display: block;
   padding: 0;
-  overflow: hidden;
   min-height: 0;
 }
 
 .sa-drive-manager {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
   min-width: 0;
-  min-height: 0;
-  overflow: hidden;
   background: #fbfdfd;
 }
 
 .sa-drive-manager-scroll {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
+  overflow: visible;
 }
 
 .sa-drive-manager-intro {
@@ -2032,6 +2024,9 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   padding: 1rem 1.35rem 1.15rem;
   border-top: 1px solid #e4edef;
   background: rgba(255, 255, 255, 0.95);
