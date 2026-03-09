@@ -10,8 +10,6 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
 
   use AssistantWeb, :html
 
-  alias Assistant.Integrations.Google.Auth, as: GoogleAuth
-
   import AssistantWeb.Components.GoogleWorkspaceDriveAccess,
     only: [google_workspace_drive_access: 1]
 
@@ -103,21 +101,21 @@ defmodule AssistantWeb.Components.SettingsPage.AppDetail do
         style="margin-top: 1.5rem;"
       >
         <.google_workspace_drive_access
-          connected_drives={@connected_drives}
-          available_drives={@available_drives}
-          drives_loading={@drives_loading}
-        has_google_token={GoogleAuth.configured?()}
-        sync_scopes={@sync_scopes}
-        manager_drive={@drive_manager_drive}
-        manager_scopes={Map.values(@drive_scope_draft_scopes || %{})}
-        tree_nodes={@drive_tree_nodes}
-        tree_root_keys={@drive_tree_root_keys}
-        tree_expanded={@drive_tree_expanded}
-        tree_loading={@drive_tree_loading}
-        tree_loading_nodes={@drive_tree_loading_nodes}
-        tree_error={@drive_tree_error}
-        drive_scope_dirty={@drive_scope_dirty}
-      />
+          connected_sources={@connected_storage_sources}
+          available_sources={@available_storage_sources}
+          sources_loading={@storage_sources_loading}
+          provider_connected={@google_connected}
+          storage_scopes={@storage_scopes}
+          selected_source={@file_picker_selected_source}
+          draft_scopes={Map.values(@file_picker_selection_draft || %{})}
+          nodes={@file_picker_nodes}
+          root_keys={@file_picker_root_keys}
+          expanded={@file_picker_expanded}
+          loading={@file_picker_loading}
+          loading_nodes={@file_picker_loading_nodes}
+          error={@file_picker_error}
+          dirty={@file_picker_dirty}
+        />
       </section>
 
       <section :if={@current_app.id == "telegram"} class="sa-card" style="margin-top: 1.5rem;">

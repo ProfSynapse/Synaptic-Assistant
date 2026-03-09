@@ -31,10 +31,12 @@ defmodule Assistant.Schemas.User do
     has_many :memory_entries, Assistant.Schemas.MemoryEntry
     has_many :memory_entities, Assistant.Schemas.MemoryEntity
     has_many :connected_drives, Assistant.Schemas.ConnectedDrive
+    has_many :connected_storage_sources, Assistant.Schemas.ConnectedStorageSource
     has_many :oauth_tokens, Assistant.Schemas.OAuthToken
     has_many :auth_tokens, Assistant.Schemas.AuthToken
     has_many :skill_overrides, Assistant.Schemas.UserSkillOverride
     has_many :connector_states, Assistant.Schemas.SettingsUserConnectorState
+    has_many :storage_scopes, Assistant.Schemas.StorageScope
 
     timestamps(type: :utc_datetime_usec)
   end

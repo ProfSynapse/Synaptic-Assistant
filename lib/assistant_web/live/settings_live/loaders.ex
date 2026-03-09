@@ -10,7 +10,6 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.Analytics
   alias Assistant.Auth.TokenStore
   alias Assistant.Config.Loader, as: ConfigLoader
-  alias Assistant.ConnectedDrives
   alias Assistant.IntegrationSettings
   alias Assistant.IntegrationSettings.ConnectionValidator
   alias Assistant.IntegrationSettings.Registry
@@ -20,12 +19,12 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.MemoryExplorer
   alias Assistant.SettingsUserConnectorStates
   alias Assistant.SpendingLimits
+  alias Assistant.Storage
   alias Assistant.MemoryGraph
   alias Assistant.ModelCatalog
   alias Assistant.ModelDefaults
   alias Assistant.OrchestratorSystemPrompt
   alias Assistant.SkillPermissions
-  alias Assistant.Sync.StateStore
   alias Assistant.Transcripts
   alias Assistant.Workflows
   alias AssistantWeb.SettingsLive.Context
@@ -42,9 +41,10 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     do:
       socket
       |> load_google_status()
+      |> load_connected_storage_sources()
+      |> load_available_storage_sources()
+      |> load_storage_scopes()
       |> load_openrouter_status()
-      |> load_connected_drives()
-      |> load_sync_scopes()
       |> load_apps_integration_settings()
       |> load_workspace_enabled_groups()
       |> load_connector_states()
@@ -422,8 +422,9 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   defp maybe_load_google_workspace_app_detail(socket, %{id: "google_workspace"}) do
     socket
     |> load_google_status()
-    |> load_connected_drives()
-    |> load_sync_scopes()
+    |> load_connected_storage_sources()
+    |> load_available_storage_sources()
+    |> load_storage_scopes()
   end
 
   defp maybe_load_google_workspace_app_detail(socket, _app), do: socket
@@ -532,29 +533,52 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     _ -> socket
   end
 
-  def load_connected_drives(socket) do
+  def load_connected_storage_sources(socket) do
     case Context.current_user_id(socket) do
       nil ->
-        socket
+        assign(socket, :connected_storage_sources, [])
 
       user_id ->
-        drives = ConnectedDrives.list_for_user(user_id)
-        assign(socket, :connected_drives, drives)
+        assign(
+          socket,
+          :connected_storage_sources,
+          Storage.list_connected_sources(user_id, provider: "google_drive")
+        )
     end
   rescue
-    _ -> socket
+    _ -> assign(socket, :connected_storage_sources, [])
   end
 
-  def load_sync_scopes(socket) do
+  def load_available_storage_sources(socket) do
+    socket = assign(socket, :storage_sources_loading, false)
+
     case Context.current_user_id(socket) do
       nil ->
-        assign(socket, :sync_scopes, [])
+        assign(socket, :available_storage_sources, [])
 
       user_id ->
-        assign(socket, :sync_scopes, StateStore.list_scopes(user_id))
+        case Storage.list_provider_sources(user_id, "google_drive") do
+          {:ok, sources} ->
+            assign(socket, :available_storage_sources, sources)
+
+          _ ->
+            assign(socket, :available_storage_sources, [])
+        end
     end
   rescue
-    _ -> assign(socket, :sync_scopes, [])
+    _ -> assign(socket, :available_storage_sources, [])
+  end
+
+  def load_storage_scopes(socket) do
+    case Context.current_user_id(socket) do
+      nil ->
+        assign(socket, :storage_scopes, [])
+
+      user_id ->
+        assign(socket, :storage_scopes, Storage.list_scopes(user_id, provider: "google_drive"))
+    end
+  rescue
+    _ -> assign(socket, :storage_scopes, [])
   end
 
   def load_profile(socket) do

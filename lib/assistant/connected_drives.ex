@@ -59,6 +59,16 @@ defmodule Assistant.ConnectedDrives do
   @spec get(String.t()) :: ConnectedDrive.t() | nil
   def get(drive_row_id), do: Repo.get(ConnectedDrive, drive_row_id)
 
+  @doc "Fetch the legacy connected drive row ID by user and drive ID."
+  @spec get_connected_source_id(String.t(), String.t() | nil) :: String.t() | nil
+  def get_connected_source_id(user_id, drive_id) do
+    ConnectedDrive
+    |> where(user_id: ^user_id)
+    |> where_drive_id(drive_id)
+    |> select([drive], drive.id)
+    |> Repo.one()
+  end
+
   @doc "Disconnect (delete) a drive."
   @spec disconnect(String.t()) :: {:ok, ConnectedDrive.t()} | {:error, term()}
   def disconnect(drive_row_id) do
