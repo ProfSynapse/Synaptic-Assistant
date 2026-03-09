@@ -566,12 +566,12 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
 
   defp node_icon(%{node_type: "folder"}, true), do: "hero-folder-open"
   defp node_icon(%{node_type: "folder"}, false), do: "hero-folder"
-  defp node_icon(%{file_kind: "doc"}, _expanded?), do: "hero-document-text"
-  defp node_icon(%{file_kind: "sheet"}, _expanded?), do: "hero-table-cells"
-  defp node_icon(%{file_kind: "slides"}, _expanded?), do: "hero-presentation-chart-bar"
-  defp node_icon(%{file_kind: "pdf"}, _expanded?), do: "hero-document"
-  defp node_icon(%{file_kind: "image"}, _expanded?), do: "hero-photo"
-  defp node_icon(_node, _expanded?), do: "hero-document"
+  defp node_icon(%{file_kind: "doc"}, _expanded?), do: "hero-document-duplicate"
+  defp node_icon(%{file_kind: "sheet"}, _expanded?), do: "hero-document-duplicate"
+  defp node_icon(%{file_kind: "slides"}, _expanded?), do: "hero-document-duplicate"
+  defp node_icon(%{file_kind: "pdf"}, _expanded?), do: "hero-document-duplicate"
+  defp node_icon(%{file_kind: "image"}, _expanded?), do: "hero-document-duplicate"
+  defp node_icon(_node, _expanded?), do: "hero-document-duplicate"
 
   defp node_avatar_class(%{node_type: "folder"}), do: "is-folder"
   defp node_avatar_class(%{file_kind: "doc"}), do: "is-doc"
