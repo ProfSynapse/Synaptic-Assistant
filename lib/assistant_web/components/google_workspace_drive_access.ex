@@ -150,134 +150,136 @@ defmodule AssistantWeb.Components.GoogleWorkspaceDriveAccess do
         on_cancel={Phoenix.LiveView.JS.push("close_drive_scope_manager")}
       >
         <div class="sa-drive-manager">
-          <div class="sa-drive-manager-intro">
-            <div>
-              <p class="sa-drive-manager-kicker">Scoped Drive Access</p>
-              <p class="sa-muted">
-                Select the folders and files to sync into the agent workspace. Folder selections cascade until you override a child.
-              </p>
-            </div>
-            <span class={["sa-drive-scope-summary", scope_summary_class(@manager_drive, @manager_scopes)]}>
-              {scope_summary(@manager_drive, @manager_scopes)}
-            </span>
-          </div>
-
-          <div
-            :if={@manager_drive.enabled}
-            class="sa-drive-notice sa-drive-notice--info"
-          >
-            <.icon name="hero-information-circle" class="h-5 w-5" />
-            <span>Full access is on for this drive. Turn it off to scope down to folders and files.</span>
-          </div>
-
-          <div :if={!@manager_drive.enabled} class="sa-drive-manager-body">
-            <div :if={@tree_error} class="sa-drive-notice">
-              <.icon name="hero-exclamation-triangle" class="h-5 w-5" />
-              <span>{@tree_error}</span>
-            </div>
-
-            <div :if={@tree_loading} class="sa-empty sa-drive-manager-state">
-              Loading drive contents...
+          <div class="sa-drive-manager-scroll">
+            <div class="sa-drive-manager-intro">
+              <div>
+                <p class="sa-drive-manager-kicker">Scoped Drive Access</p>
+                <p class="sa-muted">
+                  Select the folders and files to sync into the agent workspace. Folder selections cascade until you override a child.
+                </p>
+              </div>
+              <span class={["sa-drive-scope-summary", scope_summary_class(@manager_drive, @manager_scopes)]}>
+                {scope_summary(@manager_drive, @manager_scopes)}
+              </span>
             </div>
 
             <div
-              :if={!@tree_loading and @tree_rows == [] and is_nil(@tree_error)}
-              class="sa-empty sa-drive-manager-state"
+              :if={@manager_drive.enabled}
+              class="sa-drive-notice sa-drive-notice--info"
             >
-              No folders or files found at the root of this drive.
+              <.icon name="hero-information-circle" class="h-5 w-5" />
+              <span>Full access is on for this drive. Turn it off to scope down to folders and files.</span>
             </div>
 
-            <div
-              :if={!@tree_loading and @tree_rows != []}
-              class="sa-drive-tree"
-            >
+            <div :if={!@manager_drive.enabled} class="sa-drive-manager-body">
+              <div :if={@tree_error} class="sa-drive-notice">
+                <.icon name="hero-exclamation-triangle" class="h-5 w-5" />
+                <span>{@tree_error}</span>
+              </div>
+
+              <div :if={@tree_loading} class="sa-empty sa-drive-manager-state">
+                Loading drive contents...
+              </div>
+
               <div
-                :for={row <- @tree_rows}
-                class={tree_row_classes(row)}
-                style={tree_row_style(row.depth)}
+                :if={!@tree_loading and @tree_rows == [] and is_nil(@tree_error)}
+                class="sa-empty sa-drive-manager-state"
               >
-                <button
-                  type="button"
-                  class="sa-drive-tree-check"
-                  phx-click="toggle_drive_tree_node_scope"
-                  phx-value-node_key={row.node.key}
-                  phx-value-node_type={row.node.node_type}
-                  aria-label={"Toggle #{row.node.name}"}
-                >
-                  <span class="sa-drive-tree-check-shell">
-                    <input
-                      type="checkbox"
-                      checked={row.checkbox_state == :checked}
-                      aria-checked={checkbox_aria_state(row.checkbox_state)}
-                      tabindex="-1"
-                      class="sa-drive-tree-native-check"
-                      readonly
-                    />
-                    <span class={["sa-drive-tree-check-box", "is-#{row.checkbox_state}"]}>
-                      <.icon
-                        :if={row.checkbox_state == :checked}
-                        name="hero-check-solid"
-                        class="h-3.5 w-3.5"
-                      />
-                      <.icon
-                        :if={row.checkbox_state == :partial}
-                        name="hero-minus"
-                        class="h-3.5 w-3.5"
-                      />
-                    </span>
-                  </span>
-                </button>
+                No folders or files found at the root of this drive.
+              </div>
 
-                <button
-                  :if={row.node.node_type == "folder"}
-                  type="button"
-                  class="sa-drive-tree-node-trigger"
-                  phx-click="toggle_drive_tree_node_expanded"
-                  phx-value-node_key={row.node.key}
-                  aria-label={if row.expanded?, do: "Collapse #{row.node.name}", else: "Expand #{row.node.name}"}
+              <div
+                :if={!@tree_loading and @tree_rows != []}
+                class="sa-drive-tree"
+              >
+                <div
+                  :for={row <- @tree_rows}
+                  class={tree_row_classes(row)}
+                  style={tree_row_style(row.depth)}
                 >
-                  <span class={["sa-drive-tree-node-avatar", node_avatar_class(row.node)]}>
-                    <.icon
-                      name={node_icon(row.node, row.expanded?)}
-                      class="h-4 w-4 sa-drive-tree-node-icon"
-                    />
-                  </span>
-                  <span class="sa-drive-tree-label-wrap">
-                    <span class="sa-drive-tree-label">{row.node.name}</span>
-                    <span class="sa-drive-tree-subtitle">Folder</span>
-                  </span>
-                  <span class="sa-drive-tree-tail">
-                    <span
-                      :if={MapSet.member?(@tree_loading_nodes, row.node.key)}
-                      class="sa-drive-tree-meta"
-                    >
-                      Loading...
+                  <button
+                    type="button"
+                    class="sa-drive-tree-check"
+                    phx-click="toggle_drive_tree_node_scope"
+                    phx-value-node_key={row.node.key}
+                    phx-value-node_type={row.node.node_type}
+                    aria-label={"Toggle #{row.node.name}"}
+                  >
+                    <span class="sa-drive-tree-check-shell">
+                      <input
+                        type="checkbox"
+                        checked={row.checkbox_state == :checked}
+                        aria-checked={checkbox_aria_state(row.checkbox_state)}
+                        tabindex="-1"
+                        class="sa-drive-tree-native-check"
+                        readonly
+                      />
+                      <span class={["sa-drive-tree-check-box", "is-#{row.checkbox_state}"]}>
+                        <.icon
+                          :if={row.checkbox_state == :checked}
+                          name="hero-check-solid"
+                          class="h-3.5 w-3.5"
+                        />
+                        <.icon
+                          :if={row.checkbox_state == :partial}
+                          name="hero-minus"
+                          class="h-3.5 w-3.5"
+                        />
+                      </span>
                     </span>
-                    <span :if={row.explicit_effect} class="sa-drive-tree-meta">
-                      {String.capitalize(row.explicit_effect)}
-                    </span>
-                  </span>
-                </button>
+                  </button>
 
-                <div :if={row.node.node_type != "folder"} class="sa-drive-tree-node-trigger is-file">
-                  <span class={["sa-drive-tree-node-avatar", node_avatar_class(row.node)]}>
-                    <.icon
-                      name={node_icon(row.node, row.expanded?)}
-                      class="h-4 w-4 sa-drive-tree-node-icon"
-                    />
-                  </span>
-                  <span class="sa-drive-tree-label-wrap">
-                    <span class="sa-drive-tree-label">{row.node.name}</span>
-                    <span class="sa-drive-tree-subtitle">{file_kind_text(row.node.file_kind)}</span>
-                  </span>
-                  <span class="sa-drive-tree-tail">
-                    <span class={["sa-drive-file-badge", file_badge_class(row.node.file_kind)]}>
-                      {file_badge_label(row.node.file_kind)}
+                  <button
+                    :if={row.node.node_type == "folder"}
+                    type="button"
+                    class="sa-drive-tree-node-trigger"
+                    phx-click="toggle_drive_tree_node_expanded"
+                    phx-value-node_key={row.node.key}
+                    aria-label={if row.expanded?, do: "Collapse #{row.node.name}", else: "Expand #{row.node.name}"}
+                  >
+                    <span class={["sa-drive-tree-node-avatar", node_avatar_class(row.node)]}>
+                      <.icon
+                        name={node_icon(row.node, row.expanded?)}
+                        class="h-4 w-4 sa-drive-tree-node-icon"
+                      />
                     </span>
-                    <span :if={row.explicit_effect} class="sa-drive-tree-meta">
-                      {String.capitalize(row.explicit_effect)}
+                    <span class="sa-drive-tree-label-wrap">
+                      <span class="sa-drive-tree-label">{row.node.name}</span>
+                      <span class="sa-drive-tree-subtitle">Folder</span>
                     </span>
-                  </span>
+                    <span class="sa-drive-tree-tail">
+                      <span
+                        :if={MapSet.member?(@tree_loading_nodes, row.node.key)}
+                        class="sa-drive-tree-meta"
+                      >
+                        Loading...
+                      </span>
+                      <span :if={row.explicit_effect} class="sa-drive-tree-meta">
+                        {String.capitalize(row.explicit_effect)}
+                      </span>
+                    </span>
+                  </button>
+
+                  <div :if={row.node.node_type != "folder"} class="sa-drive-tree-node-trigger is-file">
+                    <span class={["sa-drive-tree-node-avatar", node_avatar_class(row.node)]}>
+                      <.icon
+                        name={node_icon(row.node, row.expanded?)}
+                        class="h-4 w-4 sa-drive-tree-node-icon"
+                      />
+                    </span>
+                    <span class="sa-drive-tree-label-wrap">
+                      <span class="sa-drive-tree-label">{row.node.name}</span>
+                      <span class="sa-drive-tree-subtitle">{file_kind_text(row.node.file_kind)}</span>
+                    </span>
+                    <span class="sa-drive-tree-tail">
+                      <span class={["sa-drive-file-badge", file_badge_class(row.node.file_kind)]}>
+                        {file_badge_label(row.node.file_kind)}
+                      </span>
+                      <span :if={row.explicit_effect} class="sa-drive-tree-meta">
+                        {String.capitalize(row.explicit_effect)}
+                      </span>
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
