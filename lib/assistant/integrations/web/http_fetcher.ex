@@ -4,6 +4,8 @@ defmodule Assistant.Integrations.Web.HttpFetcher do
   """
 
   alias Assistant.Integrations.Web.{Robots, UrlPolicy}
+  alias Assistant.Policy
+  alias Assistant.Schemas.PolicyRule
 
   @default_timeout_ms 10_000
   @default_max_bytes 1_000_000
@@ -41,7 +43,8 @@ defmodule Assistant.Integrations.Web.HttpFetcher do
     url_policy = Keyword.get(opts, :url_policy, UrlPolicy)
     request_fun = Keyword.get(opts, :request_fun, &Req.get/2)
 
-    with {:ok, uri} <- url_policy.validate(url),
+    with :ok <- authorize_web_fetch(url, opts),
+         {:ok, uri} <- url_policy.validate(url),
          {:ok, response, final_uri} <-
            start_fetch(
              uri,
@@ -183,6 +186,81 @@ defmodule Assistant.Integrations.Web.HttpFetcher do
   defp accepted_content_types do
     Enum.join(@allowed_content_types, ", ")
   end
+
+  defp authorize_web_fetch(url, opts) do
+    action = build_web_fetch_action(url, opts)
+    context = build_web_fetch_context(opts)
+    policy_rules = Keyword.get(opts, :policy_rules)
+
+    if policy_resolution_enabled?(context, policy_rules) and Code.ensure_loaded?(Policy) and
+         function_exported?(Policy, :resolve_action, 2) do
+      resolve_opts =
+        [scope: context]
+        |> maybe_put_opt(:rules, policy_rules)
+
+      case Policy.resolve_action(action, resolve_opts) do
+        {:ok, :deny, rule} ->
+          {:error, {:policy_denied, policy_block_message(rule)}}
+
+        {:ok, :ask, rule} ->
+          {:error, {:policy_requires_approval, policy_block_message(rule)}}
+
+        {:ok, _effect, _rule} ->
+          :ok
+
+        _ ->
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp build_web_fetch_action(url, opts) do
+    uri = URI.parse(url)
+
+    if Code.ensure_loaded?(Policy.Action) do
+      Policy.Action.web_fetch(url, opts)
+    else
+      %{
+        resource_type: :web_fetch,
+        host: uri.host || "",
+        scheme: uri.scheme || "https",
+        path: uri.path || "/",
+        query: uri.query,
+        user_id: opts[:user_id]
+      }
+    end
+  end
+
+  defp build_web_fetch_context(opts) do
+    %{
+      user_id: opts[:user_id],
+      workspace_id: opts[:workspace_id],
+      integration: opts[:integration],
+      requester: opts[:requester]
+    }
+  end
+
+  defp policy_resolution_enabled?(context, policy_rules) do
+    is_list(policy_rules) or
+      valid_policy_scope_id?(context[:user_id]) or
+      valid_policy_scope_id?(context[:workspace_id])
+  end
+
+  defp maybe_put_opt(opts, _key, nil), do: opts
+  defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp valid_policy_scope_id?(value) when is_binary(value), do: String.trim(value) != ""
+  defp valid_policy_scope_id?(_value), do: false
+
+  defp policy_block_message(%PolicyRule{} = rule) do
+    rule.reason || "Action blocked by workspace policy."
+  end
+
+  defp policy_block_message(%{message: message}) when is_binary(message), do: message
+  defp policy_block_message(%{reason: reason}) when is_binary(reason), do: reason
+  defp policy_block_message(%{}), do: "Action blocked by workspace policy."
 
   defp header(headers, name) do
     case headers[String.downcase(name)] do

@@ -602,6 +602,264 @@
     },
   }
 
+  function reducedMotionPreferred() {
+    try {
+      return window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    } catch (_error) {
+      return false
+    }
+  }
+
+  Hooks.MarketingNav = {
+    mounted() {
+      this.raf = null
+      this.handleScroll = () => {
+        if (this.raf) return
+
+        this.raf = window.requestAnimationFrame(() => {
+          this.raf = null
+          this.el.classList.toggle("is-scrolled", window.scrollY > 18)
+        })
+      }
+
+      this.handleScroll()
+      window.addEventListener("scroll", this.handleScroll, { passive: true })
+    },
+
+    destroyed() {
+      if (this.raf) window.cancelAnimationFrame(this.raf)
+      window.removeEventListener("scroll", this.handleScroll)
+    },
+  }
+
+  Hooks.MarketingReveal = {
+    mounted() {
+      this.targets = Array.from(this.el.querySelectorAll("[data-reveal]"))
+
+      if (this.targets.length === 0) return
+      if (reducedMotionPreferred() || typeof IntersectionObserver !== "function") {
+        this.targets.forEach((target) => target.classList.add("is-visible"))
+        return
+      }
+
+      this.observer = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return
+            entry.target.classList.add("is-visible")
+            this.observer.unobserve(entry.target)
+          })
+        },
+        { rootMargin: "0px 0px -10% 0px", threshold: 0.12 },
+      )
+
+      this.targets.forEach((target, index) => {
+        target.style.setProperty("--sa-reveal-delay", `${index * 45}ms`)
+        this.observer.observe(target)
+      })
+    },
+
+    destroyed() {
+      if (this.observer) this.observer.disconnect()
+    },
+  }
+
+  Hooks.MarketingParallax = {
+    mounted() {
+      this.layers = Array.from(this.el.querySelectorAll("[data-parallax-layer]"))
+      this.raf = null
+
+      if (this.layers.length === 0 || reducedMotionPreferred()) return
+
+      this.handleScroll = () => {
+        if (this.raf) return
+
+        this.raf = window.requestAnimationFrame(() => {
+          this.raf = null
+          const rect = this.el.getBoundingClientRect()
+          const progress = (window.innerHeight - rect.top) / (window.innerHeight + rect.height)
+          const clamped = Math.max(-0.25, Math.min(1.25, progress))
+
+          this.layers.forEach((layer) => {
+            const speed = Number(layer.dataset.parallaxSpeed || "0")
+            const y = (clamped - 0.5) * 120 * speed
+            layer.style.transform = `translate3d(0, ${y}px, 0)`
+          })
+        })
+      }
+
+      this.handleScroll()
+      window.addEventListener("scroll", this.handleScroll, { passive: true })
+      window.addEventListener("resize", this.handleScroll)
+    },
+
+    destroyed() {
+      if (this.raf) window.cancelAnimationFrame(this.raf)
+      window.removeEventListener("scroll", this.handleScroll)
+      window.removeEventListener("resize", this.handleScroll)
+    },
+  }
+
+  Hooks.MarketingExampleScene = {
+    mounted() {
+      this.steps = Array.from(this.el.querySelectorAll("[data-example-step]"))
+      this.jumps = Array.from(this.el.querySelectorAll("[data-example-jump]"))
+      this.handlers = []
+      this.activeIndex = null
+
+      if (this.steps.length === 0) return
+
+      this.pushIndex = (index, options = {}) => {
+        const { scroll = false } = options
+        const nextIndex = Math.max(0, Math.min(this.steps.length - 1, index))
+
+        if (this.activeIndex !== nextIndex) {
+          this.activeIndex = nextIndex
+          this.pushEvent("set_example_index", { index: nextIndex })
+        }
+
+        if (scroll) {
+          const step = this.steps[nextIndex]
+          if (step) {
+            step.scrollIntoView({
+              behavior: reducedMotionPreferred() ? "auto" : "smooth",
+              block: "start",
+            })
+          }
+        }
+      }
+
+      this.jumps.forEach((jump) => {
+        const index = Number(jump.dataset.exampleIndex)
+        const clickHandler = () => this.pushIndex(index, { scroll: true })
+        const keyHandler = (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return
+          event.preventDefault()
+          this.pushIndex(index, { scroll: true })
+        }
+
+        jump.addEventListener("click", clickHandler)
+        jump.addEventListener("keydown", keyHandler)
+        this.handlers.push({ element: jump, clickHandler, keyHandler })
+      })
+
+      this.observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries
+            .filter((entry) => entry.isIntersecting)
+            .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+
+          if (!visible) return
+
+          this.pushIndex(Number(visible.target.dataset.exampleIndex))
+        },
+        {
+          root: null,
+          rootMargin: "-42% 0px -42% 0px",
+          threshold: [0.15, 0.3, 0.5, 0.7, 1],
+        },
+      )
+
+      this.steps.forEach((step) => this.observer.observe(step))
+
+      if (reducedMotionPreferred()) {
+        this.pushIndex(0)
+        return
+      }
+
+      this.pushIndex(0)
+    },
+
+    destroyed() {
+      if (this.observer) this.observer.disconnect()
+
+      this.handlers.forEach(({ element, clickHandler, keyHandler }) => {
+        element.removeEventListener("click", clickHandler)
+        element.removeEventListener("keydown", keyHandler)
+      })
+    },
+  }
+
+  Hooks.MarketingStickyScene = {
+    mounted() {
+      this.steps = Array.from(this.el.querySelectorAll("[data-story-step]"))
+      this.panels = Array.from(this.el.querySelectorAll("[data-story-panel]"))
+      this.progressFill = this.el.querySelector("[data-story-progress-fill]")
+      this.interactionHandlers = []
+
+      if (this.steps.length === 0 || this.panels.length === 0) return
+
+      this.activate = (index, options = {}) => {
+        const { scroll = false } = options
+        const ratio = this.steps.length > 1 ? index / (this.steps.length - 1) : 1
+
+        this.steps.forEach((step) => {
+          step.classList.toggle("is-active", Number(step.dataset.storyIndex) === index)
+        })
+
+        this.panels.forEach((panel) => {
+          panel.classList.toggle("is-active", Number(panel.dataset.storyIndex) === index)
+        })
+
+        if (this.progressFill) {
+          this.progressFill.style.transform = `scaleX(${ratio})`
+        }
+
+        if (scroll) {
+          const step = this.steps[index]
+          if (step) {
+            step.scrollIntoView({
+              behavior: reducedMotionPreferred() ? "auto" : "smooth",
+              block: "center",
+            })
+          }
+        }
+      }
+
+      this.steps.forEach((step) => {
+        const index = Number(step.dataset.storyIndex)
+        const clickHandler = () => this.activate(index, { scroll: true })
+        const keyHandler = (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return
+          event.preventDefault()
+          this.activate(index, { scroll: true })
+        }
+
+        step.addEventListener("click", clickHandler)
+        step.addEventListener("keydown", keyHandler)
+        this.interactionHandlers.push({ step, clickHandler, keyHandler })
+      })
+
+      if (reducedMotionPreferred() || typeof IntersectionObserver !== "function") {
+        this.activate(0)
+        return
+      }
+
+      this.observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries
+            .filter((entry) => entry.isIntersecting)
+            .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+
+          if (!visible) return
+          this.activate(Number(visible.target.dataset.storyIndex))
+        },
+        { threshold: [0.35, 0.55, 0.75], rootMargin: "-10% 0px -20% 0px" },
+      )
+
+      this.steps.forEach((step) => this.observer.observe(step))
+      this.activate(0)
+    },
+
+    destroyed() {
+      if (this.observer) this.observer.disconnect()
+      this.interactionHandlers.forEach(({ step, clickHandler, keyHandler }) => {
+        step.removeEventListener("click", clickHandler)
+        step.removeEventListener("keydown", keyHandler)
+      })
+    },
+  }
+
   // OAuth popup handler: opens the OAuth flow in a popup window,
   // polls for popup close, and reloads the page to refresh connection status.
   window.addEventListener("phx:open_oauth_popup", (event) => {

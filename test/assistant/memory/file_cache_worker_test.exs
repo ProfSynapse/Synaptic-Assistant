@@ -7,6 +7,7 @@ defmodule Assistant.Memory.FileCacheWorkerTest do
 
   describe "module compilation" do
     test "FileCacheWorker is loaded and exports Oban.Worker callbacks" do
+      assert Code.ensure_loaded?(FileCacheWorker)
       assert function_exported?(FileCacheWorker, :perform, 1)
       assert function_exported?(FileCacheWorker, :new, 1)
     end

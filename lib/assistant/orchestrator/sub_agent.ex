@@ -84,6 +84,8 @@ defmodule Assistant.Orchestrator.SubAgent do
   alias Assistant.SkillPermissions
   alias Assistant.SpendingLimits
   alias Assistant.Skills.{Context, Executor, Registry, Result}
+  alias Assistant.Policy
+  alias Assistant.Policy.Action
 
   require Logger
 
@@ -923,73 +925,53 @@ defmodule Assistant.Orchestrator.SubAgent do
            "Call request_help to ask the orchestrator for access to this skill."}
 
       true ->
-        # Sentinel security gate
-        proposed_action = %{
-          skill_name: skill_name,
-          arguments: skill_args,
-          agent_id: dispatch_params.agent_id
-        }
+        resolve_skill_policy(skill_name, skill_args, dispatch_params, engine_state)
+        |> case do
+          {:deny, metadata} ->
+            reason = metadata[:reason] || "Action blocked by workspace policy."
+            {tc, reason}
 
-        original_request = engine_state[:original_request]
-
-        case Sentinel.check(
-               original_request,
-               dispatch_params.mission,
-               proposed_action,
-               user_id: engine_state[:user_id]
-             ) do
-          {:ok, :approved} ->
-            # Look up skill definition early so the approval gate can inspect it
-            case Registry.lookup(skill_name) do
-              {:ok, %{requires_approval: true} = skill_def} ->
-                approval_index =
-                  if batch_info.count > 1, do: {batch_info.seq, batch_info.count}, else: nil
-
-                case ApprovalGate.check(skill_name, skill_args,
-                       skill_def: skill_def,
-                       dispatch_params: dispatch_params,
-                       genserver_pid: genserver_pid,
-                       approval_index: approval_index
-                     ) do
-                  :approved ->
-                    execute_skill_call(
-                      tc,
-                      skill_name,
-                      skill_args,
-                      skill_def,
-                      dispatch_params,
-                      engine_state
-                    )
-
-                  {:denied, message} ->
-                    {tc, message}
-
-                  {:timeout, message} ->
-                    {tc, message}
-                end
-
-              {:ok, skill_def} ->
-                execute_skill_call(
+          {:allow, metadata} ->
+            with_sentinel(
+              tc,
+              skill_name,
+              skill_args,
+              dispatch_params,
+              engine_state,
+              fn ->
+                execute_skill_with_policy_allow(
                   tc,
                   skill_name,
                   skill_args,
-                  skill_def,
                   dispatch_params,
-                  engine_state
+                  engine_state,
+                  batch_info,
+                  genserver_pid,
+                  metadata
                 )
-
-              {:error, :not_found} ->
-                {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
-            end
-
-          {:ok, {:rejected, reason}} ->
-            Logger.warning("Sentinel rejected sub-agent action",
-              agent_id: dispatch_params.agent_id,
-              skill: skill_name,
-              reason: reason
+              end
             )
 
-            {tc, "Action rejected by security gate: #{reason}"}
+          {:ask, metadata} ->
+            with_sentinel(
+              tc,
+              skill_name,
+              skill_args,
+              dispatch_params,
+              engine_state,
+              fn ->
+                execute_skill_with_policy_ask(
+                  tc,
+                  skill_name,
+                  skill_args,
+                  dispatch_params,
+                  engine_state,
+                  batch_info,
+                  genserver_pid,
+                  metadata
+                )
+              end
+            )
         end
     end
   end
@@ -1028,6 +1010,70 @@ defmodule Assistant.Orchestrator.SubAgent do
            "Try a different approach or report this in your result."}
     end
   end
+
+  defp resolve_skill_policy(skill_name, skill_args, dispatch_params, engine_state) do
+    action = build_skill_action(skill_name, skill_args, dispatch_params)
+    context = build_policy_context(dispatch_params, engine_state)
+    policy_rules = dispatch_params[:policy_rules]
+
+    if policy_resolution_enabled?(context, policy_rules) and Code.ensure_loaded?(Policy) and
+         function_exported?(Policy, :resolve_action, 2) do
+      resolve_opts =
+        [scope: context]
+        |> maybe_put_policy_rules(policy_rules)
+
+      case Policy.resolve_action(action, resolve_opts) do
+        {:ok, effect, rule} when effect in [:allow, :ask, :deny] ->
+          {effect, policy_metadata(rule, false)}
+
+        _ ->
+          {:allow, policy_metadata(nil, true)}
+      end
+    else
+      {:allow, policy_metadata(nil, true)}
+    end
+  end
+
+  defp policy_metadata(rule, fallback) do
+    %{
+      rule: rule,
+      reason: if(rule, do: rule.reason, else: nil),
+      fallback_requires_approval: fallback
+    }
+  end
+
+  defp build_skill_action(skill_name, skill_args, dispatch_params) do
+    opts = [
+      action_class: :external_write,
+      user_id: dispatch_params.user_id,
+      integration_group: dispatch_params[:integration_group]
+    ]
+
+    Action.skill(skill_name, opts)
+    |> Map.put(:arguments, skill_args)
+  end
+
+  defp build_policy_context(dispatch_params, engine_state) do
+    %{
+      user_id: dispatch_params.user_id,
+      workspace_id: dispatch_params[:workspace_id],
+      channel: engine_state[:channel],
+      original_request: engine_state[:original_request],
+      mission: dispatch_params.mission
+    }
+  end
+
+  defp policy_resolution_enabled?(context, policy_rules) do
+    is_list(policy_rules) or
+      valid_policy_scope_id?(context[:user_id]) or
+      valid_policy_scope_id?(context[:workspace_id])
+  end
+
+  defp maybe_put_policy_rules(opts, nil), do: opts
+  defp maybe_put_policy_rules(opts, policy_rules), do: Keyword.put(opts, :rules, policy_rules)
+
+  defp valid_policy_scope_id?(value) when is_binary(value), do: String.trim(value) != ""
+  defp valid_policy_scope_id?(_value), do: false
 
   # Check if a skill requires Google OAuth and whether the user has a token.
   # Returns :ok if no auth needed or token is present, {:needs_auth, url}
@@ -1119,6 +1165,119 @@ defmodule Assistant.Orchestrator.SubAgent do
 
       handler_module ->
         Executor.execute(handler_module, flags, context, timeout: @default_timeout_ms)
+    end
+  end
+
+  defp execute_skill_with_policy_allow(
+         tc,
+         skill_name,
+         skill_args,
+         dispatch_params,
+         engine_state,
+         batch_info,
+         genserver_pid,
+         metadata
+       ) do
+    case Registry.lookup(skill_name) do
+      {:ok, skill_def} ->
+        if metadata[:fallback_requires_approval] && skill_def.requires_approval do
+          execute_skill_with_policy_ask(
+            tc,
+            skill_name,
+            skill_args,
+            dispatch_params,
+            engine_state,
+            batch_info,
+            genserver_pid,
+            metadata
+          )
+        else
+          execute_skill_call(
+            tc,
+            skill_name,
+            skill_args,
+            skill_def,
+            dispatch_params,
+            engine_state
+          )
+        end
+
+      {:error, :not_found} ->
+        {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
+    end
+  end
+
+  defp execute_skill_with_policy_ask(
+         tc,
+         skill_name,
+         skill_args,
+         dispatch_params,
+         engine_state,
+         batch_info,
+         genserver_pid,
+         metadata
+       ) do
+    case Registry.lookup(skill_name) do
+      {:ok, skill_def} ->
+        approval_index =
+          if batch_info.count > 1, do: {batch_info.seq, batch_info.count}, else: nil
+
+        case ApprovalGate.check(skill_name, skill_args,
+               skill_def: skill_def,
+               dispatch_params: dispatch_params,
+               genserver_pid: genserver_pid,
+               approval_index: approval_index,
+               policy_effect: :ask,
+               policy_meta: metadata
+             ) do
+          :approved ->
+            execute_skill_call(
+              tc,
+              skill_name,
+              skill_args,
+              skill_def,
+              dispatch_params,
+              engine_state
+            )
+
+          {:denied, message} ->
+            {tc, message}
+
+          {:timeout, message} ->
+            {tc, message}
+        end
+
+      {:error, :not_found} ->
+        {tc, "Error: Skill \"#{skill_name}\" not found in registry."}
+    end
+  end
+
+  defp with_sentinel(tc, skill_name, skill_args, dispatch_params, engine_state, fun) do
+    proposed_action = %{
+      skill_name: skill_name,
+      arguments: skill_args,
+      agent_id: dispatch_params.agent_id
+    }
+
+    original_request = engine_state[:original_request]
+
+    case Sentinel.check(
+           original_request,
+           dispatch_params.mission,
+           proposed_action,
+           user_id: engine_state[:user_id]
+         ) do
+      {:ok, :approved} ->
+        fun.()
+
+      {:ok, {:rejected, reason}} ->
+        Logger.warning("Sentinel rejected sub-agent action",
+          agent_id: dispatch_params.agent_id,
+          skill: skill_name,
+          reason: reason
+        )
+
+        {tc, "Action rejected by security gate: #{reason}"}
     end
   end
 

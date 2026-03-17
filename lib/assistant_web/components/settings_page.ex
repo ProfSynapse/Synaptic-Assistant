@@ -15,6 +15,7 @@ defmodule AssistantWeb.Components.SettingsPage do
   import AssistantWeb.Components.SettingsPage.Memory, only: [memory_section: 1]
   import AssistantWeb.Components.SettingsPage.Profile, only: [profile_section: 1]
   import AssistantWeb.Components.SettingsPage.Workflows, only: [workflows_section: 1]
+  import AssistantWeb.Components.SettingsPage.Approvals, only: [approvals_section: 1]
 
   def settings_page(assigns) do
     is_admin =
@@ -97,6 +98,7 @@ defmodule AssistantWeb.Components.SettingsPage do
           {assigns}
         />
         <.help_section :if={@section == "help" and !@current_app} {assigns} />
+        <.approvals_section :if={@section == "approvals" and !@current_app} {assigns} />
       </section>
     </div>
     """

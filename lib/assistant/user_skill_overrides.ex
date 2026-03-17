@@ -40,6 +40,9 @@ defmodule Assistant.UserSkillOverrides do
       not is_binary(user_id) or user_id == "" ->
         default
 
+      match?(:error, Ecto.UUID.cast(user_id)) ->
+        default
+
       true ->
         case Repo.get_by(UserSkillOverride, user_id: user_id, skill_name: skill_name) do
           %UserSkillOverride{enabled: enabled} -> enabled

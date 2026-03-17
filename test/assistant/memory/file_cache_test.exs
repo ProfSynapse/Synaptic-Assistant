@@ -7,6 +7,7 @@ defmodule Assistant.Memory.FileCacheTest do
 
   describe "module compilation" do
     test "FileCache module is loaded and exports cache_file/4" do
+      assert Code.ensure_loaded?(FileCache)
       assert function_exported?(FileCache, :cache_file, 4)
     end
   end

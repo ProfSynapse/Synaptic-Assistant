@@ -29,6 +29,8 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
   setup do
     Process.flag(:trap_exit, true)
 
+    original_config = capture_config_loader_state()
+
     # --- Infrastructure (idempotent, unlinked) ---
     Application.ensure_all_started(:phoenix_pubsub)
     start_unlinked(Phoenix.PubSub.Supervisor, name: Assistant.PubSub)
@@ -74,14 +76,23 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
     # Bypass intercepts OpenRouter HTTP calls
     bypass = Bypass.open()
     original_base_url = Application.get_env(:assistant, :openrouter_base_url)
+    original_api_key = Application.get_env(:assistant, :openrouter_api_key)
     Application.put_env(:assistant, :openrouter_base_url, "http://localhost:#{bypass.port}")
     Application.put_env(:assistant, :openrouter_api_key, "test-bypass-key")
 
     on_exit(fn ->
+      restore_config_loader_state(original_config)
+
       if original_base_url do
         Application.put_env(:assistant, :openrouter_base_url, original_base_url)
       else
         Application.delete_env(:assistant, :openrouter_base_url)
+      end
+
+      if original_api_key do
+        Application.put_env(:assistant, :openrouter_api_key, original_api_key)
+      else
+        Application.delete_env(:assistant, :openrouter_api_key)
       end
     end)
 
@@ -149,6 +160,40 @@ defmodule Assistant.Orchestrator.ApprovalGateSubAgentTest do
       start_unlinked(Assistant.Config.Loader, path: path)
     end
   end
+
+  defp capture_config_loader_state do
+    if :ets.whereis(:assistant_config) == :undefined do
+      :missing
+    else
+      %{
+        models: lookup_config_entry(:models),
+        defaults: lookup_config_entry(:defaults)
+      }
+    end
+  end
+
+  defp restore_config_loader_state(:missing), do: :ok
+
+  defp restore_config_loader_state(%{} = snapshot) do
+    if :ets.whereis(:assistant_config) != :undefined do
+      restore_config_entry(:models, snapshot.models)
+      restore_config_entry(:defaults, snapshot.defaults)
+    end
+
+    :ok
+  end
+
+  defp lookup_config_entry(key) do
+    case :ets.lookup(:assistant_config, key) do
+      [{^key, value}] -> {:present, value}
+      [] -> :absent
+    end
+  end
+
+  defp restore_config_entry(key, {:present, value}),
+    do: :ets.insert(:assistant_config, {key, value})
+
+  defp restore_config_entry(key, :absent), do: :ets.delete(:assistant_config, key)
 
   defp test_models do
     [

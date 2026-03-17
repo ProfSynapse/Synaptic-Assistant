@@ -8,6 +8,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       {"analytics", "Analytics"},
       {"memory", "Memory"},
       {"apps", "Apps & Connections"},
+      {"approvals", "Approvals"},
       {"workflows", "Workflows"},
       {"help", "Help"},
       {"admin", "Admin"}
@@ -75,6 +76,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "analytics" -> "hero-chart-bar"
       "memory" -> "hero-circle-stack"
       "apps" -> "hero-puzzle-piece"
+      "approvals" -> "hero-shield-check"
       "workflows" -> "hero-command-line"
       "admin" -> "hero-cog-6-tooth"
       "help" -> "hero-question-mark-circle"
@@ -89,6 +91,7 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
       "analytics" -> "Analytics"
       "memory" -> "Memory"
       "apps" -> "Apps & Connections"
+      "approvals" -> "Approvals"
       "workflows" -> "Workflows"
       "admin" -> "Admin"
       "help" -> "Help & Setup"
