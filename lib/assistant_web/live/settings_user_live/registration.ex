@@ -3,6 +3,7 @@ defmodule AssistantWeb.SettingsUserLive.Registration do
 
   alias Assistant.Accounts
   alias Assistant.Accounts.SettingsUser
+  alias Assistant.Deployment
   alias Phoenix.LiveView.JS
 
   @logo_url "https://picoshare-production-7223.up.railway.app/-emRBGyJeG9"
@@ -31,6 +32,16 @@ defmodule AssistantWeb.SettingsUserLive.Registration do
 
         <div class="sa-auth-divider">
           <span>or sign up with email</span>
+        </div>
+
+        <div :if={Assistant.Mailer.local_preview?()} class="sa-auth-alert">
+          <.icon name="hero-information-circle" class="size-6 shrink-0" />
+          <div>
+            <p>Local mail adapter is active.</p>
+            <p>
+              View delivered emails in <.link href="/dev/mailbox">/dev/mailbox</.link>.
+            </p>
+          </div>
         </div>
 
         <.form for={@form} id="registration_form" phx-submit="save" phx-change="validate">
@@ -73,9 +84,14 @@ defmodule AssistantWeb.SettingsUserLive.Registration do
   end
 
   def mount(_params, _session, socket) do
-    changeset = Accounts.change_settings_user_email(%SettingsUser{}, %{}, validate_unique: false)
+    if Deployment.self_hosted?() do
+      {:ok, push_navigate(socket, to: redirect_path_for_self_hosted())}
+    else
+      changeset =
+        Accounts.change_settings_user_email(%SettingsUser{}, %{}, validate_unique: false)
 
-    {:ok, assign_form(socket, changeset), temporary_assigns: [form: nil]}
+      {:ok, assign_form(socket, changeset), temporary_assigns: [form: nil]}
+    end
   end
 
   @impl true
@@ -113,5 +129,9 @@ defmodule AssistantWeb.SettingsUserLive.Registration do
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     form = to_form(changeset, as: "settings_user")
     assign(socket, form: form)
+  end
+
+  defp redirect_path_for_self_hosted do
+    if Accounts.admin_bootstrap_available?(), do: ~p"/setup", else: ~p"/settings_users/log-in"
   end
 end

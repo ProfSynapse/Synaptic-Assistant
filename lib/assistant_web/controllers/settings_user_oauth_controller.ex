@@ -2,6 +2,7 @@ defmodule AssistantWeb.SettingsUserOAuthController do
   use AssistantWeb, :controller
 
   alias Assistant.Accounts
+  alias Assistant.Deployment
   alias Assistant.IntegrationSettings
   alias AssistantWeb.SettingsUserAuth
 
@@ -14,63 +15,81 @@ defmodule AssistantWeb.SettingsUserOAuthController do
   @state_session_key :settings_user_google_oauth_state
 
   def request(conn, _params) do
-    with {:ok, client_id} <- fetch_client_id() do
-      state = random_state()
-
-      params =
-        URI.encode_query(%{
-          "client_id" => client_id,
-          "redirect_uri" => callback_url(),
-          "response_type" => "code",
-          "scope" => @google_scopes,
-          "state" => state,
-          "access_type" => "online",
-          "prompt" => "select_account"
-        })
-
+    if Deployment.self_hosted?() do
       conn
-      |> put_session(@state_session_key, state)
-      |> redirect(external: "#{@google_authorize_url}?#{params}")
+      |> put_flash(:error, "Google sign in is disabled in self-hosted deployments.")
+      |> redirect(to: ~p"/settings_users/log-in")
     else
-      {:error, :missing_google_oauth_client_id} ->
+      with {:ok, client_id} <- fetch_client_id() do
+        state = random_state()
+
+        params =
+          URI.encode_query(%{
+            "client_id" => client_id,
+            "redirect_uri" => callback_url(),
+            "response_type" => "code",
+            "scope" => @google_scopes,
+            "state" => state,
+            "access_type" => "online",
+            "prompt" => "select_account"
+          })
+
         conn
-        |> put_flash(:error, "Google sign in is not configured yet.")
-        |> redirect(to: ~p"/settings_users/log-in")
+        |> put_session(@state_session_key, state)
+        |> redirect(external: "#{@google_authorize_url}?#{params}")
+      else
+        {:error, :missing_google_oauth_client_id} ->
+          conn
+          |> put_flash(:error, "Google sign in is not configured yet.")
+          |> redirect(to: ~p"/settings_users/log-in")
+      end
     end
   end
 
   def callback(conn, %{"code" => code, "state" => state}) do
-    with :ok <- verify_state(conn, state),
-         {:ok, token_data} <- exchange_code(code, callback_url()),
-         {:ok, claims} <- fetch_claims(token_data),
-         {:ok, settings_user} <- Accounts.get_or_register_settings_user_from_google(claims) do
-      conn
-      |> delete_session(@state_session_key)
-      |> put_flash(:info, "Signed in with Google.")
-      |> SettingsUserAuth.log_in_settings_user(settings_user, %{"remember_me" => "true"})
+    if Deployment.self_hosted?() do
+      google_sign_in_disabled(conn)
     else
-      {:error, reason} ->
-        Logger.warning("Google sign in failed", reason: inspect(reason))
-
+      with :ok <- verify_state(conn, state),
+           {:ok, token_data} <- exchange_code(code, callback_url()),
+           {:ok, claims} <- fetch_claims(token_data),
+           {:ok, settings_user} <- Accounts.get_or_register_settings_user_from_google(claims) do
         conn
         |> delete_session(@state_session_key)
-        |> put_flash(:error, "Google sign in failed. Please try again.")
-        |> redirect(to: ~p"/settings_users/log-in")
+        |> put_flash(:info, "Signed in with Google.")
+        |> SettingsUserAuth.log_in_settings_user(settings_user, %{"remember_me" => "true"})
+      else
+        {:error, reason} ->
+          Logger.warning("Google sign in failed", reason: inspect(reason))
+
+          conn
+          |> delete_session(@state_session_key)
+          |> put_flash(:error, "Google sign in failed. Please try again.")
+          |> redirect(to: ~p"/settings_users/log-in")
+      end
     end
   end
 
   def callback(conn, %{"error" => _provider_error}) do
-    conn
-    |> delete_session(@state_session_key)
-    |> put_flash(:error, "Google sign in was cancelled.")
-    |> redirect(to: ~p"/settings_users/log-in")
+    if Deployment.self_hosted?() do
+      google_sign_in_disabled(conn)
+    else
+      conn
+      |> delete_session(@state_session_key)
+      |> put_flash(:error, "Google sign in was cancelled.")
+      |> redirect(to: ~p"/settings_users/log-in")
+    end
   end
 
   def callback(conn, _params) do
-    conn
-    |> delete_session(@state_session_key)
-    |> put_flash(:error, "Google sign in failed. Please try again.")
-    |> redirect(to: ~p"/settings_users/log-in")
+    if Deployment.self_hosted?() do
+      google_sign_in_disabled(conn)
+    else
+      conn
+      |> delete_session(@state_session_key)
+      |> put_flash(:error, "Google sign in failed. Please try again.")
+      |> redirect(to: ~p"/settings_users/log-in")
+    end
   end
 
   defp fetch_client_id do
@@ -178,5 +197,12 @@ defmodule AssistantWeb.SettingsUserOAuthController do
   defp random_state do
     :crypto.strong_rand_bytes(32)
     |> Base.url_encode64(padding: false)
+  end
+
+  defp google_sign_in_disabled(conn) do
+    conn
+    |> delete_session(@state_session_key)
+    |> put_flash(:error, "Google sign in is disabled in self-hosted deployments.")
+    |> redirect(to: ~p"/settings_users/log-in")
   end
 end

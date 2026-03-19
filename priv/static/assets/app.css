@@ -1172,14 +1172,50 @@
   .\[-292277022656\:292277026595\] {
     -292277022656: 292277026595;
   }
+  .\[erl_parse\:normalise\(F\)\] {
+    erl_parse: normalise(F);
+  }
+  .\[erl_prettypr\:format\(F\)\] {
+    erl_prettypr: format(F);
+  }
+  .\[erl_syntax\:atom\(undefined\)\] {
+    erl_syntax: atom(undefined);
+  }
+  .\[erl_syntax\:list_comp_template\(FunF\)\] {
+    erl_syntax: list comp template(FunF);
+  }
+  .\[erl_syntax\:string\(\"undefined\"\)\] {
+    erl_syntax: string("undefined");
+  }
+  .\[erl_syntax\:syntaxTree\(\)\] {
+    erl_syntax: syntaxTree();
+  }
+  .\[hackney_url\:make_url\/3\] {
+    hackney_url: make url/3;
+  }
   .\[icon\:copy\] {
     icon: copy;
   }
   .\[icon\:edit\] {
     icon: edit;
   }
+  .\[lists\:reverse\(Acc\)\] {
+    lists: reverse(Acc);
+  }
+  .\[lists\:reverse\(Acc\)\|T0\] {
+    lists: reverse(Acc)|T0;
+  }
+  .\[lists\:reverse\(Cs\)\,BinPart\] {
+    lists: reverse(Cs),BinPart;
+  }
   .\[scheme\:\/\/\] {
     scheme: //;
+  }
+  .\[unicode\:characters_to_binary\(\[Bin\|Used\]\)\|Acc\] {
+    unicode: characters to binary([Bin|Used])|Acc;
+  }
+  .\[unicode\:chardata\(\)\] {
+    unicode: chardata();
   }
   .\[v\:��z\2 �\&k�\] {
     v: ��z�&k�;

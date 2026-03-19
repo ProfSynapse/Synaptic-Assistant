@@ -1,5 +1,5 @@
 defmodule AssistantWeb.SettingsUserLive.RegistrationTest do
-  use AssistantWeb.ConnCase, async: true
+  use AssistantWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
   import Assistant.AccountsFixtures
@@ -7,6 +7,16 @@ defmodule AssistantWeb.SettingsUserLive.RegistrationTest do
   # An admin must exist in the DB or post-registration redirects land on /setup
   setup do
     admin_settings_user_fixture()
+    :ok
+  end
+
+  setup do
+    previous = Application.get_env(:assistant, :deployment_mode, :cloud)
+
+    on_exit(fn ->
+      Application.put_env(:assistant, :deployment_mode, previous)
+    end)
+
     :ok
   end
 
@@ -26,6 +36,17 @@ defmodule AssistantWeb.SettingsUserLive.RegistrationTest do
         |> follow_redirect(conn, ~p"/workspace")
 
       assert {:ok, _conn} = result
+    end
+
+    test "redirects to login page in self-hosted mode", %{conn: conn} do
+      Application.put_env(:assistant, :deployment_mode, :self_hosted)
+
+      result =
+        live(conn, ~p"/settings_users/register")
+        |> follow_redirect(conn, ~p"/settings_users/log-in")
+
+      assert {:ok, _lv, html} = result
+      assert html =~ "Sign In"
     end
 
     test "renders errors for invalid data", %{conn: conn} do

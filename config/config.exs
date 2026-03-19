@@ -41,6 +41,8 @@ config :phoenix, :json_library, Jason
 # Mailer
 config :assistant, Assistant.Mailer, adapter: Swoosh.Adapters.Local
 config :swoosh, :api_client, false
+config :assistant, :mail_from_name, "Synaptic Assistant"
+config :assistant, :mail_from_address, "contact@example.com"
 
 # Suppress Tesla deprecation warnings from Google API libraries
 config :tesla, disable_deprecated_builder_warning: true

@@ -203,6 +203,26 @@ if meter_event_name = System.get_env("STRIPE_STORAGE_METER_EVENT_NAME") do
   config :assistant, :stripe_storage_meter_event_name, meter_event_name
 end
 
+# Email delivery
+if api_key = System.get_env("RESEND_API_KEY") do
+  from_address =
+    System.get_env("MAIL_FROM_ADDRESS") ||
+      raise """
+      environment variable MAIL_FROM_ADDRESS is missing.
+      Set it to a verified sender like no-reply@synapticlabs.ai
+      """
+
+  config :assistant, Assistant.Mailer,
+    adapter: Resend.Swoosh.Adapter,
+    api_key: api_key
+
+  config :assistant, :mail_from_address, from_address
+end
+
+if from_name = System.get_env("MAIL_FROM_NAME") do
+  config :assistant, :mail_from_name, from_name
+end
+
 # Cloak encryption key for Ecto field encryption.
 # Required in production — OAuth tokens are encrypted at rest via Cloak AES-GCM.
 # In dev/test, omitting this env var means the Vault starts with no ciphers

@@ -62,6 +62,7 @@ defmodule Assistant.MixProject do
        compile: false,
        sparse: "optimized"},
       {:swoosh, "~> 1.17"},
+      {:resend, "~> 0.4.5"},
       {:bandit, "~> 1.0"},
       {:jason, "~> 1.4"},
       {:dns_cluster, "~> 0.1"},

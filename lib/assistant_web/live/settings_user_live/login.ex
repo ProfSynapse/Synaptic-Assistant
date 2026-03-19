@@ -2,6 +2,7 @@ defmodule AssistantWeb.SettingsUserLive.Login do
   use AssistantWeb, :live_view
 
   alias Assistant.Accounts
+  alias Assistant.Deployment
   alias Phoenix.LiveView.JS
 
   @logo_url "https://picoshare-production-7223.up.railway.app/-emRBGyJeG9"
@@ -51,20 +52,30 @@ defmodule AssistantWeb.SettingsUserLive.Login do
           </.button>
         </.form>
 
-        <div class="sa-auth-divider">
-          <span>or</span>
+        <div :if={!Deployment.self_hosted?()}>
+          <div class="sa-auth-divider">
+            <span>or</span>
+          </div>
+
+          <.link href={~p"/settings_users/auth/google"} class="sa-btn secondary sa-auth-google-btn w-full">
+            <img src="/images/apps/google.svg" alt="" class="sa-auth-social-icon" />
+            Sign in with Google
+          </.link>
         </div>
 
-        <.link href={~p"/settings_users/auth/google"} class="sa-btn secondary sa-auth-google-btn w-full">
-          <img src="/images/apps/google.svg" alt="" class="sa-auth-social-icon" />
-          Sign in with Google
-        </.link>
-
         <div class="sa-auth-secondary-links">
-          <.link navigate={~p"/settings_users/magic-link"} class="sa-auth-inline-link">
+          <.link
+            :if={!Deployment.self_hosted?()}
+            navigate={~p"/settings_users/magic-link"}
+            class="sa-auth-inline-link"
+          >
             Send Magic Link
           </.link>
-          <.link navigate={~p"/settings_users/register"} class="sa-auth-inline-link">
+          <.link
+            :if={!Deployment.self_hosted?()}
+            navigate={~p"/settings_users/register"}
+            class="sa-auth-inline-link"
+          >
             Create Account
           </.link>
         </div>
@@ -108,7 +119,11 @@ defmodule AssistantWeb.SettingsUserLive.Login do
           <.link navigate={~p"/settings_users/log-in"} class="sa-auth-inline-link">
             Back to password login
           </.link>
-          <.link navigate={~p"/settings_users/register"} class="sa-auth-inline-link">
+          <.link
+            :if={!Deployment.self_hosted?()}
+            navigate={~p"/settings_users/register"}
+            class="sa-auth-inline-link"
+          >
             Create Account
           </.link>
         </div>
@@ -119,16 +134,25 @@ defmodule AssistantWeb.SettingsUserLive.Login do
 
   @impl true
   def mount(_params, _session, socket) do
-    if Accounts.admin_bootstrap_available?() do
-      {:ok, push_navigate(socket, to: ~p"/setup")}
-    else
-      email =
-        Phoenix.Flash.get(socket.assigns.flash, :email) ||
-          get_in(socket.assigns, [:current_scope, Access.key(:settings_user), Access.key(:email)])
+    cond do
+      Accounts.admin_bootstrap_available?() ->
+        {:ok, push_navigate(socket, to: ~p"/setup")}
 
-      form = to_form(%{"email" => email}, as: "settings_user")
+      Deployment.self_hosted?() and socket.assigns.live_action == :magic ->
+        {:ok, push_navigate(socket, to: ~p"/settings_users/log-in")}
 
-      {:ok, assign(socket, form: form, trigger_submit: false)}
+      true ->
+        email =
+          Phoenix.Flash.get(socket.assigns.flash, :email) ||
+            get_in(socket.assigns, [
+              :current_scope,
+              Access.key(:settings_user),
+              Access.key(:email)
+            ])
+
+        form = to_form(%{"email" => email}, as: "settings_user")
+
+        {:ok, assign(socket, form: form, trigger_submit: false)}
     end
   end
 
@@ -155,6 +179,6 @@ defmodule AssistantWeb.SettingsUserLive.Login do
   end
 
   defp local_mail_adapter? do
-    Application.get_env(:assistant, Assistant.Mailer)[:adapter] == Swoosh.Adapters.Local
+    Assistant.Mailer.local_preview?()
   end
 end

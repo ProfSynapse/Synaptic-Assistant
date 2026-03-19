@@ -9,7 +9,7 @@ defmodule Assistant.Accounts.SettingsUserNotifier do
     email =
       new()
       |> to(recipient)
-      |> from({"Assistant", "contact@example.com"})
+      |> from(Mailer.from_sender())
       |> subject(subject)
       |> text_body(body)
 
