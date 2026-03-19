@@ -43,7 +43,7 @@ defmodule Assistant.ExecutionLogs.Content do
             row_id: nil
           }
           
-          case Encryption.encrypt(plaintext, context) do
+          case Encryption.encrypt(context, plaintext) do
             {:ok, ciphertext_payload} ->
               Map.put(attrs, :"#{field}_encrypted", ciphertext_payload)
             _ -> attrs
@@ -88,7 +88,7 @@ defmodule Assistant.ExecutionLogs.Content do
         row_id: log.id
       }
       
-      case Encryption.decrypt(enc_val, context) do
+      case Encryption.decrypt(context, enc_val) do
         {:ok, plaintext} ->
           final_val = if is_json, do: parse_json(plaintext, Map.get(log, plain_field)), else: plaintext
           Map.put(log, plain_field, final_val)

@@ -401,7 +401,7 @@ Auth recommendation:
 
 **Stage G: Rotation and cleanup**
 - [x] 24. Add operator tooling for Vault key rotate + wrapped DEK rewrap.
-- [ ] 25. Add integrity checks and repair jobs.
+- [x] 25. Add integrity checks and repair jobs.
 - [ ] 26. `F0` Only after parity and rollback drills: stop plaintext writes, switch hosted reads to encrypted-only, and remove plaintext search artifacts.
 
 ---

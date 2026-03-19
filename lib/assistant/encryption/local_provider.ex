@@ -92,9 +92,21 @@ defmodule Assistant.Encryption.LocalProvider do
   end
 
   defp decode_field(payload, key) do
+    string_key = to_string(key)
+    atom_key = try do String.to_existing_atom(string_key) rescue _ -> key end
+    
     case payload do
-      %{^key => value} when is_binary(value) ->
-        Base.decode64(value)
+      %{^atom_key => value} when is_binary(value) ->
+        case Base.decode64(value) do
+          {:ok, decoded} -> {:ok, decoded}
+          :error -> {:error, {:invalid_base64, key}}
+        end
+
+      %{^string_key => value} when is_binary(value) ->
+        case Base.decode64(value) do
+          {:ok, decoded} -> {:ok, decoded}
+          :error -> {:error, {:invalid_base64, key}}
+        end
 
       _ ->
         {:error, {:missing_field, key}}
