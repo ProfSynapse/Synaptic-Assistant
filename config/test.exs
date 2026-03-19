@@ -12,6 +12,8 @@ System.put_env("ENV_VAR", "test")
 System.put_env("ELEVENLABS_VOICE_ID", "test-voice-id")
 
 # Test database — use SQL sandbox for async tests
+config :assistant, blind_index_key: "test_blind_index_key_needs_to_be_at_least_32_bytes_long_just_in_case"
+
 config :assistant, Assistant.Repo,
   username: "postgres",
   password: "postgres",
@@ -69,3 +71,4 @@ config :phoenix, sort_verified_routes_query_params: true
 
 # Disable embeddings in test
 config :assistant, :embeddings, enabled: false
+config :assistant, blind_index_key: "test_blind_index_key_needs_to_be_at_least_32_bytes_long_just_in_case"
