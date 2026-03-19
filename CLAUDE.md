@@ -6,9 +6,9 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume 1f60ca2c-ec6c-46f9-b767-4d7ae646ce5f`
-- Team: `pact-1f60ca2c`
-- Started: 2026-03-17 22:20:20 UTC
+- Resume: `claude --resume 7924bf74-0590-4ef3-858f-c84d6cf15d78`
+- Team: `pact-7924bf74`
+- Started: 2026-03-19 13:16:00 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context
@@ -17,6 +17,16 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 ## Working Memory
 <!-- Auto-managed by pact-memory skill. Last 3 memories shown. Full history searchable via pact-memory skill. -->
 
+### 2026-03-19 13:27
+**Context**: Session orchestration retrospective for the Arcana RAG backbone feature (PR #51). The full workflow ran: worktree setup (ruvector) → CODE phase (single backend-coder) → peer-review (4 parallel reviewers: architect, test-engineer, backend-coder, database-engineer) → 3 fix cycles (reviewer-to-fixer reuse for backend + test; fresh spawn for DB specialist) → rebase onto main → merge. This was the first embeddings/ML domain work in the Synaptic-Assistant project, introducing pgvector, Nx.Serving, spreading activation models, and RRF unified search.
+**Goal**: Orchestration calibration data for Learning II — inform future variety scoring and specialist selection for embeddings/ML/vector-search domains.
+**Decisions**: Use reviewer-to-fixer reuse pattern instead of spawning fresh coders for fixes, Scored variety as High (~11/16) for embeddings/activation/RRF feature
+**Lessons**: Variety scored ~11/16 (High) for this embeddings/activation/RRF feature. Actual complexity matched — 6 blocking findings across 4 reviewers, 3 fix cycles needed, plus a rebase. High variety score was well-calibrated for this domain., Reviewer-to-fixer reuse worked excellently: reviewer-backend and reviewer-test were reassigned as fixers for the issues they found, leveraging their existing context. This eliminated handoff overhead and produced faster, more accurate fixes., reviewer-db (database-engineer) delivered a creative HNSW session-GUC solution for pgvector index tuning rather than over-engineered partitioning — domain specialists can surprise with pragmatic solutions when given autonomy., Embedding/ML code reviews consistently surface two recurring anti-patterns: (1) schema-validation/write-path mismatches (changeset constraints not aligned with model ranges) and (2) batching anti-patterns (sequential calls to batch-oriented APIs like Nx.Serving). Future reviews in this domain should have reviewers explicitly check for these., Four parallel reviewers (architect, test, backend, database) provided comprehensive coverage for a new subsystem PR. The breadth caught issues that a single reviewer would likely miss — zero-coverage modules, schema mismatches, OTP batching patterns, and migration safety all came from different specialists., All specialist selections were well-matched for this feature. No specialist struggled with their assigned scope or needed replacement.
+**Reasoning chains**: High variety (11/16) chosen because: novel domain (embeddings never done before) + many concerns (5 new module types) + ambiguous patterns (Nx.Serving, activation math) + high data-integrity risk → validated by 6 blocking findings and 3 fix cycles, Reviewer-to-fixer reuse chosen because: reviewers already loaded full file context + understood the bug root cause → eliminated handoff → faster fixes with higher accuracy
+**Memory ID**: 9ceb674ea325e6799927739362ecba5b
+
+### 2026-03-19 12:51
+**Summary**: PR #51 peer review for the Arcana RAG backbone — a major new subsystem adding vector embeddings (pgvector), semantic chu...
 ## Pinned Architecture
 
 ### Shared Helpers Pattern (Phase 4)
@@ -149,6 +159,17 @@ Comprehensive user management with dual-layer enforcement and per-user spending 
 - **Unified UI**: Add User mirrors Edit User with all controls (scopes, connectors, API keys, model defaults, spending limits). Scope-gated sidebar navigation.
 - **4-layer skill permissions** (updated): `workspace_enabled AND global_enabled AND user_enabled AND connector_enabled AND scope_allowed`.
 
+### Arcana RAG Backbone Architecture (PR #51)
+Vector embeddings, semantic chunking, spreading activation, and unified RRF search. Key patterns:
+- **Embedding API**: `lib/assistant/embeddings.ex` — `generate/1` + `generate_batch/1` (concurrent `Task.async` calls so Nx.Serving can batch them; sequential Enum.map defeats batching). Hard limit: `@max_input_chars 2048` (~512 tokens) with `truncate/1` before every serving call.
+- **Serving**: `lib/assistant/embeddings/serving.ex` — async GenServer with `handle_continue` model loading; exponential backoff retry (2s→32s, 5 attempts); app starts immediately in degraded mode if download fails
+- **SemanticChunker**: `@max_tokens 450` safety margin below 512; `enforce_size_limits` splits oversized chunks; hard char-split fallback for sentence-boundary-free dense prose
+- **Spreading activation**: `MemoryActivation` boosts retrieved neighbors via cosine similarity; `DecayCoolingWorker` (Oban cron) cools toward 1.0 exponentially. `decay_factor` range: 0–1.5 (schema validates to 1.5, NOT 1.0 — activation model needs headroom above 1.0)
+- **Folder activation**: `DocumentActivation.spread/2` takes `user_id` — MUST pass user_id to prevent cross-user contamination. Updates `document_folders.activation_boost` (LEAST-capped via Ecto `update:` clause in `from` macro — NOT in `Repo.update_all` set: list)
+- **Unified search**: `UnifiedSearch.search/2` — `Task.async` parallel FTS + semantic, merged via RRF (k=60, score = Σ 1/(k+rank)); wrapped in try/rescue to isolate path failures
+- **HNSW multi-tenant**: Session GUCs set via `after_connect` callback in `Repo.init/2` — `hnsw.iterative_scan` (pgvector 0.8+) or elevated `ef_search` (older) to improve per-user ANN recall
+- **access_count**: `touch_accessed_at` in `search.ex` MUST `inc: [access_count: 1]` — activation_strength scoring weight (15%) is always 0 without it
+
 ### Phase Status
 - Phase 1-4 complete and merged (PR #9). Branch: `main`.
 - Phase 4 covers: Gmail (5 skills), Calendar (3 skills), Workflow scheduler (4 skills + WorkflowWorker + QuantumLoader).
@@ -162,3 +183,4 @@ Comprehensive user management with dual-layer enforcement and per-user spending 
 - PR #45: Admin-only model management, credential-based LLM routing, fallback model cascade, 3-layer skill permissions, per-user connector states.
 - PR #46: Admin-first connectors (integration catalog, app card toggles, sidebar cleanup), per-role fallback models, 4-layer skill permissions with workspace runtime enforcement.
 - PR #50: User management, access scope enforcement, spending limits — dual-layer enforcement, per-user budgets, unified Add/Edit UI, 172 feature tests.
+- PR #51: Arcana RAG backbone — vector embeddings (pgvector/Nx.Serving), SemanticChunker, spreading activation (memory + folder), unified RRF search, 2792 tests.
