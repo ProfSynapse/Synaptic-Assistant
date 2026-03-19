@@ -52,6 +52,8 @@ defmodule Assistant.Schemas.SyncedFile do
     field :drive_id, :string
     field :file_size, :integer
     field :content, Assistant.Encrypted.Binary
+    field :parent_folder_id, :string
+    field :parent_folder_name, :string
 
     belongs_to :user, Assistant.Schemas.User
     has_many :sync_history, Assistant.Schemas.SyncHistoryEntry
@@ -78,7 +80,9 @@ defmodule Assistant.Schemas.SyncedFile do
     :sync_error,
     :drive_id,
     :file_size,
-    :content
+    :content,
+    :parent_folder_id,
+    :parent_folder_name
   ]
 
   def changeset(synced_file, attrs) do

@@ -32,6 +32,9 @@ defmodule Assistant.Schemas.MemoryEntry do
     belongs_to :user, Assistant.Schemas.User
     belongs_to :source_conversation, Assistant.Schemas.Conversation
 
+    field :embedding, Pgvector.Ecto.Vector
+    field :access_count, :integer, default: 0
+
     has_many :entity_mentions, Assistant.Schemas.MemoryEntityMention
 
     timestamps(type: :utc_datetime_usec)
@@ -50,7 +53,9 @@ defmodule Assistant.Schemas.MemoryEntry do
     :user_id,
     :source_conversation_id,
     :segment_start_message_id,
-    :segment_end_message_id
+    :segment_end_message_id,
+    :embedding,
+    :access_count
   ]
 
   def changeset(memory_entry, attrs) do
