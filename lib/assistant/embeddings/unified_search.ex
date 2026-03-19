@@ -129,7 +129,7 @@ defmodule Assistant.Embeddings.UnifiedSearch do
     limit = Keyword.get(opts, :limit, 10)
 
     # Delegate to existing Memory.Search FTS
-    case Assistant.Memory.Search.search(user_id, query, limit: limit) do
+    case Assistant.Memory.Search.search_memories(user_id, query: query, limit: limit) do
       {:ok, results} ->
         results
         |> Enum.with_index()

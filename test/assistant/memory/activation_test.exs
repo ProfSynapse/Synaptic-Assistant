@@ -88,7 +88,7 @@ defmodule Assistant.Memory.ActivationTest do
 
       # Set neighbor's decay_factor above 1.0 via raw SQL (bypasses changeset validation)
       Repo.query!("UPDATE memory_entries SET decay_factor = 1.48 WHERE id = $1", [
-        Ecto.UUID.dump!(neighbor.id) |> elem(1)
+        Ecto.UUID.dump!(neighbor.id)
       ])
 
       # Spread activation — boost formula: LEAST(1.5, 1.48 + 0.05 * sim)

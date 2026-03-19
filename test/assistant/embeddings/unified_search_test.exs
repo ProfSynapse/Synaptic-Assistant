@@ -124,13 +124,13 @@ defmodule Assistant.Embeddings.UnifiedSearchTest do
       assert results == []
     end
 
-    test "returns empty list when no folders exist and embeddings enabled" do
-      Application.put_env(:assistant, :embeddings, enabled: true)
+    test "returns empty list when no folders have embeddings" do
       user = user_fixture()
-      # Embeddings.generate will fail (no Nx.Serving running), returning {:error, _}
-      # which triggers the [] fallback
+      # With embeddings disabled, generate returns {:error, :embeddings_disabled}
+      # which triggers the [] fallback in search_folders
+      Application.put_env(:assistant, :embeddings, enabled: false)
       results = UnifiedSearch.search_folders(user.id, "test query")
-      assert is_list(results)
+      assert results == []
     end
   end
 end

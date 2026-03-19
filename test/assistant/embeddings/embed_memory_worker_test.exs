@@ -1,5 +1,5 @@
 defmodule Assistant.Embeddings.EmbedMemoryWorkerTest do
-  use Assistant.DataCase, async: true
+  use Assistant.DataCase, async: false
 
   import Assistant.MemoryFixtures
   alias Assistant.Embeddings.EmbedMemoryWorker
@@ -54,23 +54,22 @@ defmodule Assistant.Embeddings.EmbedMemoryWorkerTest do
       assert {:cancel, _reason} = EmbedMemoryWorker.perform(job)
     end
 
-    test "returns cancel for entry with no content" do
+    test "returns cancel for entry with empty content" do
       original = Application.get_env(:assistant, :embeddings, [])
       Application.put_env(:assistant, :embeddings, enabled: true)
       on_exit(fn -> Application.put_env(:assistant, :embeddings, original) end)
 
       user = user_fixture()
 
-      # Insert directly to bypass content validation
+      # Insert directly with empty content to bypass changeset content validation
       {:ok, entry} =
         %Assistant.Schemas.MemoryEntry{}
         |> Ecto.Changeset.change(%{user_id: user.id, content: ""})
         |> Repo.insert()
 
       job = %Oban.Job{args: %{"memory_entry_id" => entry.id}}
-      # Will either cancel (empty content) or error (Nx.Serving not running)
-      result = EmbedMemoryWorker.perform(job)
-      assert result == :ok or match?({:cancel, _}, result) or match?({:error, _}, result)
+      # Empty content (byte_size 0) fails the guard, falls to cancel
+      assert {:cancel, _reason} = EmbedMemoryWorker.perform(job)
     end
   end
 end
