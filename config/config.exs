@@ -59,7 +59,8 @@ config :assistant, Oban,
     sync: 5,
     google_drive_sync: 5,
     maintenance: 3,
-    space_context: 5
+    space_context: 5,
+    embeddings: 5
   ],
   plugins: [
     {Oban.Plugins.Cron,
@@ -97,6 +98,13 @@ config :tailwind,
     ),
     cd: Path.expand("..", __DIR__)
   ]
+
+# Embeddings + Arcana RAG
+config :assistant, :embeddings, enabled: true
+
+config :arcana,
+  repo: Assistant.Repo,
+  embedder: {Assistant.Embeddings.ArcanaEmbedder, []}
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

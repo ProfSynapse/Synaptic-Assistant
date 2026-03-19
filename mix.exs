@@ -97,6 +97,10 @@ defmodule Assistant.MixProject do
       {:yaml_elixir, "~> 2.11"},
       {:file_system, "~> 1.0"},
 
+      # Embeddings & RAG
+      {:arcana, "~> 1.3"},
+      {:exla, "~> 0.9"},
+
       # Dev & test tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

@@ -12,7 +12,7 @@ defmodule Assistant.Application do
   @impl true
   def start(_type, _args) do
     children =
-      [
+      Enum.reject([
         # Config loader (must be first — other children depend on ETS config)
         Assistant.Config.Loader,
 
@@ -24,6 +24,10 @@ defmodule Assistant.Application do
 
         # Infrastructure
         Assistant.Repo,
+
+        # Embedding model serving (only when embeddings enabled)
+        if(Application.get_env(:assistant, :embeddings, []) |> Keyword.get(:enabled, false),
+          do: Assistant.Embeddings.Serving),
         {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Assistant.PubSub},
 
@@ -65,7 +69,7 @@ defmodule Assistant.Application do
 
         # Web endpoint (last — depends on everything above)
         AssistantWeb.Endpoint
-      ]
+      ], &is_nil/1)
 
     opts = [strategy: :one_for_one, name: Assistant.Supervisor]
     Supervisor.start_link(children, opts)
