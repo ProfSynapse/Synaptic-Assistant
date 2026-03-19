@@ -1,67 +1,89 @@
-# Phase 3: Local Embeddings + Semantic Search
+# Phase 3: Local Embeddings + Semantic Search (via Arcana)
 
 ## Overview
 
-Add local embedding generation (Bumblebee + gte-small, 384D) and vector search (pgvector) to both memory entries and synced document chunks. Fully in-process, no external APIs, no GPU required.
+Add local embedding generation and semantic search using **Arcana** as the RAG backbone, with a **custom semantic chunker** that detects topic boundaries via embedding similarity drops. Fully in-process, no external APIs, no GPU required.
 
 ## Architecture
 
 ```
-                    ┌─────────────────────┐
-                    │   Bumblebee Serving  │
-                    │  (gte-small, 384D)   │
-                    │  Nx.Serving in sup   │
-                    └──────────┬──────────┘
-                               │
-              ┌────────────────┼────────────────┐
-              ▼                ▼                 ▼
-     Memory.Store      FileSyncWorker      Skills (search)
-     .create_entry()   .sync_file()        .execute()
-              │                │                 │
-              ▼                ▼                 ▼
-     ┌────────────┐   ┌──────────────┐   ┌──────────────┐
-     │ memory_    │   │ document_    │   │ Hybrid       │
-     │ entries    │   │ chunks       │   │ Search       │
-     │ +embedding │   │ (new table)  │   │ FTS+Vec+Imp  │
-     └────────────┘   └──────────────┘   └──────────────┘
-              │                │                 │
-              └────────────────┼─────────────────┘
-                               ▼
-                     PostgreSQL + pgvector
+                    ┌─────────────────────────┐
+                    │  Shared Nx.Serving       │
+                    │  (gte-small, 384D)       │
+                    │  Used by Arcana +        │
+                    │  SemanticChunker +       │
+                    │  Memory embeddings       │
+                    └────────────┬────────────┘
+                                 │
+           ┌─────────────────────┼─────────────────────┐
+           ▼                     ▼                      ▼
+    Memory.Store          FileSyncWorker          Skills (search)
+    .create_entry()       .sync_file()            .execute()
+           │                     │                      │
+           ▼                     ▼                      ▼
+    ┌────────────┐    ┌──────────────────┐    ┌──────────────────┐
+    │ memory_    │    │ Arcana Pipeline   │    │ Unified Search   │
+    │ entries    │    │ SemanticChunker → │    │ memory hybrid +  │
+    │ +embedding │    │ Embed → pgvector  │    │ arcana hybrid    │
+    └────────────┘    └──────────────────┘    └──────────────────┘
+           │                     │                      │
+           └─────────────────────┼──────────────────────┘
+                                 ▼
+                       PostgreSQL + pgvector
 ```
 
-## Dependencies (new Hex packages)
+## Dependencies
 
 ```elixir
 # mix.exs
-{:bumblebee, "~> 0.6"},
-{:exla, "~> 0.9"},          # XLA backend for Nx (CPU)
-{:pgvector, "~> 0.3"},       # Ecto pgvector types + distance functions
-{:text_chunker, "~> 0.3"},   # Recursive text chunking
+{:arcana, "~> 1.3"},         # RAG backbone (bundles text_chunker, pgvector, bumblebee)
+{:exla, "~> 0.9"},           # XLA backend for Nx (CPU)
 ```
 
-No new external services. Everything runs in-process.
+Arcana pulls in `bumblebee`, `pgvector`, `text_chunker`, `nx` as transitive deps. We add only 2 direct deps.
 
-## Implementation Phases
+## Key Design Decisions
+
+### 1. Arcana for documents, custom for memories
+
+- **Documents** → Arcana's full pipeline (ingest → chunk → embed → store → search)
+- **Memory entries** → Direct embedding on the existing `memory_entries` table (memories are already atomic units, no chunking needed)
+- **Unified search** → Fan out to both, merge via RRF
+
+Why: Arcana's `arcana_collections/documents/chunks` schema is perfect for documents. But memory entries are small, already have FTS + importance scoring, and live in their own table — shoehorning them into Arcana's schema would lose the importance/decay/access metadata.
+
+### 2. Semantic chunking via custom `Arcana.Chunker`
+
+Instead of fixed-size windows, we implement **embedding-based boundary detection**:
+
+```
+Document → split into sentences → batch-embed all sentences →
+compare adjacent embeddings → similarity drops = topic boundaries →
+group sentences between boundaries into chunks
+```
+
+This produces variable-size chunks that align with actual topic shifts. The `Arcana.Chunker` behaviour makes this a clean plug-in.
+
+### 3. Single shared Nx.Serving
+
+Both Arcana and our memory embedding code share one `Nx.Serving` for gte-small. We write a thin `Arcana.Embedder` adapter that delegates to our serving, avoiding double-loading the 70MB model.
 
 ---
 
-### Phase 3a: Foundation (pgvector + Bumblebee serving)
+## Implementation Phases
 
-**Goal**: Get the embedding infrastructure running without changing any existing behavior.
+### Phase 3a: Foundation
 
-#### 1. Enable pgvector extension
+**Goal**: Deps, pgvector, Bumblebee serving, Arcana installed. No behavior change.
 
-Migration:
-```elixir
-defmodule Assistant.Repo.Migrations.EnablePgvector do
-  use Ecto.Migration
-  def up, do: execute("CREATE EXTENSION IF NOT EXISTS vector")
-  def down, do: execute("DROP EXTENSION IF EXISTS vector")
-end
-```
+#### 1. Add deps + run `mix arcana.install`
 
-#### 2. Add Bumblebee serving to supervision tree
+This generates:
+- pgvector extension migration
+- `arcana_collections`, `arcana_documents`, `arcana_chunks` tables
+- Postgrex type registration for `Pgvector.Extensions.Vector`
+
+#### 2. Shared Bumblebee serving
 
 New module: `lib/assistant/embeddings/serving.ex`
 
@@ -79,18 +101,18 @@ defmodule Assistant.Embeddings.Serving do
         output_pool: :mean_pooling,
         output_attribute: :hidden_state,
         embedding_processor: :l2_norm,
-        compile: [batch_size: 8, sequence_length: 512],
+        compile: [batch_size: 32, sequence_length: 512],
         defn_options: [compiler: EXLA]
       )
 
-    {Nx.Serving, serving: serving, name: Assistant.Embeddings, batch_size: 8, batch_timeout: 50}
+    {Nx.Serving, serving: serving, name: Assistant.Embeddings, batch_size: 32, batch_timeout: 100}
   end
 end
 ```
 
-Add to application.ex supervision tree (after Repo, before Oban).
+Add to application.ex supervision tree (after Repo, before Oban). Batch size 32 matches Arcana's default.
 
-#### 3. Embedding helper module
+#### 3. Embeddings public API
 
 New module: `lib/assistant/embeddings.ex`
 
@@ -98,11 +120,10 @@ New module: `lib/assistant/embeddings.ex`
 defmodule Assistant.Embeddings do
   @moduledoc false
 
-  @model "gte-small"
   @dimensions 384
 
   def generate(text) when is_binary(text) and byte_size(text) > 0 do
-    %{embedding: tensor} = Nx.Serving.run(__MODULE__, text)
+    %{embedding: tensor} = Nx.Serving.batched_run(__MODULE__, text)
     {:ok, Nx.to_flat_list(tensor)}
   end
 
@@ -113,30 +134,198 @@ defmodule Assistant.Embeddings do
     {:ok, Enum.map(results, fn %{embedding: t} -> Nx.to_flat_list(t) end)}
   end
 
-  def model, do: @model
   def dimensions, do: @dimensions
 end
 ```
 
-#### 4. Config flag for gradual rollout
+#### 4. Arcana embedder adapter (shares our serving)
+
+New module: `lib/assistant/embeddings/arcana_embedder.ex`
 
 ```elixir
-# config/config.exs
-config :assistant, :embeddings,
-  enabled: true,
-  model: "gte-small",
-  dimensions: 384,
-  chunk_size: 1600,       # ~400 tokens
-  chunk_overlap: 200      # ~50 tokens
+defmodule Assistant.Embeddings.ArcanaEmbedder do
+  @moduledoc false
+  @behaviour Arcana.Embedder
+
+  @impl true
+  def embed(text, _opts) do
+    Assistant.Embeddings.generate(text)
+  end
+
+  @impl true
+  def dimensions(_opts), do: 384
+
+  @impl true
+  def embed_batch(texts, _opts) do
+    Assistant.Embeddings.generate_batch(texts)
+  end
+end
 ```
 
-Check `Application.get_env(:assistant, :embeddings)[:enabled]` before embedding operations. Allows disabling in test env or low-resource deploys.
+Config:
+```elixir
+config :arcana,
+  repo: Assistant.Repo,
+  embedder: {Assistant.Embeddings.ArcanaEmbedder, []}
+```
+
+#### 5. Config flag
+
+```elixir
+config :assistant, :embeddings, enabled: true
+config :assistant, :embeddings, enabled: false  # test.exs
+```
 
 ---
 
-### Phase 3b: Memory entry embeddings
+### Phase 3b: Semantic Chunker
 
-**Goal**: Embed memory entries on create, add vector search to Memory.Search.
+**Goal**: Implement embedding-based topic boundary detection as an `Arcana.Chunker`.
+
+#### The algorithm
+
+```
+Input: "The quick brown fox... Machine learning is a subset of AI..."
+
+Step 1: Split into sentences
+  → ["The quick brown fox...", "It jumped over...", "Machine learning is...", "Neural networks..."]
+
+Step 2: Batch-embed all sentences (one call, ~30ms for a page)
+  → [vec_0, vec_1, vec_2, vec_3]
+
+Step 3: Compute cosine similarity between adjacent pairs
+  → [cos(0,1)=0.92, cos(1,2)=0.31, cos(2,3)=0.89]
+
+Step 4: Detect boundaries where similarity < threshold (default 0.5)
+  → Boundary between sentence 1 and 2
+
+Step 5: Group sentences between boundaries into chunks
+  → Chunk 1: "The quick brown fox... It jumped over..."
+  → Chunk 2: "Machine learning is... Neural networks..."
+
+Step 6: If any chunk > 512 tokens, split at the next-lowest similarity point within it
+Step 7: If any chunk < min_size (50 tokens), merge with neighbor that has higher similarity
+```
+
+#### Implementation
+
+New module: `lib/assistant/embeddings/semantic_chunker.ex`
+
+```elixir
+defmodule Assistant.Embeddings.SemanticChunker do
+  @moduledoc false
+  @behaviour Arcana.Chunker
+
+  @similarity_threshold 0.5
+  @max_tokens 450           # leave headroom below gte-small's 512 limit
+  @min_tokens 50
+  @approx_chars_per_token 4
+
+  @impl true
+  def chunk(text, opts \\ []) do
+    threshold = Keyword.get(opts, :similarity_threshold, @similarity_threshold)
+
+    text
+    |> split_sentences()
+    |> embed_sentences()
+    |> compute_similarities()
+    |> detect_boundaries(threshold)
+    |> group_into_chunks()
+    |> enforce_size_limits()
+    |> add_metadata(text)
+  end
+
+  # Split on sentence boundaries (period + space, newlines, markdown headers)
+  defp split_sentences(text) do
+    # First split on markdown headers (these are always boundaries)
+    # Then split remaining blocks on sentence-ending punctuation
+    text
+    |> String.split(~r/(?=^#{1,6}\s)/m)
+    |> Enum.flat_map(&split_block_sentences/1)
+    |> Enum.reject(&(String.trim(&1) == ""))
+  end
+
+  defp split_block_sentences(block) do
+    # Split on sentence boundaries: ". ", "! ", "? ", or double newline
+    String.split(block, ~r/(?<=[.!?])\s+|\n\n+/)
+  end
+
+  defp embed_sentences(sentences) do
+    {:ok, embeddings} = Assistant.Embeddings.generate_batch(sentences)
+    Enum.zip(sentences, embeddings)
+  end
+
+  defp compute_similarities(sentence_embeddings) do
+    sentence_embeddings
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.map(fn [{_s1, e1}, {_s2, e2}] -> cosine_similarity(e1, e2) end)
+  end
+
+  defp cosine_similarity(a, b) do
+    # Vectors are already L2-normalized by gte-small, so dot product = cosine
+    Enum.zip_reduce(a, b, 0.0, fn x, y, acc -> acc + x * y end)
+  end
+
+  defp detect_boundaries(similarities, threshold) do
+    similarities
+    |> Enum.with_index()
+    |> Enum.filter(fn {sim, _idx} -> sim < threshold end)
+    |> Enum.map(fn {_sim, idx} -> idx + 1 end)  # boundary AFTER this index
+  end
+
+  defp group_into_chunks(sentences, boundaries) do
+    # Split sentence list at boundary indices
+    # Returns list of sentence groups
+  end
+
+  defp enforce_size_limits(chunks) do
+    # If chunk > @max_tokens chars, sub-split at lowest internal similarity
+    # If chunk < @min_tokens chars, merge with most-similar neighbor
+  end
+
+  defp add_metadata(chunks, original_text) do
+    # Add chunk_index, byte_start, byte_end, token_count estimate
+    chunks
+    |> Enum.with_index()
+    |> Enum.map(fn {text, idx} ->
+      %{
+        text: text,
+        chunk_index: idx,
+        token_count: div(byte_size(text), @approx_chars_per_token)
+      }
+    end)
+  end
+end
+```
+
+Config:
+```elixir
+config :arcana, chunker: {Assistant.Embeddings.SemanticChunker, similarity_threshold: 0.5}
+```
+
+#### Markdown-aware enhancement
+
+For documents that came from the sync pipeline (all markdown):
+1. **Preserve header context**: Each chunk gets a `header_path` metadata field (e.g., `"## Setup > ### Prerequisites"`)
+2. **Headers are always boundaries**: Never split a section mid-header
+3. **Header text prepended to chunk**: So the embedding captures section context
+
+```elixir
+# In metadata
+%{
+  text: "### Prerequisites\nYou need Elixir 1.17...",
+  chunk_index: 3,
+  token_count: 120,
+  header_path: "Setup > Prerequisites",  # breadcrumb trail
+  source_type: :markdown
+}
+```
+
+---
+
+### Phase 3c: Memory entry embeddings
+
+**Goal**: Embed memory entries directly (no chunking — they're already atomic). Add hybrid search.
 
 #### 1. Add embedding column to memory_entries
 
@@ -149,176 +338,112 @@ end
 create index(:memory_entries, [:embedding],
   using: "hnsw",
   options: "WITH (m = 16, ef_construction = 64)",
-  comment: "HNSW index for cosine similarity search",
   where: "embedding IS NOT NULL"
 )
 ```
 
-Partial index (WHERE NOT NULL) so existing entries without embeddings don't bloat the index.
+#### 2. Embed on memory creation (async)
 
-#### 2. Embed on memory creation
+New Oban worker: `lib/assistant/embeddings/embed_memory_worker.ex`
+- Queue: `:embeddings` (concurrency 3)
+- Reads entry content, calls `Embeddings.generate/1`, updates row
 
-In `Memory.Store.create_memory_entry/1` — after successful insert, generate embedding async via Oban job (don't block the caller):
+Hook into `Memory.Store.create_memory_entry/1` — after insert, enqueue job.
 
-New worker: `lib/assistant/embeddings/embed_memory_worker.ex`
-- Reads entry content
-- Calls `Embeddings.generate/1`
-- Updates `memory_entries.embedding` and `embedding_model`
-- Oban queue: `:embeddings` (new queue, concurrency 3)
+#### 3. Hybrid search on memories
 
-#### 3. Add vector search to Memory.Search
-
-New function: `search_by_similarity/3`
-```elixir
-def search_by_similarity(user_id, query_embedding, opts \\ []) do
-  limit = Keyword.get(opts, :limit, 10)
-
-  from(me in MemoryEntry,
-    where: me.user_id == ^user_id and not is_nil(me.embedding),
-    order_by: fragment("embedding <=> ?::vector", ^query_embedding),
-    limit: ^limit
-  )
-  |> Repo.all()
-  |> touch_accessed_at()
-  |> then(&{:ok, &1})
-end
-```
-
-#### 4. Hybrid search with Reciprocal Rank Fusion
-
-New function: `hybrid_search/3` — combines FTS + vector + importance:
+New function in `Memory.Search`:
 
 ```elixir
 def hybrid_search(user_id, query_text, opts \\ []) do
-  # 1. FTS results (existing search_memories/2)
-  # 2. Vector results (embed query_text, then search_by_similarity)
-  # 3. Merge via RRF: score = Σ 1/(k + rank_i), k=60
-  # 4. Boost by importance score
-  # 5. Return top N
-end
-```
-
-RRF is simple and parameter-free (k=60 is standard). No ML needed.
-
-#### 5. Backfill existing entries
-
-Oban cron job or one-time Mix task: `mix assistant.backfill_embeddings`
-- Queries entries WHERE embedding IS NULL, batch of 50
-- Generates embeddings, updates rows
-- Rate-limited to avoid overwhelming CPU on startup
-
----
-
-### Phase 3c: Document chunk embeddings
-
-**Goal**: Chunk synced documents, embed chunks, enable semantic file search.
-
-#### 1. New `document_chunks` table
-
-Migration:
-```elixir
-create table(:document_chunks, primary_key: false) do
-  add :id, :binary_id, primary_key: true
-  add :synced_file_id, references(:synced_files, type: :binary_id, on_delete: :delete_all), null: false
-  add :user_id, references(:users, type: :binary_id, on_delete: :delete_all), null: false
-  add :chunk_index, :integer, null: false
-  add :content, :text, null: false
-  add :byte_start, :integer
-  add :byte_end, :integer
-  add :embedding, :vector, size: 384
-  add :embedding_model, :string
-  add :search_text, :tsvector  # trigger-populated for FTS
-  add :metadata, :map, default: %{}
-  timestamps(type: :utc_datetime_usec)
-end
-
-create index(:document_chunks, [:synced_file_id])
-create index(:document_chunks, [:user_id])
-create unique_index(:document_chunks, [:synced_file_id, :chunk_index])
-create index(:document_chunks, [:embedding],
-  using: "hnsw",
-  options: "WITH (m = 16, ef_construction = 64)",
-  where: "embedding IS NOT NULL"
-)
-create index(:document_chunks, [:search_text], using: "gin",
-  where: "search_text IS NOT NULL")
-
-# Trigger to populate search_text from content
-execute """
-CREATE TRIGGER trg_document_chunks_search_text
-BEFORE INSERT OR UPDATE OF content ON document_chunks
-FOR EACH ROW EXECUTE FUNCTION
-  tsvector_update_trigger(search_text, 'pg_catalog.english', content)
-"""
-```
-
-#### 2. Chunking module
-
-New module: `lib/assistant/embeddings/chunker.ex`
-
-```elixir
-defmodule Assistant.Embeddings.Chunker do
-  @moduledoc false
-
-  @default_chunk_size 1600    # ~400 tokens for gte-small (512 max)
-  @default_overlap 200        # ~50 tokens
-
-  def chunk(text, opts \\ []) do
-    chunk_size = Keyword.get(opts, :chunk_size, @default_chunk_size)
-    overlap = Keyword.get(opts, :chunk_overlap, @default_overlap)
-
-    # Use text_chunker for format-aware splitting
-    TextChunker.split(text,
-      chunk_size: chunk_size,
-      chunk_overlap: overlap,
-      format: detect_format(text)
-    )
-  end
-
-  defp detect_format(text) do
-    if String.contains?(text, ["# ", "## ", "```", "- [ ]"]),
-      do: :markdown,
-      else: :plaintext
-  end
-end
-```
-
-#### 3. Hook into FileSyncWorker
-
-After successful file sync (content written to `synced_files`):
-1. Check if file is text-based (`md`, `csv`, `txt`, `json`)
-2. If so, enqueue `EmbedDocumentWorker` Oban job
-3. Worker reads content, chunks it, embeds each chunk, upserts `document_chunks`
-4. On re-sync: delete old chunks for that synced_file_id, re-chunk, re-embed
-
-New worker: `lib/assistant/embeddings/embed_document_worker.ex`
-- Oban queue: `:embeddings`
-- Reads synced_file.content (decrypts)
-- Skips binary formats (pdf images for now — text extraction deferred)
-- Chunks text via `Chunker.chunk/2`
-- Batch-embeds chunks via `Embeddings.generate_batch/1`
-- Bulk-inserts into `document_chunks`
-
-#### 4. Add document search
-
-New function in `Memory.Search` or new module `Assistant.Embeddings.Search`:
-
-```elixir
-def search_documents(user_id, query_text, opts \\ []) do
-  {:ok, query_embedding} = Embeddings.generate(query_text)
   limit = Keyword.get(opts, :limit, 10)
+  {:ok, query_embedding} = Embeddings.generate(query_text)
 
-  from(dc in DocumentChunk,
-    where: dc.user_id == ^user_id and not is_nil(dc.embedding),
-    order_by: fragment("embedding <=> ?::vector", ^query_embedding),
-    limit: ^limit,
-    preload: [:synced_file]
+  # Single SQL query: FTS score + vector score + importance, combined
+  from(me in MemoryEntry,
+    where: me.user_id == ^user_id,
+    select: %{
+      entry: me,
+      score: fragment("""
+        (CASE WHEN search_text @@ plainto_tsquery('english', ?) THEN
+          ts_rank(search_text, plainto_tsquery('english', ?)) ELSE 0 END) * 0.3
+        + (CASE WHEN embedding IS NOT NULL THEN
+          (1 - (embedding <=> ?::vector)) ELSE 0 END) * 0.5
+        + (importance / 10.0) * 0.2
+      """, ^query_text, ^query_text, ^query_embedding)
+    },
+    order_by: [desc: fragment("score")],
+    limit: ^limit
   )
   |> Repo.all()
 end
 ```
 
-#### 5. Unified search across memories + documents
+Weights: 50% semantic, 30% FTS, 20% importance. Tunable.
+
+#### 4. Backfill existing entries
+
+Mix task `mix assistant.backfill_embeddings`:
+- Batches of 32, queries WHERE embedding IS NULL
+- Generates + updates, logs progress
+
+---
+
+### Phase 3d: Document ingestion via Arcana
+
+**Goal**: Chunk synced documents with the semantic chunker, embed + store via Arcana.
+
+#### 1. Create a default Arcana collection
+
+On app startup or first use:
+```elixir
+Arcana.create_collection("user_documents", description: "Synced user documents")
+```
+
+#### 2. Hook into FileSyncWorker
+
+After successful file sync:
+1. Check if content is text-based (md, csv, txt, json — the sync pipeline already converts Google Docs/Sheets/Slides to these)
+2. Enqueue `EmbedDocumentWorker` Oban job
+3. Worker calls:
+
+```elixir
+Arcana.ingest(content,
+  collection: "user_documents",
+  source_id: synced_file.drive_file_id,
+  metadata: %{
+    user_id: synced_file.user_id,
+    file_name: synced_file.name,
+    mime_type: synced_file.mime_type,
+    drive_id: synced_file.drive_id
+  }
+)
+```
+
+4. On re-sync: delete old Arcana document by `source_id`, re-ingest
+
+#### 3. Document search via Arcana
+
+```elixir
+Arcana.search(query,
+  collection: "user_documents",
+  mode: :hybrid,
+  semantic_weight: 0.7,
+  fulltext_weight: 0.3,
+  limit: 10,
+  where: [metadata: %{user_id: user_id}]  # scope to user
+)
+```
+
+Returns chunks with text, similarity score, and document metadata (file name, path, etc.).
+
+---
+
+### Phase 3e: Unified search + skill wiring
+
+**Goal**: Combine memory and document search, wire into context builder and skills.
+
+#### 1. Unified search module
 
 New module: `lib/assistant/embeddings/unified_search.ex`
 
@@ -328,113 +453,131 @@ defmodule Assistant.Embeddings.UnifiedSearch do
 
   def search(user_id, query, opts \\ []) do
     limit = Keyword.get(opts, :limit, 10)
-    {:ok, query_embedding} = Embeddings.generate(query)
 
-    # Fan out to both sources in parallel
+    # Fan out in parallel
     memory_task = Task.async(fn ->
       Memory.Search.hybrid_search(user_id, query, limit: limit)
     end)
+
     doc_task = Task.async(fn ->
-      search_documents(user_id, query_embedding, limit: limit)
+      Arcana.search(query,
+        collection: "user_documents",
+        mode: :hybrid,
+        limit: limit,
+        where: [metadata: %{user_id: user_id}]
+      )
     end)
 
-    memories = Task.await(memory_task)
-    docs = Task.await(doc_task)
+    memories = Task.await(memory_task, 5_000)
+    docs = Task.await(doc_task, 5_000)
 
-    # Merge and RRF rank
-    merge_results(memories, docs, limit)
+    # Normalize scores to 0-1, interleave via RRF, return top N
+    merge_rrf(memories, docs, limit)
   end
 end
 ```
 
+#### 2. Context builder upgrade
+
+In `Memory.ContextBuilder`:
+- If embeddings enabled: call `UnifiedSearch.search/3` with the current user message
+- Inject top-K results as context (memories + relevant doc chunks with header breadcrumbs)
+- Fall back to existing FTS-only path if disabled
+
+#### 3. Skill updates
+
+**Skills.Files.Search** — add semantic mode:
+- Default behavior: query `Arcana.search` against `user_documents` collection
+- Returns file name, chunk excerpt, header path, similarity score
+
+**Skills.Memory.Search** — add semantic mode:
+- Use `hybrid_search` (combined FTS + vector + importance)
+- Display similarity score in results
+
 ---
 
-### Phase 3d: Wire into context builder + skills
+## Arcana's Agentic Pipeline (Future Enhancement)
 
-**Goal**: Make semantic search available to the orchestrator and file search skill.
+Arcana includes an `Agent` pipeline with steps we could wire in later:
 
-#### 1. Update Memory.ContextBuilder
+| Step | Value for us |
+|------|-------------|
+| `gate/2` | Skip retrieval for simple greetings/commands |
+| `rewrite/2` | Clean conversational queries into search queries |
+| `expand/2` | Add synonyms to improve recall |
+| `rerank/2` | LLM-based re-scoring of retrieved chunks |
+| `reason/2` | Multi-hop: search → read → search again |
 
-Replace or augment the FTS-based memory lookup with `hybrid_search/3`:
-- If embeddings enabled: use `hybrid_search` (FTS + vector + importance fusion)
-- If disabled: fall back to existing `search_memories/2` (FTS only)
-
-#### 2. Update Skills.Files.Search
-
-Add `--semantic` flag (or make it default) that queries `document_chunks` by vector similarity instead of just filename ILIKE:
-- `query` param → generate embedding → search document_chunks → return file info with relevant chunk excerpts
-
-#### 3. Update Skills.Memory.Search
-
-Add vector search option alongside existing FTS:
-- `--semantic` flag triggers `hybrid_search` instead of plain FTS
-- Return similarity score alongside results
-
-#### 4. Context-aware file injection
-
-In `Orchestrator.ContextFiles`, optionally use semantic search to pick the most relevant synced file chunks for the current conversation topic, rather than requiring explicit file references.
+These are optional enhancements. The core pipeline (chunk → embed → search) works without them.
 
 ---
 
 ## Testing Strategy
 
-- **Unit tests**: Embeddings module with mock Nx.Serving (avoid loading model in CI)
-- **Chunker tests**: Verify chunk sizes, overlap, byte ranges, format detection
-- **Integration tests**: End-to-end memory create → embed → search with Bypass/mock
-- **Migration tests**: Verify pgvector extension, HNSW index creation
+- **SemanticChunker tests**: Verify boundary detection with known topic-shift texts, edge cases (single sentence, very long section, empty input)
+- **ArcanaEmbedder tests**: Mock `Nx.Serving.batched_run/2`, verify delegation
+- **Memory hybrid search tests**: Mock embeddings, verify score weighting
+- **Arcana ingest/search tests**: Use test collection, verify end-to-end with mock embedder
 - **Config toggle**: All embedding tests skip when `embeddings.enabled == false`
 
-Test env config:
 ```elixir
-config :assistant, :embeddings, enabled: false  # Don't load model in tests
+# test.exs
+config :assistant, :embeddings, enabled: false
+config :arcana, embedder: {Assistant.Embeddings.MockEmbedder, dimensions: 384}
 ```
 
-For tests that need embeddings, use a tagged setup that starts a test serving or mocks `Nx.Serving.run/2`.
+---
 
-## Performance Considerations
+## Performance
 
-| Operation | Expected Latency | Notes |
-|-----------|-----------------|-------|
-| Single embedding (gte-small, CPU) | 10-30ms | After JIT warmup |
-| Batch of 8 embeddings | 30-80ms | Batched via Nx.Serving |
-| pgvector HNSW search (10K vectors) | <5ms | Well within budget |
-| pgvector HNSW search (100K vectors) | <15ms | Still fast |
-| Document chunk + embed (1 page) | ~100ms | 3-4 chunks × 30ms |
-| Full file re-chunk + embed | 200-500ms | Async via Oban, not blocking |
+| Operation | Latency | Notes |
+|-----------|---------|-------|
+| Sentence embedding batch (32) | ~50ms | One Nx.Serving call for chunker |
+| Semantic chunk a 10-page doc | ~200ms | ~200 sentences, 7 batches |
+| pgvector HNSW search (10K) | <5ms | Cosine distance |
+| Arcana hybrid search | ~20ms | Single CTE query (FTS + vector) |
+| Memory hybrid search | ~25ms | FTS + vector + importance |
+| Unified search (parallel) | ~30ms | Max of both, not sum |
 
-Memory overhead: gte-small model ~70MB resident. Acceptable for a Phoenix app.
+Model memory: ~70MB for gte-small. Single serving shared by all consumers.
+
+---
 
 ## Migration Path
 
-1. **Phase 3a** — Foundation: deps, pgvector extension, Bumblebee serving. No behavior change.
-2. **Phase 3b** — Memory embeddings: embed on create, hybrid search, backfill.
-3. **Phase 3c** — Document chunks: new table, chunk on sync, document search.
-4. **Phase 3d** — Wire in: context builder, file search skill, memory search skill.
+1. **3a** — Foundation: deps, pgvector, serving, Arcana install. Zero behavior change.
+2. **3b** — Semantic chunker: custom `Arcana.Chunker` with boundary detection.
+3. **3c** — Memory embeddings: column, async embed, hybrid search, backfill.
+4. **3d** — Document ingestion: Arcana pipeline, hook into file sync.
+5. **3e** — Unified search + skills: context builder, file search, memory search.
 
-Each phase is independently deployable and testable. Existing FTS continues working throughout — vector search is additive, not a replacement.
+Each phase independently deployable. FTS continues working throughout.
 
-## File Inventory (new/modified)
+---
+
+## File Inventory
 
 ### New files
-- `lib/assistant/embeddings.ex` — public API (generate, generate_batch, model, dimensions)
-- `lib/assistant/embeddings/serving.ex` — Bumblebee Nx.Serving child_spec
-- `lib/assistant/embeddings/chunker.ex` — text_chunker wrapper with format detection
-- `lib/assistant/embeddings/embed_memory_worker.ex` — Oban worker for memory embedding
-- `lib/assistant/embeddings/embed_document_worker.ex` — Oban worker for document chunking + embedding
-- `lib/assistant/embeddings/unified_search.ex` — cross-source RRF search
-- `lib/assistant/schemas/document_chunk.ex` — Ecto schema
-- 3 migrations (pgvector extension, memory_entries embedding column, document_chunks table)
-- Test files for each new module
+- `lib/assistant/embeddings.ex` — public API (generate, generate_batch)
+- `lib/assistant/embeddings/serving.ex` — shared Bumblebee Nx.Serving
+- `lib/assistant/embeddings/arcana_embedder.ex` — Arcana.Embedder adapter
+- `lib/assistant/embeddings/semantic_chunker.ex` — Arcana.Chunker with boundary detection
+- `lib/assistant/embeddings/embed_memory_worker.ex` — Oban worker for memories
+- `lib/assistant/embeddings/embed_document_worker.ex` — Oban worker for doc ingestion
+- `lib/assistant/embeddings/unified_search.ex` — cross-source search
+- Migration: enable pgvector + add embedding column to memory_entries
+- Arcana-generated migrations (collections, documents, chunks)
+- Test files for each module
 
 ### Modified files
-- `mix.exs` — add deps (bumblebee, exla, pgvector, text_chunker)
+- `mix.exs` — add `arcana`, `exla`
 - `lib/assistant/application.ex` — add Embeddings.Serving to supervision tree
-- `config/config.exs` — embeddings config
-- `config/test.exs` — disable embeddings in test
-- `lib/assistant/memory/search.ex` — add search_by_similarity, hybrid_search
-- `lib/assistant/memory/store.ex` — enqueue embed job after create_memory_entry
-- `lib/assistant/memory/context_builder.ex` — use hybrid_search when available
-- `lib/assistant/sync/workers/file_sync_worker.ex` — enqueue embed_document after sync
-- `lib/assistant/skills/files/search.ex` — add semantic search option
-- `lib/assistant/skills/memory/search.ex` — add semantic search option
+- `config/config.exs` — embeddings + arcana config
+- `config/test.exs` — disable embeddings, mock embedder
+- `lib/assistant/memory/search.ex` — add hybrid_search
+- `lib/assistant/memory/store.ex` — enqueue embed job after create
+- `lib/assistant/memory/context_builder.ex` — use unified search
+- `lib/assistant/sync/workers/file_sync_worker.ex` — enqueue doc ingestion
+- `lib/assistant/skills/files/search.ex` — semantic search mode
+- `lib/assistant/skills/memory/search.ex` — hybrid search mode
 - `lib/assistant/schemas/memory_entry.ex` — add :embedding field
