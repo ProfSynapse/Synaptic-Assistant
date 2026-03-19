@@ -2,6 +2,7 @@ defmodule Assistant.AccountsTest do
   use Assistant.DataCase
 
   alias Assistant.Accounts
+  alias Assistant.Billing
 
   import Assistant.AccountsFixtures
   alias Assistant.Accounts.{SettingsUser, SettingsUserToken}
@@ -424,8 +425,10 @@ defmodule Assistant.AccountsTest do
       assert settings_user.confirmed_at
       {encoded_token, _hashed_token} = generate_settings_user_magic_link_token(settings_user)
 
-      assert {:ok, {^settings_user, []}} =
+      assert {:ok, {logged_in_settings_user, []}} =
                Accounts.login_settings_user_by_magic_link(encoded_token)
+
+      assert logged_in_settings_user.id == settings_user.id
 
       # one time use only
       assert {:error, :not_found} = Accounts.login_settings_user_by_magic_link(encoded_token)
@@ -439,6 +442,35 @@ defmodule Assistant.AccountsTest do
       assert_raise RuntimeError, ~r/magic link log in is not allowed/, fn ->
         Accounts.login_settings_user_by_magic_link(encoded_token)
       end
+    end
+
+    test "provisions a free billing account after confirmation" do
+      settings_user = unconfirmed_settings_user_fixture()
+      {encoded_token, _hashed_token} = generate_settings_user_magic_link_token(settings_user)
+
+      assert {:ok, {updated_settings_user, _expired_tokens}} =
+               Accounts.login_settings_user_by_magic_link(encoded_token)
+
+      assert is_binary(updated_settings_user.billing_account_id)
+
+      assert Billing.free_storage_limit_bytes() ==
+               Billing.storage_policy(updated_settings_user).included_bytes
+    end
+  end
+
+  describe "get_or_register_settings_user_from_google/1" do
+    test "provisions a free billing account for new confirmed users" do
+      assert {:ok, settings_user} =
+               Accounts.get_or_register_settings_user_from_google(%{
+                 "email" => unique_settings_user_email(),
+                 "name" => "Google User"
+               })
+
+      assert settings_user.confirmed_at
+      assert is_binary(settings_user.billing_account_id)
+
+      assert Billing.free_storage_limit_bytes() ==
+               Billing.storage_policy(settings_user).included_bytes
     end
   end
 

@@ -814,12 +814,30 @@ defmodule Assistant.Accounts do
       {:error, :disabled}
     else
       with true <- email_allowed_by_allowlist?(settings_user.email),
-           {:ok, synced_settings_user} <- sync_settings_user_access_from_allowlist(settings_user) do
-        {:ok, synced_settings_user}
+           {:ok, synced_settings_user} <- sync_settings_user_access_from_allowlist(settings_user),
+           {:ok, billable_settings_user} <- maybe_ensure_billing_account(synced_settings_user) do
+        {:ok, billable_settings_user}
       else
         false -> {:error, :not_allowed}
         {:error, _} = error -> error
       end
+    end
+  end
+
+  defp maybe_ensure_billing_account(%SettingsUser{confirmed_at: nil} = settings_user),
+    do: {:ok, settings_user}
+
+  defp maybe_ensure_billing_account(
+         %SettingsUser{billing_account_id: billing_account_id} = settings_user
+       )
+       when is_binary(billing_account_id) and billing_account_id != "" do
+    {:ok, settings_user}
+  end
+
+  defp maybe_ensure_billing_account(%SettingsUser{} = settings_user) do
+    case Billing.ensure_billing_account(settings_user) do
+      {:ok, {updated_settings_user, _billing_account}} -> {:ok, updated_settings_user}
+      {:error, _} = error -> error
     end
   end
 

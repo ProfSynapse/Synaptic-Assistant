@@ -11,6 +11,8 @@ defmodule AssistantWeb.MarketingLive do
       socket
       |> assign(:signed_in?, signed_in?)
       |> assign(:primary_cta_href, primary_cta_href(signed_in?))
+      |> assign(:free_cta_href, free_cta_href())
+      |> assign(:pro_cta_href, pro_cta_href())
       |> assign(:nav_app_href, nav_app_href(signed_in?))
       |> assign(:nav_app_label, nav_app_label(signed_in?))
       |> assign(:enterprise_contact_href, enterprise_contact_href())
@@ -32,6 +34,8 @@ defmodule AssistantWeb.MarketingLive do
       <.marketing_page
         signed_in?={@signed_in?}
         primary_cta_href={@primary_cta_href}
+        free_cta_href={@free_cta_href}
+        pro_cta_href={@pro_cta_href}
         nav_app_href={@nav_app_href}
         nav_app_label={@nav_app_label}
         enterprise_contact_href={@enterprise_contact_href}
@@ -48,7 +52,10 @@ defmodule AssistantWeb.MarketingLive do
   end
 
   defp primary_cta_href(true), do: ~p"/workspace"
-  defp primary_cta_href(false), do: ~p"/settings_users/log-in"
+  defp primary_cta_href(false), do: ~p"/pricing/free"
+
+  defp free_cta_href, do: ~p"/pricing/free"
+  defp pro_cta_href, do: ~p"/pricing/pro"
 
   defp nav_app_href(true), do: ~p"/workspace"
   defp nav_app_href(false), do: ~p"/settings_users/log-in"

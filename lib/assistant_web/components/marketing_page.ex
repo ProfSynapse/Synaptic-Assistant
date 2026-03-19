@@ -7,6 +7,8 @@ defmodule AssistantWeb.Components.MarketingPage do
 
   attr :signed_in?, :boolean, required: true
   attr :primary_cta_href, :string, required: true
+  attr :free_cta_href, :string, required: true
+  attr :pro_cta_href, :string, required: true
   attr :nav_app_href, :string, required: true
   attr :nav_app_label, :string, required: true
   attr :enterprise_contact_href, :string, required: true
@@ -205,7 +207,7 @@ defmodule AssistantWeb.Components.MarketingPage do
               <li>In-app assistant and retained context</li>
               <li>Upgrade when you hit the cap</li>
             </ul>
-            <.link navigate={@primary_cta_href} class="sa-btn secondary">Start Free</.link>
+            <.link navigate={@free_cta_href} class="sa-btn secondary">Start Free</.link>
           </article>
 
           <article class="sa-cloud-price-card is-featured" data-reveal>
@@ -218,8 +220,8 @@ defmodule AssistantWeb.Components.MarketingPage do
               <li>Billed on monthly average retained storage</li>
               <li>All chat and workflow connectors</li>
             </ul>
-            <.link navigate={@primary_cta_href} class="sa-btn">
-              {if @signed_in?, do: "Open Workspace", else: "Get Started"}
+            <.link navigate={@pro_cta_href} class="sa-btn">
+              {if @signed_in?, do: "Start Pro Checkout", else: "Start Pro"}
             </.link>
           </article>
 

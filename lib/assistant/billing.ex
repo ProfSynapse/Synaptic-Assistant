@@ -69,6 +69,7 @@ defmodule Assistant.Billing do
 
       case settings_user.billing_account do
         %BillingAccount{} = billing_account ->
+          :ok = sync_linked_user_billing_account(settings_user)
           {:ok, {settings_user, billing_account}}
 
         nil ->

@@ -133,6 +133,9 @@ defmodule AssistantWeb.Router do
   scope "/", AssistantWeb do
     pipe_through [:browser]
 
+    get "/pricing/free", BillingController, :start_free
+    get "/pricing/pro", BillingController, :start_pro
+
     get "/settings_users/auth/google", SettingsUserOAuthController, :request
     get "/settings_users/auth/google/callback", SettingsUserOAuthController, :callback
 

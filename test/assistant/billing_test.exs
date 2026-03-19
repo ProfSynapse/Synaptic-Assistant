@@ -153,7 +153,7 @@ defmodule Assistant.BillingTest do
 
   describe "billing_snapshot/2" do
     test "can read billing state without creating a billing account" do
-      settings_user = settings_user_fixture()
+      settings_user = unconfirmed_settings_user_fixture()
 
       snapshot = Billing.billing_snapshot(settings_user)
 

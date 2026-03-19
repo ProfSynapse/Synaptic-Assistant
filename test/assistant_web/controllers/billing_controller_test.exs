@@ -51,6 +51,42 @@ defmodule AssistantWeb.BillingControllerTest do
     end
   end
 
+  describe "GET /pricing/free" do
+    test "redirects signed-out users to registration" do
+      conn = build_conn() |> get(~p"/pricing/free")
+
+      assert redirected_to(conn) == ~p"/settings_users/register"
+      assert get_session(conn, :settings_user_return_to) == ~p"/workspace"
+    end
+  end
+
+  describe "GET /pricing/pro" do
+    test "redirects signed-out users to registration and preserves pro intent" do
+      conn = build_conn() |> get(~p"/pricing/pro")
+
+      assert redirected_to(conn) == ~p"/settings_users/register"
+      assert get_session(conn, :settings_user_return_to) == ~p"/pricing/pro"
+    end
+
+    test "redirects signed-in users to Stripe checkout", %{conn: conn, bypass: bypass} do
+      Bypass.expect_once(bypass, "POST", "/v1/customers", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("content-type", "application/json")
+        |> Plug.Conn.resp(200, ~s({"id":"cus_456"}))
+      end)
+
+      Bypass.expect_once(bypass, "POST", "/v1/checkout/sessions", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("content-type", "application/json")
+        |> Plug.Conn.resp(200, ~s({"id":"cs_456","url":"https://checkout.stripe.test/pro"}))
+      end)
+
+      conn = get(conn, ~p"/pricing/pro")
+
+      assert redirected_to(conn, 302) == "https://checkout.stripe.test/pro"
+    end
+  end
+
   describe "POST /billing/portal" do
     test "redirects to the Stripe customer portal", %{
       conn: conn,
