@@ -400,9 +400,9 @@ Auth recommendation:
 23. [x] Decide whether `synced_files.content` remains transitional Cloak scope or migrates into the unified hosted model later. (Decision: Remain on Cloak to avoid JSONB/Base64 overhead on raw binaries; reconsider during S3 migration)
 
 **Stage G: Rotation and cleanup**
-24. Add operator tooling for Vault key rotate + wrapped DEK rewrap.
-25. Add integrity checks and repair jobs.
-26. `F0` Only after parity and rollback drills: stop plaintext writes, switch hosted reads to encrypted-only, and remove plaintext search artifacts.
+- [x] 24. Add operator tooling for Vault key rotate + wrapped DEK rewrap.
+- [ ] 25. Add integrity checks and repair jobs.
+- [ ] 26. `F0` Only after parity and rollback drills: stop plaintext writes, switch hosted reads to encrypted-only, and remove plaintext search artifacts.
 
 ---
 

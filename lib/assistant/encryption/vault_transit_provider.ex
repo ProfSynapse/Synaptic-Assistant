@@ -63,6 +63,29 @@ defmodule Assistant.Encryption.VaultTransitProvider do
     end
   end
 
+  @doc """
+  Rewraps a wrapped data key with the latest version of the transit key.
+  Does not change the app-local ciphertext, only the `wrapped_dek` and `key_version`.
+  """
+  @spec rewrap(Assistant.Encryption.field_ref(), String.t()) ::
+          {:ok, %{wrapped_dek: String.t(), key_version: integer()}} | {:error, term()}
+  def rewrap(field_ref, wrapped_dek) do
+    path = "/v1/#{transit_mount()}/rewrap/#{transit_key()}"
+
+    body = %{
+      ciphertext: wrapped_dek,
+      context: Context.derivation_context(field_ref)
+    }
+
+    with {:ok, %{"data" => %{"ciphertext" => new_wrapped_dek}}} <- request(:post, path, body) do
+      {:ok,
+       %{
+         wrapped_dek: new_wrapped_dek,
+         key_version: key_version_from_ciphertext(new_wrapped_dek)
+       }}
+    end
+  end
+
   defp generate_data_key(field_ref) do
     path = "/v1/#{transit_mount()}/datakey/plaintext/#{transit_key()}"
 
