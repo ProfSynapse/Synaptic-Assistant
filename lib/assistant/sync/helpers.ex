@@ -18,14 +18,18 @@ defmodule Assistant.Sync.Helpers do
   """
   @spec parse_time(DateTime.t() | String.t() | nil) :: DateTime.t() | nil
   def parse_time(nil), do: nil
-  def parse_time(%DateTime{} = dt), do: dt
+  def parse_time(%DateTime{} = dt), do: ensure_microsecond_precision(dt)
 
   def parse_time(time_string) when is_binary(time_string) do
     case DateTime.from_iso8601(time_string) do
-      {:ok, dt, _offset} -> dt
+      {:ok, dt, _offset} -> ensure_microsecond_precision(dt)
       {:error, _} -> nil
     end
   end
 
   def parse_time(_), do: nil
+
+  defp ensure_microsecond_precision(%DateTime{} = dt) do
+    %{dt | microsecond: {elem(dt.microsecond, 0), 6}}
+  end
 end

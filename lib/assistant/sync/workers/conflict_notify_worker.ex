@@ -64,7 +64,7 @@ defmodule Assistant.Sync.Workers.ConflictNotifyWorker do
     Error: #{synced_file.sync_error}
 
     Both the local copy and remote Drive file have been modified since the last sync.
-    A conflict copy has been saved locally. Manual resolution is required.
+    The file has been marked as conflicted and requires manual resolution.
     """
 
     Logger.warning(message)

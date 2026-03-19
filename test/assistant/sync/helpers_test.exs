@@ -19,7 +19,7 @@ defmodule Assistant.Sync.HelpersTest do
 
     test "returns DateTime unchanged" do
       dt = ~U[2026-03-02 12:00:00Z]
-      assert Helpers.parse_time(dt) == dt
+      assert Helpers.parse_time(dt) == ~U[2026-03-02 12:00:00.000000Z]
     end
 
     test "parses ISO 8601 string" do

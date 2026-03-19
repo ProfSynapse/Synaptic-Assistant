@@ -1,5 +1,5 @@
 defmodule Assistant.Skills.Files.ArchiveTest do
-  use ExUnit.Case, async: true
+  use Assistant.DataCase, async: false
 
   alias Assistant.Skills.Files.Archive
   alias Assistant.Skills.Result
@@ -36,8 +36,10 @@ defmodule Assistant.Skills.Files.ArchiveTest do
   end
 
   defp build_context do
+    user_id = Ecto.UUID.generate()
+
     %{
-      user_id: "user-1",
+      user_id: user_id,
       integrations: %{file_manager: FakeFileManager, state_store: FakeStateStore},
       metadata: %{}
     }
@@ -64,23 +66,28 @@ defmodule Assistant.Skills.Files.ArchiveTest do
   test "archives file by path — deletes locally and enqueues upstream trash" do
     Process.put(:fake_synced_file, fake_synced_file())
 
+    context = build_context()
+    user_id = context.user_id
+
     {:ok, %Result{status: :ok} = result} =
-      Archive.execute(%{"path" => "docs/example.md"}, build_context())
+      Archive.execute(%{"path" => "docs/example.md"}, context)
 
     assert result.content =~ "Archived 'Example.md'"
     assert result.side_effects == [:file_archived]
-    assert_received {:get_by_path, "user-1", "docs/example.md"}
+    assert_received {:get_by_path, ^user_id, "docs/example.md"}
     assert_received {:delete_file, "docs/example.md"}
   end
 
   test "archives file by Drive file ID" do
     Process.put(:fake_synced_file, fake_synced_file())
 
-    {:ok, %Result{status: :ok} = result} =
-      Archive.execute(%{"id" => "drive-file-1"}, build_context())
+    context = build_context()
+    user_id = context.user_id
+
+    {:ok, %Result{status: :ok} = result} = Archive.execute(%{"id" => "drive-file-1"}, context)
 
     assert result.content =~ "Archived 'Example.md'"
-    assert_received {:get_by_id, "user-1", "drive-file-1"}
+    assert_received {:get_by_id, ^user_id, "drive-file-1"}
     assert_received {:delete_file, "docs/example.md"}
   end
 

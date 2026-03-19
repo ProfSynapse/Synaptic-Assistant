@@ -27,6 +27,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.SpendingLimits
   alias Assistant.Storage
   alias Assistant.Storage.Source
+  alias Assistant.Sync.StorageBridge
   alias Assistant.Transcripts
   alias Assistant.Workflows
   alias AssistantWeb.SettingsLive.Context
@@ -452,11 +453,29 @@ defmodule AssistantWeb.SettingsLive.Events do
     enabled? = enabled == "true"
 
     case ensure_storage_source_for_access(socket, %{"id" => id}, enabled?) do
-      {:ok, _source, socket} ->
-        {:noreply,
-         socket
-         |> reload_storage_picker()
-         |> refresh_selected_source()}
+      {:ok, source, socket} ->
+        access_token =
+          case GoogleAuth.user_token(source.user_id) do
+            {:ok, token} -> token
+            _ -> nil
+          end
+
+        case StorageBridge.reconcile_source(source.user_id, source.source_id,
+               access_token: access_token
+             ) do
+          {:ok, _} ->
+            {:noreply,
+             socket
+             |> reload_storage_picker()
+             |> refresh_selected_source()}
+
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> reload_storage_picker()
+             |> refresh_selected_source()
+             |> put_flash(:error, "Drive sync bridge failed: #{inspect(reason)}")}
+        end
 
       {:error, :not_found, socket} ->
         {:noreply, put_flash(socket, :error, "Source not found.")}
@@ -593,12 +612,22 @@ defmodule AssistantWeb.SettingsLive.Events do
              socket.assigns.file_picker_nodes,
              socket.assigns.file_picker_pending_ops || []
            ) do
-      {:noreply,
-       socket
-       |> reload_storage_picker()
-       |> refresh_selected_source()
-       |> reset_file_picker()
-       |> put_flash(:info, "Drive access updated.")}
+      case StorageBridge.reconcile_source(user_id, source_id, access_token: access_token) do
+        {:ok, _} ->
+          {:noreply,
+           socket
+           |> reload_storage_picker()
+           |> refresh_selected_source()
+           |> reset_file_picker()
+           |> put_flash(:info, "Drive access updated.")}
+
+        {:error, reason} ->
+          {:noreply,
+           socket
+           |> reload_storage_picker()
+           |> refresh_selected_source()
+           |> put_flash(:error, "Drive sync bridge failed: #{inspect(reason)}")}
+      end
     else
       {:error, :not_connected} ->
         {:noreply, put_flash(socket, :error, "Connect your Google account first.")}

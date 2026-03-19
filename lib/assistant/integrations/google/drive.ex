@@ -29,17 +29,20 @@ defmodule Assistant.Integrations.Google.Drive do
       # Search for files
       {:ok, files} = Drive.list_files(token, "name contains 'report'", pageSize: 10)
 
-      # Read file content (auto-detects Google Workspace types)
-      {:ok, content} = Drive.read_file(token, "1a2b3c4d")
+  # Read file content (auto-detects Google Workspace types)
+  {:ok, content} = Drive.read_file(token, "1a2b3c4d")
 
-      # Create a new file
-      {:ok, file} = Drive.create_file(token, "notes.txt", "Hello world")
+  # Create a new file
+  {:ok, file} = Drive.create_file(token, "notes.txt", "Hello world")
 
-      # Update an existing file's content
-      {:ok, file} = Drive.update_file_content(token, "1a2b3c4d", "Updated content")
+  # Update an existing file's content
+  {:ok, file} = Drive.update_file_content(token, "1a2b3c4d", "Updated content")
 
-      # List shared drives
-      {:ok, drives} = Drive.list_shared_drives(token)
+  # Trash a file
+  {:ok, file} = Drive.trash_file(token, "1a2b3c4d")
+
+  # List shared drives
+  {:ok, drives} = Drive.list_shared_drives(token)
   """
 
   require Logger
@@ -49,7 +52,7 @@ defmodule Assistant.Integrations.Google.Drive do
   alias GoogleApi.Drive.V3.Model
 
   @default_fields "files(id,name,mimeType,modifiedTime,size,parents)"
-  @single_file_fields "id,name,mimeType,modifiedTime,size,parents,webViewLink,md5Checksum,version"
+  @single_file_fields "id,name,mimeType,modifiedTime,size,parents,webViewLink,md5Checksum,version,trashed"
 
   @google_workspace_prefix "application/vnd.google-apps."
 
@@ -279,7 +282,7 @@ defmodule Assistant.Integrations.Google.Drive do
              "multipart",
              metadata,
              content,
-             fields: "id,name,webViewLink",
+             fields: "id,name,webViewLink,modifiedTime,md5Checksum,version,mimeType",
              supportsAllDrives: true
            ) do
         {:ok, %Model.File{} = file} ->
@@ -287,7 +290,11 @@ defmodule Assistant.Integrations.Google.Drive do
            %{
              id: file.id,
              name: file.name,
-             web_view_link: file.webViewLink
+             web_view_link: file.webViewLink,
+             modified_time: file.modifiedTime,
+             md5_checksum: file.md5Checksum,
+             version: file.version,
+             mime_type: file.mimeType
            }}
 
         {:error, %Tesla.Env{status: 404}} ->
@@ -303,6 +310,60 @@ defmodule Assistant.Integrations.Google.Drive do
                 "Drive update_file_content failed for #{file_id}: #{inspect(reason)}"
               )
 
+              {:error, reason}
+          end
+      end
+    end
+  end
+
+  @doc """
+  Move a file to the trash in Google Drive.
+
+  ## Parameters
+
+    - `access_token` - OAuth2 access token string
+    - `file_id` - The Drive file ID to trash
+    - `opts` - Optional keyword list:
+      - `:expected_modified_time` - Guard against trashing a file that has changed remotely
+      - `:expected_checksum` - Guard against trashing a file that has changed remotely
+      - `:expected_version` - Guard against trashing a file that has changed remotely
+
+  ## Returns
+
+    - `{:ok, %{id, name, trashed, modified_time}}` on success
+    - `{:error, term()}` on failure
+  """
+  @spec trash_file(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def trash_file(access_token, file_id, opts \\ []) do
+    conn = Connection.new(access_token)
+
+    with :ok <- maybe_validate_write_preconditions(access_token, file_id, opts) do
+      case Files.drive_files_update(conn, file_id,
+             trashed: true,
+             fields: "id,name,trashed,modifiedTime,md5Checksum,version",
+             supportsAllDrives: true
+           ) do
+        {:ok, %Model.File{} = file} ->
+          {:ok,
+           %{
+             id: file.id,
+             name: file.name,
+             trashed: file.trashed || true,
+             modified_time: file.modifiedTime,
+             md5_checksum: file.md5Checksum,
+             version: file.version
+           }}
+
+        {:error, %Tesla.Env{status: 404}} ->
+          {:error, :not_found}
+
+        {:error, reason} ->
+          case classify_write_error(reason) do
+            :conflict ->
+              {:error, :conflict}
+
+            _ ->
+              Logger.warning("Drive trash_file failed for #{file_id}: #{inspect(reason)}")
               {:error, reason}
           end
       end
@@ -490,7 +551,8 @@ defmodule Assistant.Integrations.Google.Drive do
       parents: file.parents,
       web_view_link: file.webViewLink,
       md5_checksum: file.md5Checksum,
-      version: file.version
+      version: file.version,
+      trashed: file.trashed
     }
   end
 

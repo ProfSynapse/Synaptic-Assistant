@@ -140,6 +140,31 @@ defmodule Assistant.Skills.Files.UpdateTest do
     assert_received {:update_synced_file, "sf-1", %{sync_status: "local_ahead"}}
   end
 
+  test "keeps preserved conflict copies local-only after update" do
+    Process.put(
+      :fake_synced_file,
+      fake_synced_file(%{
+        drive_file_id: "local-conflict:drive-file-1:123",
+        local_path: "docs/example.conflict.20260319T100000Z.md"
+      })
+    )
+
+    Process.put(:fake_file_content, "hello world")
+    context = build_context()
+
+    {:ok, %Result{status: :ok}} =
+      Update.execute(
+        %{
+          "path" => "docs/example.conflict.20260319T100000Z.md",
+          "search" => "hello",
+          "replace" => "hi"
+        },
+        context
+      )
+
+    assert_received {:update_synced_file, "sf-1", %{sync_status: "conflict"}}
+  end
+
   test "resolves file by Drive file ID" do
     Process.put(:fake_synced_file, fake_synced_file())
     Process.put(:fake_file_content, "hello world")

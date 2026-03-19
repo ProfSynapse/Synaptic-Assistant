@@ -183,27 +183,46 @@ defmodule Assistant.Skills.Files.Update do
     checksum = FileManager.checksum(content)
     now = DateTime.utc_now()
 
-    state_store.update_synced_file(synced_file, %{
-      sync_status: "local_ahead",
-      local_checksum: checksum,
-      local_modified_at: now
-    })
+    attrs =
+      if local_conflict_copy?(synced_file) do
+        %{
+          sync_status: "conflict",
+          local_checksum: checksum,
+          local_modified_at: now
+        }
+      else
+        %{
+          sync_status: "local_ahead",
+          local_checksum: checksum,
+          local_modified_at: now
+        }
+      end
+
+    state_store.update_synced_file(synced_file, attrs)
   end
 
   defp enqueue_upstream_sync(synced_file, user_id) do
-    intent_id = "files.update:#{synced_file.drive_file_id}:#{System.system_time(:millisecond)}"
+    if local_conflict_copy?(synced_file) do
+      :ok
+    else
+      intent_id = "files.update:#{synced_file.drive_file_id}:#{System.system_time(:millisecond)}"
 
-    %{
-      action: "write_intent",
-      user_id: user_id,
-      drive_file_id: synced_file.drive_file_id,
-      intent_id: intent_id
-    }
-    |> Assistant.Sync.Workers.UpstreamSyncWorker.new()
-    |> Oban.insert()
-    |> case do
-      {:ok, _job} -> :ok
-      {:error, reason} -> Logger.warning("Failed to enqueue upstream sync: #{inspect(reason)}")
+      %{
+        action: "write_intent",
+        user_id: user_id,
+        drive_file_id: synced_file.drive_file_id,
+        intent_id: intent_id
+      }
+      |> Assistant.Sync.Workers.UpstreamSyncWorker.new()
+      |> Oban.insert()
+      |> case do
+        {:ok, _job} -> :ok
+        {:error, reason} -> Logger.warning("Failed to enqueue upstream sync: #{inspect(reason)}")
+      end
     end
+  end
+
+  defp local_conflict_copy?(synced_file) do
+    String.starts_with?(synced_file.drive_file_id || "", "local-conflict:")
   end
 end
