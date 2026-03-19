@@ -323,16 +323,74 @@ For documents that came from the sync pipeline (all markdown):
 
 ---
 
-### Phase 3c: Memory entry embeddings
+### Phase 3c: Memory embeddings + activation model
 
-**Goal**: Embed memory entries directly (no chunking — they're already atomic). Add hybrid search.
+**Goal**: Embed memory entries, implement a GNN-inspired scoring model that combines semantic similarity, recency decay, access reinforcement, and spreading activation — all in SQL, no graph infrastructure.
 
-#### 1. Add embedding column to memory_entries
+#### The model: Spreading Activation via Embedding Space
 
-Migration:
+A GNN propagates activation through graph edges. We use **cosine similarity as implicit edges** — the embedding space IS the graph. No adjacency matrix, no message-passing framework, just math.
+
+```
+                    ┌─────────────┐
+                    │   Query     │
+                    │  embedding  │
+                    └──────┬──────┘
+                           │ cosine similarity (implicit edges)
+              ┌────────────┼────────────────┐
+              ▼            ▼                 ▼
+         ┌────────┐  ┌────────┐        ┌────────┐
+         │ Mem A  │  │ Mem B  │        │ Mem C  │
+         │ sim=.9 │  │ sim=.7 │  ...   │ sim=.3 │
+         │ fresh  │  │ stale  │        │ fresh  │
+         │ 12 hits│  │ 1 hit  │        │ 40 hits│
+         └────┬───┘  └────────┘        └────────┘
+              │ spreading activation
+              ▼ (top-K retrieval boosts neighbors)
+         ┌────────┐
+         │ Mem D  │  ← semantically near A, gets decay refreshed
+         │ sim=.4 │    even though it wasn't directly retrieved
+         └────────┘
+```
+
+#### Scoring formula (single SQL query)
+
+```sql
+score(memory, query) =
+    0.35 × semantic_sim                    -- cosine similarity (GNN "message")
+  + 0.20 × fts_rank                       -- lexical match
+  + 0.15 × importance                     -- user-set node weight
+  + 0.15 × recency_decay                  -- Ebbinghaus forgetting curve
+  + 0.15 × activation_strength            -- reinforcement (access frequency)
+```
+
+**Recency decay** (Ebbinghaus forgetting curve):
+```sql
+recency_decay = EXP(-0.01 × EXTRACT(EPOCH FROM (now() - accessed_at)) / 3600)
+-- λ=0.01 → half-life ≈ 69 hours (~3 days)
+-- Recently accessed = ~1.0, 1 week stale = ~0.19, 1 month = ~0.001
+```
+
+**Activation strength** (synaptic reinforcement with diminishing returns):
+```sql
+activation_strength = LN(access_count + 1) / LN(max_access_count + 1)
+-- 1 hit = 0.0, 10 hits = ~0.6, 100 hits = ~0.85, 1000 hits = ~0.95
+-- Logarithmic: early hits matter most, like real synaptic strengthening
+```
+
+**decay_factor** (spreading activation multiplier):
+```sql
+-- decay_factor starts at 1.0, gets boosted by spreading activation
+-- Applied as a multiplier on the final score
+final_score = score × decay_factor
+```
+
+#### 1. Migration: add embedding + access_count
+
 ```elixir
 alter table(:memory_entries) do
   add :embedding, :vector, size: 384
+  add :access_count, :integer, default: 0, null: false
 end
 
 create index(:memory_entries, [:embedding],
@@ -342,6 +400,8 @@ create index(:memory_entries, [:embedding],
 )
 ```
 
+Update schema: add `:embedding`, `:access_count` fields.
+
 #### 2. Embed on memory creation (async)
 
 New Oban worker: `lib/assistant/embeddings/embed_memory_worker.ex`
@@ -350,7 +410,18 @@ New Oban worker: `lib/assistant/embeddings/embed_memory_worker.ex`
 
 Hook into `Memory.Store.create_memory_entry/1` — after insert, enqueue job.
 
-#### 3. Hybrid search on memories
+#### 3. Update `touch_accessed_at` to also increment access_count
+
+In `Memory.Store`:
+```elixir
+def touch_access(entry_ids) do
+  from(me in MemoryEntry, where: me.id in ^entry_ids)
+  |> Repo.update_all(set: [accessed_at: DateTime.utc_now()],
+                     inc: [access_count: 1])
+end
+```
+
+#### 4. Hybrid search with full activation model
 
 New function in `Memory.Search`:
 
@@ -359,33 +430,128 @@ def hybrid_search(user_id, query_text, opts \\ []) do
   limit = Keyword.get(opts, :limit, 10)
   {:ok, query_embedding} = Embeddings.generate(query_text)
 
-  # Single SQL query: FTS score + vector score + importance, combined
+  # Subquery to get max access_count for normalization
+  max_access_q = from(me in MemoryEntry,
+    where: me.user_id == ^user_id,
+    select: max(me.access_count)
+  )
+
   from(me in MemoryEntry,
     where: me.user_id == ^user_id,
+    inner_lateral_join: stats in subquery(max_access_q), on: true,
     select: %{
       entry: me,
       score: fragment("""
-        (CASE WHEN search_text @@ plainto_tsquery('english', ?) THEN
-          ts_rank(search_text, plainto_tsquery('english', ?)) ELSE 0 END) * 0.3
-        + (CASE WHEN embedding IS NOT NULL THEN
-          (1 - (embedding <=> ?::vector)) ELSE 0 END) * 0.5
-        + (importance / 10.0) * 0.2
-      """, ^query_text, ^query_text, ^query_embedding)
+        (
+          -- Semantic similarity (0-1): cosine sim via pgvector
+          (CASE WHEN ? IS NOT NULL AND embedding IS NOT NULL THEN
+            (1.0 - (embedding <=> ?::vector)) ELSE 0 END) * 0.35
+
+          -- FTS relevance (0-1): normalized ts_rank
+          + (CASE WHEN search_text @@ plainto_tsquery('english', ?) THEN
+            ts_rank(search_text, plainto_tsquery('english', ?)) ELSE 0 END) * 0.20
+
+          -- Importance (0-1): user-set weight
+          + COALESCE(importance, 0.5) * 0.15
+
+          -- Recency decay (0-1): Ebbinghaus curve, half-life ~3 days
+          + EXP(-0.01 * EXTRACT(EPOCH FROM (NOW() - COALESCE(accessed_at, inserted_at))) / 3600) * 0.15
+
+          -- Activation strength (0-1): log-dampened access frequency
+          + (CASE WHEN ? > 0 THEN
+            LN(access_count + 1) / LN(? + 1) ELSE 0 END) * 0.15
+        )
+        -- Spreading activation multiplier (boosted by neighbor retrieval)
+        * COALESCE(decay_factor, 1.0)
+      """,
+        ^query_embedding, ^query_embedding,
+        ^query_text, ^query_text,
+        stats.max, stats.max
+      )
     },
     order_by: [desc: fragment("score")],
     limit: ^limit
   )
   |> Repo.all()
+  |> tap(&touch_access(Enum.map(&1, fn %{entry: e} -> e.id end)))
+  |> tap(&spread_activation(user_id, &1))
 end
 ```
 
-Weights: 50% semantic, 30% FTS, 20% importance. Tunable.
+#### 5. Spreading activation (the GNN message-passing step)
 
-#### 4. Backfill existing entries
+After retrieval, boost semantically nearby memories — this is the key insight that makes it GNN-like without a graph:
+
+New module: `lib/assistant/memory/activation.ex`
+
+```elixir
+defmodule Assistant.Memory.Activation do
+  @moduledoc false
+
+  @spread_rate 0.05      # how much activation spreads per retrieval
+  @neighbor_count 5       # top-K neighbors to activate
+  @min_similarity 0.6     # only spread to sufficiently similar memories
+  @max_decay_factor 1.5   # cap so it doesn't grow unbounded
+
+  def spread(user_id, retrieved_entries) do
+    retrieved_ids = Enum.map(retrieved_entries, & &1.id)
+    retrieved_embeddings = Enum.map(retrieved_entries, & &1.embedding)
+
+    # For each retrieved memory, find top-K nearest neighbors NOT in retrieved set
+    # and bump their decay_factor
+    Enum.each(retrieved_embeddings, fn embedding ->
+      from(me in MemoryEntry,
+        where: me.user_id == ^user_id
+          and me.id not in ^retrieved_ids
+          and not is_nil(me.embedding)
+          and fragment("1 - (embedding <=> ?::vector)", ^embedding) > ^@min_similarity,
+        order_by: fragment("embedding <=> ?::vector", ^embedding),
+        limit: ^@neighbor_count
+      )
+      |> Repo.update_all(
+        set: [
+          decay_factor: fragment(
+            "LEAST(?, COALESCE(decay_factor, 1.0) + ? * (1 - (embedding <=> ?::vector)))",
+            ^@max_decay_factor, ^@spread_rate, ^embedding
+          )
+        ]
+      )
+    end)
+  end
+end
+```
+
+What this does:
+- When you ask about "Elixir GenServers", that memory gets retrieved
+- Its 5 nearest neighbors ("OTP supervision", "process linking", "Registry patterns") get their `decay_factor` bumped proportional to similarity
+- Next time you search for something adjacent, those neighbors score higher
+- `decay_factor` is capped at 1.5 to prevent runaway amplification
+- Over time, unused `decay_factor` decays back toward 1.0 via a cron job
+
+#### 6. Decay factor cooling (prevents stale amplification)
+
+Oban cron worker: `lib/assistant/memory/decay_cooling_worker.ex`
+- Runs daily (or hourly for more granularity)
+- Gradually moves all `decay_factor` values back toward 1.0:
+
+```elixir
+# Cool 10% toward 1.0 each day
+from(me in MemoryEntry,
+  where: me.decay_factor != 1.0
+)
+|> Repo.update_all(
+  set: [decay_factor: fragment("1.0 + (decay_factor - 1.0) * 0.9")]
+)
+```
+
+A memory boosted to 1.3 today → 1.27 tomorrow → 1.24 next day → asymptotically back to 1.0 unless re-activated.
+
+#### 7. Backfill existing entries
 
 Mix task `mix assistant.backfill_embeddings`:
 - Batches of 32, queries WHERE embedding IS NULL
 - Generates + updates, logs progress
+- Sets `access_count = 0` for entries without it
 
 ---
 
@@ -516,7 +682,8 @@ These are optional enhancements. The core pipeline (chunk → embed → search) 
 
 - **SemanticChunker tests**: Verify boundary detection with known topic-shift texts, edge cases (single sentence, very long section, empty input)
 - **ArcanaEmbedder tests**: Mock `Nx.Serving.batched_run/2`, verify delegation
-- **Memory hybrid search tests**: Mock embeddings, verify score weighting
+- **Activation model tests**: Verify score formula weighting, spreading activation boost/cap/cooling, access_count increment
+- **Memory hybrid search tests**: Mock embeddings, verify 5-signal scoring, verify spreading activation fires post-retrieval
 - **Arcana ingest/search tests**: Use test collection, verify end-to-end with mock embedder
 - **Config toggle**: All embedding tests skip when `embeddings.enabled == false`
 
@@ -536,10 +703,70 @@ config :arcana, embedder: {Assistant.Embeddings.MockEmbedder, dimensions: 384}
 | Semantic chunk a 10-page doc | ~200ms | ~200 sentences, 7 batches |
 | pgvector HNSW search (10K) | <5ms | Cosine distance |
 | Arcana hybrid search | ~20ms | Single CTE query (FTS + vector) |
-| Memory hybrid search | ~25ms | FTS + vector + importance |
-| Unified search (parallel) | ~30ms | Max of both, not sum |
+| Memory hybrid search (5-signal) | ~30ms | FTS + vector + importance + recency + activation |
+| Spreading activation (post-retrieval) | ~15ms | 5 neighbor lookups × pgvector scan |
+| Unified search (parallel) | ~35ms | Max of memory + doc, not sum |
+| Decay cooling cron | <100ms | Single UPDATE on decay_factor != 1.0 |
 
 Model memory: ~70MB for gte-small. Single serving shared by all consumers.
+
+---
+
+## The Activation Model at a Glance
+
+```
+  Query: "How do GenServers work?"
+                    │
+    ┌───────────────┴───────────────┐
+    │     5-Signal Scoring          │
+    │                               │
+    │  35% semantic similarity      │  ← "GNN message" (cosine sim)
+    │  20% FTS rank                 │  ← lexical match
+    │  15% importance               │  ← user-set node weight
+    │  15% recency decay            │  ← Ebbinghaus curve (e^-λt)
+    │  15% activation strength      │  ← ln(hits+1) reinforcement
+    │       × decay_factor          │  ← spreading activation multiplier
+    └───────────────┬───────────────┘
+                    │
+    ┌───────────────┴───────────────┐
+    │     Retrieved: top 10         │
+    │                               │
+    │  "GenServer basics"     0.92  │
+    │  "handle_call patterns" 0.85  │
+    │  "OTP overview"         0.71  │
+    │  ...                          │
+    └───────────────┬───────────────┘
+                    │
+    ┌───────────────┴───────────────┐
+    │  Spreading Activation         │
+    │  (async, post-retrieval)      │
+    │                               │
+    │  For each retrieved memory:   │
+    │    → Find 5 nearest neighbors │
+    │    → Bump their decay_factor  │
+    │    → Cap at 1.5               │
+    │                               │
+    │  "Supervisor trees"  1.0→1.04 │
+    │  "Process linking"   1.0→1.03 │
+    │  "Registry patterns" 1.1→1.12 │
+    └───────────────────────────────┘
+                    │
+    ┌───────────────┴───────────────┐
+    │  Daily Cooling Cron           │
+    │                               │
+    │  decay_factor → 1.0 + 0.9×Δ  │
+    │  (10% exponential cooldown)   │
+    │  1.3 → 1.27 → 1.24 → 1.0    │
+    └───────────────────────────────┘
+```
+
+This models a GNN's behavior:
+- **Node features** = importance + access_count + recency
+- **Edge weights** = cosine similarity in embedding space
+- **Message passing** = spreading activation on retrieval
+- **Temporal dynamics** = Ebbinghaus decay + cooling cron
+
+Without any of the infrastructure: no graph DB, no adjacency matrix, no PyTorch Geometric. Just SQL + pgvector.
 
 ---
 
@@ -547,7 +774,7 @@ Model memory: ~70MB for gte-small. Single serving shared by all consumers.
 
 1. **3a** — Foundation: deps, pgvector, serving, Arcana install. Zero behavior change.
 2. **3b** — Semantic chunker: custom `Arcana.Chunker` with boundary detection.
-3. **3c** — Memory embeddings: column, async embed, hybrid search, backfill.
+3. **3c** — Memory embeddings + activation model: embedding column, access_count, 5-signal hybrid search, spreading activation, decay cooling cron.
 4. **3d** — Document ingestion: Arcana pipeline, hook into file sync.
 5. **3e** — Unified search + skills: context builder, file search, memory search.
 
@@ -565,7 +792,9 @@ Each phase independently deployable. FTS continues working throughout.
 - `lib/assistant/embeddings/embed_memory_worker.ex` — Oban worker for memories
 - `lib/assistant/embeddings/embed_document_worker.ex` — Oban worker for doc ingestion
 - `lib/assistant/embeddings/unified_search.ex` — cross-source search
-- Migration: enable pgvector + add embedding column to memory_entries
+- `lib/assistant/memory/activation.ex` — spreading activation (GNN message-passing)
+- `lib/assistant/memory/decay_cooling_worker.ex` — Oban cron for decay_factor cooldown
+- Migration: enable pgvector + add embedding + access_count to memory_entries
 - Arcana-generated migrations (collections, documents, chunks)
 - Test files for each module
 
@@ -574,10 +803,10 @@ Each phase independently deployable. FTS continues working throughout.
 - `lib/assistant/application.ex` — add Embeddings.Serving to supervision tree
 - `config/config.exs` — embeddings + arcana config
 - `config/test.exs` — disable embeddings, mock embedder
-- `lib/assistant/memory/search.ex` — add hybrid_search
-- `lib/assistant/memory/store.ex` — enqueue embed job after create
+- `lib/assistant/memory/search.ex` — add hybrid_search with 5-signal scoring
+- `lib/assistant/memory/store.ex` — enqueue embed job after create, update touch_access to inc access_count
 - `lib/assistant/memory/context_builder.ex` — use unified search
 - `lib/assistant/sync/workers/file_sync_worker.ex` — enqueue doc ingestion
 - `lib/assistant/skills/files/search.ex` — semantic search mode
 - `lib/assistant/skills/memory/search.ex` — hybrid search mode
-- `lib/assistant/schemas/memory_entry.ex` — add :embedding field
+- `lib/assistant/schemas/memory_entry.ex` — add :embedding, :access_count fields
