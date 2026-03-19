@@ -293,6 +293,8 @@ defmodule Assistant.Orchestrator.Tools.DispatchAgent do
       started_at: DateTime.utc_now()
     }
 
+    attrs = Assistant.ExecutionLogs.Content.prepare_log_attrs(attrs, context.conversation_id)
+
     case %ExecutionLog{} |> ExecutionLog.changeset(attrs) |> Repo.insert() do
       {:ok, log} -> {:ok, log}
       {:error, changeset} -> {:error, :db_error, changeset}

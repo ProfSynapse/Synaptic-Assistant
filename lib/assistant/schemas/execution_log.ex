@@ -24,6 +24,12 @@ defmodule Assistant.Schemas.ExecutionLog do
     # Sub-agent trace: links child execution to parent
     field :parent_execution_id, :binary_id
 
+    # Encryption fields
+    field :billing_account_id, :binary_id
+    field :parameters_encrypted, :map
+    field :result_encrypted, :map
+    field :error_message_encrypted, :map
+
     belongs_to :conversation, Assistant.Schemas.Conversation
 
     timestamps(type: :utc_datetime_usec)
@@ -38,7 +44,11 @@ defmodule Assistant.Schemas.ExecutionLog do
     :duration_ms,
     :started_at,
     :completed_at,
-    :parent_execution_id
+    :parent_execution_id,
+    :billing_account_id,
+    :parameters_encrypted,
+    :result_encrypted,
+    :error_message_encrypted
   ]
 
   def changeset(log, attrs) do

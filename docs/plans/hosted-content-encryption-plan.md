@@ -395,8 +395,8 @@ Auth recommendation:
 20. Backfill existing memories and validate hosted retrieval parity.
 
 **Stage F: Secondary content**
-21. `E0` Encrypt task descriptions and comments.
-22. Audit `execution_logs`, `tool_results`, and similar persisted payloads.
+21. [x] `E0` Encrypt task descriptions and comments.
+22. [x] Audit `execution_logs`, `tool_results`, and similar persisted payloads. (Execution logs encrypted, tool_results transient)
 23. Decide whether `synced_files.content` remains transitional Cloak scope or migrates into the unified hosted model later.
 
 **Stage G: Rotation and cleanup**
