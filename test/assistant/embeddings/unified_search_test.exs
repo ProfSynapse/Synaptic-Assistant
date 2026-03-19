@@ -90,6 +90,40 @@ defmodule Assistant.Embeddings.UnifiedSearchTest do
       assert x.extra == "data"
     end
 
+    test "handles duplicate IDs within a single list (scores accumulate)" do
+      # If the same ID appears twice in one list, RRF groups by ID and sums scores
+      list_a = [
+        %{id: "dup", score: 0.9, text: "First"},
+        %{id: "dup", score: 0.8, text: "Duplicate"},
+        %{id: "unique", score: 0.7, text: "Unique"}
+      ]
+
+      result = UnifiedSearch.merge_rrf(list_a, [], 10)
+
+      # "dup" appears at rank 1 and rank 2, scores: 1/61 + 1/62
+      dup = Enum.find(result, fn r -> r.id == "dup" end)
+      unique = Enum.find(result, fn r -> r.id == "unique" end)
+
+      assert dup != nil
+      assert unique != nil
+      # Duplicate accumulates higher RRF score than single-occurrence unique
+      assert dup.score > unique.score
+    end
+
+    test "handles duplicate IDs across both lists (triple accumulation)" do
+      list_a = [%{id: "shared", score: 0.9, text: "A1"}, %{id: "shared", score: 0.8, text: "A2"}]
+      list_b = [%{id: "shared", score: 0.7, text: "B1"}]
+
+      result = UnifiedSearch.merge_rrf(list_a, list_b, 10)
+
+      assert length(result) == 1
+      [item] = result
+      assert item.id == "shared"
+      # Score = 1/(60+1) + 1/(60+2) + 1/(60+1) = 1/61 + 1/62 + 1/61
+      expected = 1 / 61 + 1 / 62 + 1 / 61
+      assert_in_delta item.score, expected, 1.0e-10
+    end
+
     test "returns items sorted by descending RRF score" do
       # Items at lower ranks get lower RRF scores
       list_a =

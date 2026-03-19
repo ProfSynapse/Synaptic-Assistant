@@ -25,9 +25,75 @@ defmodule Assistant.Memory.DecayCoolingWorkerTest do
       assert changeset.changes[:queue] == "maintenance"
     end
 
-    test "max attempts is 1 (no retry)" do
+    test "max attempts is 3" do
       changeset = DecayCoolingWorker.new(%{})
-      assert changeset.changes[:max_attempts] == 1
+      assert changeset.changes[:max_attempts] == 3
+    end
+  end
+
+  describe "perform/1 folder activation boost cooling" do
+    test "cools folder activation_boost toward 1.0" do
+      user = user_fixture()
+
+      {:ok, folder} =
+        Assistant.Schemas.DocumentFolder.upsert(%{
+          drive_folder_id: "cool-folder-#{System.unique_integer([:positive])}",
+          name: "Hot Folder",
+          user_id: user.id
+        })
+
+      # Set activation_boost above 1.0
+      import Ecto.Query
+
+      from(df in Assistant.Schemas.DocumentFolder, where: df.id == ^folder.id)
+      |> Repo.update_all(set: [activation_boost: 1.2])
+
+      assert :ok = DecayCoolingWorker.perform(%Oban.Job{args: %{}})
+
+      reloaded = Repo.get!(Assistant.Schemas.DocumentFolder, folder.id)
+      # Should be 1.0 + (1.2 - 1.0) * 0.9 = 1.18
+      assert_in_delta reloaded.activation_boost, 1.18, 0.01
+    end
+
+    test "does not change folder activation_boost at 1.0" do
+      user = user_fixture()
+
+      {:ok, folder} =
+        Assistant.Schemas.DocumentFolder.upsert(%{
+          drive_folder_id: "normal-folder-#{System.unique_integer([:positive])}",
+          name: "Normal Folder",
+          user_id: user.id
+        })
+
+      assert :ok = DecayCoolingWorker.perform(%Oban.Job{args: %{}})
+
+      reloaded = Repo.get!(Assistant.Schemas.DocumentFolder, folder.id)
+      assert_in_delta reloaded.activation_boost, 1.0, 0.001
+    end
+
+    test "folder cooling approaches 1.0 asymptotically over multiple runs" do
+      user = user_fixture()
+
+      {:ok, folder} =
+        Assistant.Schemas.DocumentFolder.upsert(%{
+          drive_folder_id: "hot-folder-#{System.unique_integer([:positive])}",
+          name: "Very Hot Folder",
+          user_id: user.id
+        })
+
+      import Ecto.Query
+
+      from(df in Assistant.Schemas.DocumentFolder, where: df.id == ^folder.id)
+      |> Repo.update_all(set: [activation_boost: 1.3])
+
+      for _ <- 1..5 do
+        DecayCoolingWorker.perform(%Oban.Job{args: %{}})
+      end
+
+      reloaded = Repo.get!(Assistant.Schemas.DocumentFolder, folder.id)
+      # After 5 rounds: 1.0 + 0.3 * 0.9^5 = 1.0 + 0.3 * 0.59049 = 1.177
+      assert reloaded.activation_boost < 1.3
+      assert reloaded.activation_boost > 1.0
     end
   end
 

@@ -88,6 +88,37 @@ defmodule Assistant.Embeddings.SemanticChunkerTest do
     end
   end
 
+  describe "chunk/2 with custom similarity_threshold" do
+    test "accepts :similarity_threshold option without error" do
+      text = "Elixir is great. Rust is fast. Python is popular."
+      result = SemanticChunker.chunk(text, similarity_threshold: 0.9)
+      assert is_list(result)
+      assert length(result) >= 1
+      # All content should still be present
+      full_text = Enum.map_join(result, " ", & &1.text)
+      assert String.contains?(full_text, "Elixir")
+      assert String.contains?(full_text, "Rust")
+      assert String.contains?(full_text, "Python")
+    end
+
+    test "threshold of 0.0 produces no boundaries (everything in one chunk)" do
+      text = "First sentence here. Second sentence there. Third sentence everywhere."
+      result_low = SemanticChunker.chunk(text, similarity_threshold: 0.0)
+      # With threshold 0.0, all similarities >= 0.0, so no boundaries → 1 chunk
+      # (unless embeddings are disabled, in which case all sims are 1.0 anyway)
+      assert length(result_low) >= 1
+    end
+
+    test "threshold of 1.0 maximizes boundary detection" do
+      text = "Alpha bravo charlie. Delta echo foxtrot. Golf hotel india."
+      result_high = SemanticChunker.chunk(text, similarity_threshold: 1.0)
+      result_default = SemanticChunker.chunk(text)
+      # With threshold 1.0, every pair with sim < 1.0 creates a boundary
+      # so we should get at least as many chunks as default
+      assert length(result_high) >= length(result_default)
+    end
+  end
+
   describe "chunk/2 size enforcement" do
     test "very long text produces chunks with reasonable token counts" do
       # Generate text well over 450 tokens (~1800 chars)

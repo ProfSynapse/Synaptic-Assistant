@@ -1,6 +1,6 @@
 defmodule Assistant.Memory.DecayCoolingWorker do
   @moduledoc false
-  use Oban.Worker, queue: :maintenance, max_attempts: 1
+  use Oban.Worker, queue: :maintenance, max_attempts: 3
 
   import Ecto.Query
   alias Assistant.Repo
@@ -29,26 +29,15 @@ defmodule Assistant.Memory.DecayCoolingWorker do
   end
 
   defp cool_folder_activation_boosts do
-    # Only run if the document_folders table exists (Phase 3d)
-    if table_exists?("document_folders") do
-      from(df in "document_folders",
-        where: fragment("activation_boost != 1.0"),
-        update: [set: [
-          activation_boost: fragment(
-            "1.0 + (COALESCE(activation_boost, 1.0) - 1.0) * ?",
-            ^@cooling_rate
-          )
-        ]]
-      )
-      |> Repo.update_all([])
-    end
-  end
-
-  defp table_exists?(table_name) do
-    query = "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)"
-    case Repo.query(query, [table_name]) do
-      {:ok, %{rows: [[true]]}} -> true
-      _ -> false
-    end
+    from(df in "document_folders",
+      where: fragment("activation_boost != 1.0"),
+      update: [set: [
+        activation_boost: fragment(
+          "1.0 + (COALESCE(activation_boost, 1.0) - 1.0) * ?",
+          ^@cooling_rate
+        )
+      ]]
+    )
+    |> Repo.update_all([])
   end
 end

@@ -46,8 +46,21 @@ defmodule Assistant.Embeddings.FolderEmbedder do
   defp mean_embedding(embeddings) do
     n = length(embeddings)
 
-    embeddings
-    |> Enum.map(&Pgvector.to_list/1)
-    |> Enum.zip_with(fn vals -> Enum.sum(vals) / n end)
+    mean =
+      embeddings
+      |> Enum.map(&Pgvector.to_list/1)
+      |> Enum.zip_with(fn vals -> Enum.sum(vals) / n end)
+
+    l2_normalize(mean)
+  end
+
+  defp l2_normalize(vector) do
+    magnitude = :math.sqrt(Enum.reduce(vector, 0.0, fn x, acc -> acc + x * x end))
+
+    if magnitude > 0.0 do
+      Enum.map(vector, &(&1 / magnitude))
+    else
+      vector
+    end
   end
 end

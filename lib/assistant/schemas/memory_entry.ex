@@ -88,7 +88,10 @@ defmodule Assistant.Schemas.MemoryEntry do
   end
 
   defp normalize_title(changeset) do
-    update_change(changeset, :title, &String.trim/1)
+    update_change(changeset, :title, fn
+      nil -> nil
+      title -> String.trim(title)
+    end)
   end
 
   defp derive_title(content) do

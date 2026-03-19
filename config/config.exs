@@ -73,6 +73,8 @@ config :assistant, Oban,
        {"0 4 * * *", Assistant.Sync.Workers.HistoryPruningWorker},
        # Archive stale conversations (inactive > 30 days) daily at 05:00 UTC
        {"0 5 * * *", Assistant.Channels.ConversationArchiver},
+       # Cool memory decay factors and folder activation boosts daily at 02:00 UTC
+       {"0 2 * * *", Assistant.Memory.DecayCoolingWorker},
        # Capture retained-storage snapshots hourly for billing/account usage.
        {"10 * * * *", Assistant.Workers.BillingUsageSnapshotWorker},
        # Report current-period average storage overage to Stripe hourly.

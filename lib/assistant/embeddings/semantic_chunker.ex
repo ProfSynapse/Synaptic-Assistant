@@ -170,13 +170,4 @@ defmodule Assistant.Embeddings.SemanticChunker do
     div(byte_size(text), @approx_chars_per_token)
   end
 
-  defp build_chunk(text, index, _original) do
-    %{
-      text: text,
-      chunk_index: index,
-      token_count: estimate_tokens(text),
-      header_path: nil,
-      source_type: :plain
-    }
-  end
 end

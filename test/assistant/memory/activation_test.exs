@@ -101,6 +101,62 @@ defmodule Assistant.Memory.ActivationTest do
     end
   end
 
+  describe "spread/2 boost math precision" do
+    test "boost formula is LEAST(1.5, decay_factor + 0.05 * cosine_similarity)" do
+      user = user_fixture()
+
+      # Use identical embeddings (seed 50 for both) → cosine similarity ≈ 1.0
+      retrieved = memory_with_embedding!(user, "Source memory", 50)
+      neighbor = memory_with_embedding!(user, "Identical neighbor", 50)
+
+      Activation.spread(user.id, [%{id: retrieved.id, embedding: retrieved.embedding}])
+
+      reloaded = Repo.get!(MemoryEntry, neighbor.id)
+      decay = Decimal.to_float(reloaded.decay_factor)
+      # Formula: LEAST(1.5, 1.0 + 0.05 * ~1.0) ≈ 1.05
+      # Cosine sim of identical vectors = 1.0 (dot product of L2-normalized vectors)
+      assert_in_delta decay, 1.05, 0.01
+    end
+
+    test "boost proportional to cosine similarity (dissimilar gets less)" do
+      user = user_fixture()
+
+      retrieved = memory_with_embedding!(user, "Source A", 300)
+      similar_neighbor = memory_with_embedding!(user, "Similar B", 301)
+      dissimilar_neighbor = memory_with_embedding!(user, "Different C", 999)
+
+      Activation.spread(user.id, [%{id: retrieved.id, embedding: retrieved.embedding}])
+
+      similar_decay = Decimal.to_float(Repo.get!(MemoryEntry, similar_neighbor.id).decay_factor)
+      dissimilar_decay =
+        Decimal.to_float(Repo.get!(MemoryEntry, dissimilar_neighbor.id).decay_factor)
+
+      # Similar neighbor should get higher boost than dissimilar one
+      # (or dissimilar may not be boosted at all if similarity < 0.6 threshold)
+      assert similar_decay >= dissimilar_decay
+    end
+
+    test "neighbors below min_similarity threshold (0.6) are not boosted" do
+      user = user_fixture()
+
+      # Create a retrieved entry with one embedding
+      retrieved = memory_with_embedding!(user, "Source X", 1)
+
+      # Create a neighbor with a very different embedding (high seed distance)
+      # Random embeddings from very different seeds tend to have low cosine similarity
+      far_neighbor = memory_with_embedding!(user, "Far away neighbor", 99999)
+
+      Activation.spread(user.id, [%{id: retrieved.id, embedding: retrieved.embedding}])
+
+      reloaded = Repo.get!(MemoryEntry, far_neighbor.id)
+      far_decay = Decimal.to_float(reloaded.decay_factor)
+
+      # If similarity < 0.6, neighbor should not be boosted (stays at 1.0)
+      # Note: random vectors in high dimensions tend to cluster near 0 cosine sim
+      assert_in_delta far_decay, 1.0, 0.01
+    end
+  end
+
   describe "spread/2 isolation" do
     test "does not affect other users' memories" do
       user1 = user_fixture()

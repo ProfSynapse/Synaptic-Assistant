@@ -164,12 +164,14 @@ defmodule Assistant.Embeddings.FolderEmbedderTest do
       updated = Repo.get!(DocumentFolder, folder.id)
       assert updated.child_count == 2
 
-      # Mean of two embeddings: (emb1[i] + emb2[i]) / 2
-      expected_mean = Enum.zip_with(emb1, emb2, fn a, b -> (a + b) / 2 end)
+      # Mean of two embeddings, then L2-normalized
+      raw_mean = Enum.zip_with(emb1, emb2, fn a, b -> (a + b) / 2 end)
+      magnitude = :math.sqrt(Enum.reduce(raw_mean, 0.0, fn x, acc -> acc + x * x end))
+      expected = Enum.map(raw_mean, &(&1 / magnitude))
       stored = Pgvector.to_list(updated.embedding)
 
-      for {expected, actual} <- Enum.zip(expected_mean, stored) do
-        assert_in_delta expected, actual, 1.0e-5
+      for {exp, actual} <- Enum.zip(expected, stored) do
+        assert_in_delta exp, actual, 1.0e-5
       end
     end
   end

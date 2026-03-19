@@ -1,6 +1,7 @@
 defmodule Assistant.Embeddings.UnifiedSearch do
   @moduledoc false
 
+  require Logger
   import Ecto.Query
   alias Assistant.Repo
   alias Assistant.Schemas.DocumentFolder
@@ -17,17 +18,17 @@ defmodule Assistant.Embeddings.UnifiedSearch do
     limit = Keyword.get(opts, :limit, 10)
 
     if Embeddings.enabled?() do
-      # Fan out in parallel
-      memory_task = Task.async(fn ->
+      # Fan out in parallel under supervisor to isolate failures
+      memory_task = Task.Supervisor.async_nolink(Assistant.Skills.TaskSupervisor, fn ->
         search_memories(user_id, query, limit: limit)
       end)
 
-      doc_task = Task.async(fn ->
+      doc_task = Task.Supervisor.async_nolink(Assistant.Skills.TaskSupervisor, fn ->
         search_documents(user_id, query, limit: limit * 2)
       end)
 
-      memories = Task.await(memory_task, 5_000)
-      docs = Task.await(doc_task, 5_000)
+      memories = safe_await(memory_task, [])
+      docs = safe_await(doc_task, [])
 
       merge_rrf(memories, docs, limit)
     else
@@ -86,8 +87,14 @@ defmodule Assistant.Embeddings.UnifiedSearch do
       |> Enum.sort_by(& &1.score, :desc)
       |> Enum.take(limit)
 
-    # Trigger spreading activation post-retrieval
-    Task.start(fn -> DocumentActivation.spread(results) end)
+    # Trigger spreading activation post-retrieval (fire-and-forget with error logging)
+    Task.Supervisor.start_child(Assistant.Skills.TaskSupervisor, fn ->
+      try do
+        DocumentActivation.spread(results)
+      rescue
+        e -> Logger.error("DocumentActivation.spread failed: #{inspect(e)}")
+      end
+    end)
 
     results
   end
@@ -203,4 +210,11 @@ defmodule Assistant.Embeddings.UnifiedSearch do
   defp item_id(%{id: id}), do: id
   defp item_id(%{entry: %{id: id}}), do: id
   defp item_id(item), do: :erlang.phash2(item)
+
+  defp safe_await(task, fallback) do
+    case Task.yield(task, 5_000) || Task.shutdown(task) do
+      {:ok, result} -> result
+      _ -> fallback
+    end
+  end
 end

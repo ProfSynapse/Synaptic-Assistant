@@ -115,6 +115,48 @@ defmodule Assistant.Embeddings.DocumentActivationTest do
       assert_in_delta reloaded_b.activation_boost, 1.06, 0.01
     end
 
+    test "boosts correctly from sub-default activation_boost (< 1.0)" do
+      user = user_fixture()
+      folder = create_folder!(user, "folder-low", "Cold Folder")
+
+      # Set activation_boost below default to simulate over-cooled folder
+      import Ecto.Query
+
+      from(df in DocumentFolder, where: df.id == ^folder.id)
+      |> Repo.update_all(set: [activation_boost: 0.8])
+
+      chunks = [
+        %{metadata: %{"parent_folder_id" => "folder-low"}, document_id: "doc-1"}
+      ]
+
+      DocumentActivation.spread(chunks)
+
+      reloaded = Repo.get!(DocumentFolder, folder.id)
+      # SQL: LEAST(1.3, COALESCE(0.8, 1.0) + 0.03) = LEAST(1.3, 0.83) = 0.83
+      assert_in_delta reloaded.activation_boost, 0.83, 0.01
+    end
+
+    test "boosts from nil activation_boost defaults to COALESCE 1.0" do
+      user = user_fixture()
+      folder = create_folder!(user, "folder-nil", "Nil Boost Folder")
+
+      # Force activation_boost to NULL via raw SQL
+      Repo.query!("UPDATE document_folders SET activation_boost = NULL WHERE id = $1", [
+        Ecto.UUID.dump!(folder.id)
+      ])
+
+      chunks = [
+        %{metadata: %{"parent_folder_id" => "folder-nil"}, document_id: "doc-1"},
+        %{metadata: %{"parent_folder_id" => "folder-nil"}, document_id: "doc-2"}
+      ]
+
+      DocumentActivation.spread(chunks)
+
+      reloaded = Repo.get!(DocumentFolder, folder.id)
+      # SQL: LEAST(1.3, COALESCE(NULL, 1.0) + 0.03 * 2) = LEAST(1.3, 1.06) = 1.06
+      assert_in_delta reloaded.activation_boost, 1.06, 0.01
+    end
+
     test "does not create folders for unknown drive_folder_ids" do
       # Spread activation referencing a folder_id that doesn't exist in DB
       chunks = [
