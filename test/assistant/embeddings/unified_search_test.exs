@@ -13,21 +13,25 @@ defmodule Assistant.Embeddings.UnifiedSearchTest do
 
   describe "module exports" do
     test "exports search/2 and search/3" do
+      Code.ensure_loaded!(UnifiedSearch)
       assert function_exported?(UnifiedSearch, :search, 2)
       assert function_exported?(UnifiedSearch, :search, 3)
     end
 
     test "exports search_documents/2 and search_documents/3" do
+      Code.ensure_loaded!(UnifiedSearch)
       assert function_exported?(UnifiedSearch, :search_documents, 2)
       assert function_exported?(UnifiedSearch, :search_documents, 3)
     end
 
     test "exports search_folders/2 and search_folders/3" do
+      Code.ensure_loaded!(UnifiedSearch)
       assert function_exported?(UnifiedSearch, :search_folders, 2)
       assert function_exported?(UnifiedSearch, :search_folders, 3)
     end
 
     test "exports merge_rrf/3" do
+      Code.ensure_loaded!(UnifiedSearch)
       assert function_exported?(UnifiedSearch, :merge_rrf, 3)
     end
   end

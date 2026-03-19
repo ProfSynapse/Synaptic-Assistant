@@ -9,6 +9,7 @@ defmodule Assistant.Embeddings.ArcanaEmbedderTest do
     end
 
     test "exports Arcana.Embedder behaviour callbacks" do
+      Code.ensure_loaded!(ArcanaEmbedder)
       assert function_exported?(ArcanaEmbedder, :embed, 2)
       assert function_exported?(ArcanaEmbedder, :embed_batch, 2)
       assert function_exported?(ArcanaEmbedder, :dimensions, 1)

@@ -27,11 +27,9 @@ defmodule Assistant.Repo.Migrations.AddFolderInfrastructure do
 
     create unique_index(:document_folders, [:user_id, :drive_folder_id])
 
-    create index(:document_folders, [:embedding],
-      using: "hnsw",
-      options: "WITH (m = 16, ef_construction = 64)",
-      where: "embedding IS NOT NULL",
-      name: :document_folders_embedding_hnsw_index
+    execute(
+      "CREATE INDEX document_folders_embedding_hnsw_index ON document_folders USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64) WHERE embedding IS NOT NULL",
+      "DROP INDEX IF EXISTS document_folders_embedding_hnsw_index"
     )
   end
 end

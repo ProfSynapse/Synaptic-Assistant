@@ -1,9 +1,7 @@
 defmodule Assistant.Memory.Activation do
   @moduledoc false
 
-  import Ecto.Query
   alias Assistant.Repo
-  alias Assistant.Schemas.MemoryEntry
 
   @spread_rate 0.05
   @neighbor_count 5
@@ -36,21 +34,25 @@ defmodule Assistant.Memory.Activation do
   def spread(_user_id, _entries), do: :ok
 
   defp spread_from(user_id, embedding, excluded_ids) do
-    from(me in MemoryEntry,
-      where: me.user_id == ^user_id
-        and me.id not in ^excluded_ids
-        and not is_nil(me.embedding)
-        and fragment("1 - (embedding <=> ?::vector)", ^embedding) > ^@min_similarity,
-      order_by: fragment("embedding <=> ?::vector", ^embedding),
-      limit: ^@neighbor_count
-    )
-    |> Repo.update_all(
-      set: [
-        decay_factor: fragment(
-          "LEAST(?, COALESCE(decay_factor, 1.0) + ? * (1 - (embedding <=> ?::vector)))",
-          ^@max_decay_factor, ^@spread_rate, ^embedding
-        )
-      ]
+    embedding_param = Pgvector.new(embedding)
+    user_id_bin = Ecto.UUID.dump!(user_id)
+    excluded_id_bins = Enum.map(excluded_ids, &Ecto.UUID.dump!/1)
+
+    Repo.query!(
+      """
+      UPDATE memory_entries
+      SET decay_factor = LEAST($1, COALESCE(decay_factor, 1.0) + $2 * (1 - (embedding <=> $3::vector)))
+      WHERE id IN (
+        SELECT id FROM memory_entries
+        WHERE user_id = $4
+          AND id != ALL($5)
+          AND embedding IS NOT NULL
+          AND (1 - (embedding <=> $3::vector)) > $6
+        ORDER BY embedding <=> $3::vector
+        LIMIT $7
+      )
+      """,
+      [@max_decay_factor, @spread_rate, embedding_param, user_id_bin, excluded_id_bins, @min_similarity, @neighbor_count]
     )
   end
 end

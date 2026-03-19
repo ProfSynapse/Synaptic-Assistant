@@ -8,3 +8,9 @@ defmodule Assistant.Repo do
     otp_app: :assistant,
     adapter: Ecto.Adapters.Postgres
 end
+
+Postgrex.Types.define(
+  Assistant.PostgrexTypes,
+  [Pgvector.Extensions.Vector] ++ Ecto.Adapters.Postgres.extensions(),
+  []
+)

@@ -69,6 +69,7 @@ defmodule Assistant.MixProject do
       # Database
       {:ecto_sql, "~> 3.12"},
       {:postgrex, ">= 0.0.0"},
+      {:pgvector, "~> 0.3"},
 
       # HTTP client
       {:req, "~> 0.5"},

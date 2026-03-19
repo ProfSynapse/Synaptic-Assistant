@@ -13,6 +13,7 @@ defmodule Assistant.Schemas.MemoryEntry do
   @source_types ~w(conversation skill_execution user_explicit system agent_result)
 
   schema "memory_entries" do
+    field :title, :string
     field :content, :string
     field :tags, {:array, :string}, default: []
     field :search_queries, {:array, :string}, default: []
@@ -40,7 +41,7 @@ defmodule Assistant.Schemas.MemoryEntry do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @required_fields [:content]
+  @required_fields [:content, :title]
   @optional_fields [
     :tags,
     :search_queries,
@@ -61,12 +62,43 @@ defmodule Assistant.Schemas.MemoryEntry do
   def changeset(memory_entry, attrs) do
     memory_entry
     |> cast(attrs, @required_fields ++ @optional_fields)
+    |> normalize_title()
+    |> maybe_put_generated_title()
     |> validate_required(@required_fields)
+    |> validate_length(:title, max: 160)
     |> validate_inclusion(:source_type, @source_types)
     |> validate_number(:importance, greater_than_or_equal_to: 0, less_than_or_equal_to: 1)
     |> validate_number(:decay_factor, greater_than_or_equal_to: 0, less_than_or_equal_to: 1)
     |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:source_conversation_id)
     |> check_constraint(:source_type, name: :valid_source_type)
+  end
+
+  defp maybe_put_generated_title(changeset) do
+    case {get_field(changeset, :title), get_field(changeset, :content)} do
+      {title, _content} when is_binary(title) and title != "" ->
+        changeset
+
+      {_title, content} when is_binary(content) ->
+        put_change(changeset, :title, derive_title(content))
+
+      _ ->
+        changeset
+    end
+  end
+
+  defp normalize_title(changeset) do
+    update_change(changeset, :title, &String.trim/1)
+  end
+
+  defp derive_title(content) do
+    content
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> String.slice(0, 160)
+    |> case do
+      "" -> "Untitled memory"
+      title -> title
+    end
   end
 end

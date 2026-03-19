@@ -102,7 +102,7 @@ defmodule Assistant.Integrations.OpenRouterWebSearchTest do
         else: Application.delete_env(:assistant, :openrouter_api_key)
     end)
 
-    Bypass.expect_once(bypass, "POST", "/api/v1/chat/completions", fn conn ->
+    Bypass.expect(bypass, "POST", "/api/v1/chat/completions", fn conn ->
       conn
       |> Plug.Conn.put_resp_header("retry-after", "12")
       |> Plug.Conn.resp(429, Jason.encode!(%{"error" => %{"message" => "rate limited"}}))

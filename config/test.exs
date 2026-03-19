@@ -19,6 +19,7 @@ config :assistant, Assistant.Repo,
   database: "assistant_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2,
+  types: Assistant.PostgrexTypes,
   # Real-LLM integration tests (e.g., approval_gate_llm_test) can take
   # 60-90s per turn — extend beyond the default 120s to avoid disconnects.
   ownership_timeout: 300_000

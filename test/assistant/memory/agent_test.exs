@@ -13,6 +13,10 @@ defmodule Assistant.Memory.AgentTest do
   alias Assistant.Memory.Agent, as: MemoryAgent
 
   setup do
+    # Allow the GenServer process to access the DB sandbox
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Assistant.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(Assistant.Repo, {:shared, self()})
+
     # Start infrastructure processes, idempotently and unlinked.
     # Order matters: PubSub -> TaskSupervisor -> SubAgent.Registry -> Skills.Registry -> PromptLoader
     # Using Process.unlink so infrastructure survives test process cleanup.
@@ -50,7 +54,7 @@ defmodule Assistant.Memory.AgentTest do
     # Config.Loader (ETS-backed GenServer for model/limits config)
     ensure_config_loader_started()
 
-    user_id = "mem-agent-test-#{System.unique_integer([:positive])}"
+    user_id = Ecto.UUID.generate()
 
     on_exit(fn ->
       # Clean up any leftover MemoryAgent for this user_id

@@ -33,17 +33,9 @@ defmodule Assistant.Embeddings.DocumentActivation do
     boost = @spread_rate * length(retrieved_chunks)
 
     from(df in DocumentFolder,
-      where: df.drive_folder_id == ^folder_id
+      where: df.drive_folder_id == ^folder_id,
+      update: [set: [activation_boost: fragment("LEAST(?, COALESCE(activation_boost, 1.0) + ?)", ^@max_boost, ^boost)]]
     )
-    |> Repo.update_all(
-      set: [
-        activation_boost:
-          fragment(
-            "LEAST(?, COALESCE(activation_boost, 1.0) + ?)",
-            ^@max_boost,
-            ^boost
-          )
-      ]
-    )
+    |> Repo.update_all([])
   end
 end

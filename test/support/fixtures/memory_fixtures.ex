@@ -84,6 +84,7 @@ defmodule Assistant.MemoryFixtures do
   """
   def memory_fixture!(user, content, opts \\ []) do
     attrs = %{
+      title: Keyword.get(opts, :title),
       content: content,
       category: Keyword.get(opts, :category, "fact"),
       tags: Keyword.get(opts, :tags, []),

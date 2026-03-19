@@ -33,7 +33,7 @@ defmodule Assistant.Embeddings.SemanticChunker do
   # Split on markdown headers (always boundaries) then on sentence-ending punctuation
   defp split_sentences(text) do
     text
-    |> String.split(~r/(?=^#{1,6}\s)/m)
+    |> String.split(~r/(?=^\#{1,6}\s)/m)
     |> Enum.flat_map(&split_block_sentences/1)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
@@ -143,7 +143,7 @@ defmodule Assistant.Embeddings.SemanticChunker do
   defp extract_header_path(text) do
     text
     |> String.split("\n")
-    |> Enum.filter(&String.match?(&1, ~r/^#{1,6}\s/))
+    |> Enum.filter(&String.match?(&1, ~r/^\#{1,6}\s/))
     |> Enum.map(&String.replace(&1, ~r/^#+\s*/, ""))
     |> Enum.join(" > ")
     |> case do
