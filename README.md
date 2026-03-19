@@ -1,18 +1,24 @@
-# Assistant
+# Synaptic Assistant
 
-To start your Phoenix server:
+Synaptic Assistant is a Phoenix application for running the Synaptic Assistant product across cloud and self-hosted environments.
 
-* Run `mix setup` to install and setup dependencies
-* Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
+## Development
 
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
+To start the app locally:
 
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
+- Run `mix setup` to install and set up dependencies.
+- Start Phoenix with `mix phx.server` or `iex -S mix phx.server`.
+- Visit [http://localhost:4000](http://localhost:4000).
 
-## Learn more
+## License
 
-* Official website: https://www.phoenixframework.org/
-* Guides: https://hexdocs.pm/phoenix/overview.html
-* Docs: https://hexdocs.pm/phoenix
-* Forum: https://elixirforum.com/c/phoenix-forum
-* Source: https://github.com/phoenixframework/phoenix
+This repository is licensed under `FSL-1.1-ALv2`. See [LICENSE.md](./LICENSE.md).
+
+In plain language:
+
+- You can use, modify, and self-host Synaptic Assistant for internal use.
+- You can study the code and redistribute modifications under the same license terms.
+- You cannot turn Synaptic Assistant into a competing commercial product or hosted service during the FSL restriction window.
+- Each version automatically converts to Apache 2.0 two years after that version is made available.
+
+If you need commercial rights beyond the FSL terms, contact the project maintainers.

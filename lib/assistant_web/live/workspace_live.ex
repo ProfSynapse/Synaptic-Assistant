@@ -2,6 +2,7 @@ defmodule AssistantWeb.WorkspaceLive do
   use AssistantWeb, :live_view
 
   alias Assistant.Workspace
+  alias AssistantWeb.Components.WorkspaceFeed
   alias AssistantWeb.Components.SettingsPage.Helpers
   alias AssistantWeb.SettingsLive.Context
 
@@ -219,93 +220,7 @@ defmodule AssistantWeb.WorkspaceLive do
                   <p>Start chatting. Messages from connected channels will appear here too.</p>
                 </div>
 
-                <%= for item <- @feed_items do %>
-                  <%= cond do %>
-                    <% item.type == :message -> %>
-                      <article class={["sa-workspace-message", item.role == :user && "is-user", item.role == :assistant && "is-assistant"]}>
-                        <div class="sa-workspace-message-meta">
-                          <div class="sa-workspace-message-meta-left">
-                            <span class="sa-workspace-actor">{actor_label(item.role)}</span>
-                          </div>
-                          <div class="sa-workspace-message-meta-right">
-                            <.channel_icon :if={item[:source_channel]} channel={item.source_channel} />
-                            <span>{format_time(item.inserted_at)}</span>
-                          </div>
-                        </div>
-                        <p class="sa-workspace-message-content">{item.content}</p>
-                      </article>
-
-                    <% item.type == :space_context -> %>
-                      <details class="sa-space-context">
-                        <summary class="sa-space-context-summary">
-                          <.icon name="hero-chat-bubble-left-right" class="sa-space-context-icon" />
-                          <span class="sa-space-context-label">{item.source_label}</span>
-                          <span class="sa-space-context-sub-type">{space_context_sub_type_label(item.sub_type)}</span>
-                          <span class="sa-space-context-time">{format_time(item.inserted_at)}</span>
-                          <.icon name="hero-chevron-right" class="sa-space-context-chevron" />
-                        </summary>
-                        <p class="sa-space-context-content">{item.content}</p>
-                      </details>
-
-                    <% true -> %>
-                      <section class="sa-workspace-activity-stack">
-                        <.card :if={item.tools != []} class="sa-workspace-activity-card">
-                          <div class="sa-workspace-activity-title-row">
-                            <div>
-                              <p class="sa-workspace-activity-kicker">Tools</p>
-                              <h3>{tool_count_label(item.tools)}</h3>
-                            </div>
-                            <span class="sa-workspace-time">{format_time(item.inserted_at)}</span>
-                          </div>
-
-                          <div class="sa-workspace-inline-list">
-                            <article :for={tool <- item.tools} class="sa-workspace-inline-card">
-                              <div class="sa-workspace-inline-copy">
-                                <p class="sa-workspace-inline-title">{tool.name}</p>
-                                <.badge size="sm" color={status_color(tool.status)} variant="soft">
-                                  {status_label(tool.status)}
-                                </.badge>
-                              </div>
-                              <button
-                                type="button"
-                                class="sa-workspace-inspect-btn"
-                                phx-click="inspect_tool"
-                                phx-value-id={tool.inspect_id}
-                                aria-label="Inspect"
-                              >
-                                <.icon name="hero-eye-solid" class="h-4 w-4" />
-                              </button>
-                            </article>
-                          </div>
-                        </.card>
-
-                        <.card :for={sub_agent <- item.sub_agents} class="sa-workspace-activity-card">
-                          <div class="sa-workspace-activity-title-row">
-                            <div>
-                              <p class="sa-workspace-activity-kicker">Sub-agent</p>
-                              <h3>{sub_agent.agent_id}</h3>
-                              <p class="sa-workspace-inline-subtitle">{mission_excerpt(sub_agent.mission)}</p>
-                            </div>
-                            <.badge size="sm" color={status_color(sub_agent.status)} variant="soft">
-                              {status_label(sub_agent.status)}
-                            </.badge>
-                          </div>
-
-                          <div class="sa-workspace-inline-actions">
-                            <button
-                              type="button"
-                              class="sa-workspace-inspect-btn"
-                              phx-click="inspect_sub_agent"
-                              phx-value-id={sub_agent.inspect_id}
-                              aria-label="Inspect"
-                            >
-                              <.icon name="hero-eye-solid" class="h-4 w-4" />
-                            </button>
-                          </div>
-                        </.card>
-                      </section>
-                  <% end %>
-                <% end %>
+                <WorkspaceFeed.workspace_feed_items items={@feed_items} inspect_actions={true} />
               </div>
             </section>
 
@@ -451,24 +366,6 @@ defmodule AssistantWeb.WorkspaceLive do
     """
   end
 
-  attr :channel, :string, required: true
-
-  defp channel_icon(assigns) do
-    icon_name = channel_icon_name(assigns.channel)
-    assigns = assign(assigns, :icon_name, icon_name)
-
-    ~H"""
-    <span :if={@icon_name} class={"#{@icon_name} sa-channel-icon"}></span>
-    """
-  end
-
-  defp channel_icon_name("google_chat"), do: "hero-channel-google-chat"
-  defp channel_icon_name("telegram"), do: "hero-channel-telegram"
-  defp channel_icon_name("slack"), do: "hero-channel-slack"
-  defp channel_icon_name("discord"), do: "hero-channel-discord"
-  defp channel_icon_name("in_app"), do: "hero-channel-in-app"
-  defp channel_icon_name(_), do: nil
-
   defp maybe_load_workspace(socket) do
     workspace_user_id = resolve_workspace_user_id(socket)
     socket = assign(socket, :workspace_user_id, workspace_user_id)
@@ -562,44 +459,9 @@ defmodule AssistantWeb.WorkspaceLive do
 
   defp composer_form(message), do: to_form(%{"message" => message}, as: :composer)
 
-  defp actor_label(:user), do: "You"
-  defp actor_label(:assistant), do: "Synaptic"
-  defp actor_label(_), do: "Synaptic"
-
-  defp space_context_sub_type_label(:question), do: "asked"
-  defp space_context_sub_type_label(:response), do: "responded"
-  defp space_context_sub_type_label(_), do: ""
-
-  defp tool_count_label([_single]), do: "1 tool call"
-  defp tool_count_label(tools), do: "#{length(tools)} tool calls"
-
-  defp mission_excerpt(mission) when is_binary(mission) do
-    mission
-    |> String.replace(~r/\s+/, " ")
-    |> String.trim()
-    |> String.slice(0, 140)
-    |> case do
-      "" -> "Mission text not persisted."
-      text -> text
-    end
-  end
-
-  defp mission_excerpt(_), do: "Mission text not persisted."
-
   defp inspect_title(:tool, data), do: "Tool Run · #{data.name}"
   defp inspect_title(:sub_agent, data), do: "Sub-agent · #{data.agent_id}"
   defp inspect_title(_, _), do: "Inspect"
-
-  defp status_color(status) do
-    case normalize_status(status) do
-      :running -> "info"
-      :awaiting_orchestrator -> "warning"
-      :completed -> "success"
-      :failed -> "danger"
-      :timeout -> "danger"
-      _ -> "gray"
-    end
-  end
 
   defp status_label(status) do
     case normalize_status(status) do
@@ -647,12 +509,6 @@ defmodule AssistantWeb.WorkspaceLive do
 
   defp format_duration(duration_ms) when is_integer(duration_ms), do: "#{duration_ms}ms"
   defp format_duration(_), do: "n/a"
-
-  defp format_time(%DateTime{} = datetime) do
-    Calendar.strftime(datetime, "%b %-d, %-I:%M %p")
-  end
-
-  defp format_time(_), do: ""
 
   defp format_reason(reason) when is_binary(reason), do: reason
   defp format_reason(reason), do: inspect(reason)
