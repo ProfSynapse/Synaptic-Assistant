@@ -14,6 +14,7 @@ config :assistant, Assistant.Repo,
   database: "assistant_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
+  types: Assistant.PostgrexTypes,
   pool_size: 10
 
 # Development endpoint

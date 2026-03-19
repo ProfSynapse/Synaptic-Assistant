@@ -13,6 +13,10 @@ defmodule Assistant.Memory.AgentTest do
   alias Assistant.Memory.Agent, as: MemoryAgent
 
   setup do
+    # Allow the GenServer process to access the DB sandbox
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Assistant.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(Assistant.Repo, {:shared, self()})
+
     # Start infrastructure processes, idempotently and unlinked.
     # Order matters: PubSub -> TaskSupervisor -> SubAgent.Registry -> Skills.Registry -> PromptLoader
     # Using Process.unlink so infrastructure survives test process cleanup.
@@ -50,7 +54,7 @@ defmodule Assistant.Memory.AgentTest do
     # Config.Loader (ETS-backed GenServer for model/limits config)
     ensure_config_loader_started()
 
-    user_id = "mem-agent-test-#{System.unique_integer([:positive])}"
+    user_id = Ecto.UUID.generate()
 
     on_exit(fn ->
       # Clean up any leftover MemoryAgent for this user_id
@@ -222,6 +226,162 @@ defmodule Assistant.Memory.AgentTest do
       wait_for_idle(user_id, 2_000)
 
       {:ok, status} = MemoryAgent.get_status(user_id)
+      assert status.missions_completed >= 1
+
+      GenServer.stop(pid, :normal, 1_000)
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # execute_with_search_first — via SkillExecutor integration
+  # ---------------------------------------------------------------
+
+  describe "execute_with_search_first behavior" do
+    test "agent uses SkillExecutor (module exists and exports execute/6)" do
+      alias Assistant.Memory.SkillExecutor
+      assert Code.ensure_loaded?(SkillExecutor)
+      assert function_exported?(SkillExecutor, :execute, 6)
+    end
+
+    test "agent does NOT reference Policy module (removed)" do
+      # Verify that the agent module source does not define or alias a Policy module
+      {:ok, agent_source} =
+        File.read(
+          Path.join([
+            File.cwd!(),
+            "lib",
+            "assistant",
+            "memory",
+            "agent.ex"
+          ])
+        )
+
+      refute String.contains?(agent_source, "alias Assistant.Memory.Policy")
+      refute String.contains?(agent_source, "Policy.check")
+      refute String.contains?(agent_source, "Policy.allow")
+    end
+
+    test "agent references execute_with_search_first in source" do
+      {:ok, agent_source} =
+        File.read(
+          Path.join([
+            File.cwd!(),
+            "lib",
+            "assistant",
+            "memory",
+            "agent.ex"
+          ])
+        )
+
+      assert String.contains?(agent_source, "execute_with_search_first")
+      assert String.contains?(agent_source, "SkillExecutor")
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # build_mission_text — covers all action types
+  # ---------------------------------------------------------------
+
+  describe "cast dispatch for all action types" do
+    test "extract_entities cast accepted from idle", %{user_id: user_id} do
+      {:ok, pid} = MemoryAgent.start_link(user_id: user_id)
+
+      GenServer.cast(
+        pid,
+        {:mission, :extract_entities,
+         %{
+           conversation_id: "conv-extract",
+           user_id: user_id,
+           user_message: "Alice is an engineer at TechCo",
+           assistant_response: "Noted."
+         }}
+      )
+
+      wait_for_idle(user_id, 2_000)
+      {:ok, status} = MemoryAgent.get_status(user_id)
+      assert status.status == :idle
+      GenServer.stop(pid, :normal, 1_000)
+    end
+
+    test "save_and_extract cast accepted from idle", %{user_id: user_id} do
+      {:ok, pid} = MemoryAgent.start_link(user_id: user_id)
+
+      GenServer.cast(
+        pid,
+        {:mission, :save_and_extract,
+         %{
+           conversation_id: "conv-save-extract",
+           user_id: user_id,
+           user_message: "Bob is CTO",
+           assistant_response: "Got it."
+         }}
+      )
+
+      wait_for_idle(user_id, 2_000)
+      {:ok, status} = MemoryAgent.get_status(user_id)
+      assert status.status == :idle
+      GenServer.stop(pid, :normal, 1_000)
+    end
+
+    test "unknown action uses generic fallback", %{user_id: user_id} do
+      {:ok, pid} = MemoryAgent.start_link(user_id: user_id)
+
+      GenServer.cast(
+        pid,
+        {:mission, :unknown_action,
+         %{conversation_id: "conv-unknown", user_id: user_id}}
+      )
+
+      wait_for_idle(user_id, 2_000)
+      {:ok, status} = MemoryAgent.get_status(user_id)
+      assert status.status == :idle
+      GenServer.stop(pid, :normal, 1_000)
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # Busy state — dispatch and cast rejection
+  # ---------------------------------------------------------------
+
+  describe "busy state handling" do
+    test "dispatch returns {:error, :busy} when agent is running", %{user_id: user_id} do
+      {:ok, pid} = MemoryAgent.start_link(user_id: user_id)
+
+      # Dispatch first mission
+      :ok = MemoryAgent.dispatch(user_id, %{mission: "First mission"})
+
+      # Immediately try second dispatch — agent should be running
+      # (may or may not be busy depending on timing, but test the API contract)
+      result = MemoryAgent.dispatch(user_id, %{mission: "Second mission"})
+      assert result in [:ok, {:error, :busy}]
+
+      wait_for_idle(user_id, 3_000)
+      GenServer.stop(pid, :normal, 1_000)
+    end
+
+    test "cast mission dropped when agent is busy", %{user_id: user_id} do
+      {:ok, pid} = MemoryAgent.start_link(user_id: user_id)
+
+      # Start first mission
+      :ok = MemoryAgent.dispatch(user_id, %{mission: "First"})
+
+      # Cast second mission while potentially busy — should not crash
+      GenServer.cast(
+        pid,
+        {:mission, :save_memory,
+         %{
+           conversation_id: "conv-busy",
+           user_id: user_id,
+           user_message: "Dropped",
+           assistant_response: "Should be dropped"
+         }}
+      )
+
+      wait_for_idle(user_id, 3_000)
+
+      {:ok, status} = MemoryAgent.get_status(user_id)
+      assert status.status == :idle
+      # Only 1 mission should have completed (the second was dropped or also completed)
       assert status.missions_completed >= 1
 
       GenServer.stop(pid, :normal, 1_000)

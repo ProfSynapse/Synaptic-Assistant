@@ -19,6 +19,7 @@ config :assistant, Assistant.Repo,
   database: "assistant_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2,
+  types: Assistant.PostgrexTypes,
   # Real-LLM integration tests (e.g., approval_gate_llm_test) can take
   # 60-90s per turn — extend beyond the default 120s to avoid disconnects.
   ownership_timeout: 300_000
@@ -65,3 +66,6 @@ config :phoenix, :plug_init_mode, :runtime
 
 # Sort query params output of verified routes for robust url comparisons
 config :phoenix, sort_verified_routes_query_params: true
+
+# Disable embeddings in test
+config :assistant, :embeddings, enabled: false

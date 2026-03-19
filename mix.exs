@@ -69,6 +69,7 @@ defmodule Assistant.MixProject do
       # Database
       {:ecto_sql, "~> 3.12"},
       {:postgrex, ">= 0.0.0"},
+      {:pgvector, "~> 0.3"},
 
       # HTTP client
       {:req, "~> 0.5"},
@@ -96,6 +97,10 @@ defmodule Assistant.MixProject do
       {:fuse, "~> 2.5"},
       {:yaml_elixir, "~> 2.11"},
       {:file_system, "~> 1.0"},
+
+      # Embeddings & RAG
+      {:arcana, "~> 1.3"},
+      {:exla, "~> 0.9"},
 
       # Dev & test tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

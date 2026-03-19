@@ -59,7 +59,8 @@ config :assistant, Oban,
     sync: 5,
     google_drive_sync: 5,
     maintenance: 3,
-    space_context: 5
+    space_context: 5,
+    embeddings: 5
   ],
   plugins: [
     {Oban.Plugins.Cron,
@@ -72,6 +73,8 @@ config :assistant, Oban,
        {"0 4 * * *", Assistant.Sync.Workers.HistoryPruningWorker},
        # Archive stale conversations (inactive > 30 days) daily at 05:00 UTC
        {"0 5 * * *", Assistant.Channels.ConversationArchiver},
+       # Cool memory decay factors and folder activation boosts daily at 02:00 UTC
+       {"0 2 * * *", Assistant.Memory.DecayCoolingWorker},
        # Capture retained-storage snapshots hourly for billing/account usage.
        {"10 * * * *", Assistant.Workers.BillingUsageSnapshotWorker},
        # Report current-period average storage overage to Stripe hourly.
@@ -97,6 +100,13 @@ config :tailwind,
     ),
     cd: Path.expand("..", __DIR__)
   ]
+
+# Embeddings + Arcana RAG
+config :assistant, :embeddings, enabled: true
+
+config :arcana,
+  repo: Assistant.Repo,
+  embedder: {Assistant.Embeddings.ArcanaEmbedder, []}
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
