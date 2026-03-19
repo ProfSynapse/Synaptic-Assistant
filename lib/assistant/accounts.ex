@@ -470,7 +470,6 @@ defmodule Assistant.Accounts do
   def register_settings_user(attrs) do
     %SettingsUser{}
     |> SettingsUser.email_changeset(attrs)
-    |> maybe_validate_allowlist_registration()
     |> Repo.insert()
     |> maybe_sync_new_settings_user_access()
   end
@@ -482,43 +481,39 @@ defmodule Assistant.Accounts do
     with {:ok, email} <- normalize_oauth_email(Map.get(attrs, "email") || Map.get(attrs, :email)) do
       display_name = normalize_oauth_display_name(Map.get(attrs, "name") || Map.get(attrs, :name))
 
-      if email_allowed_by_allowlist?(email) do
-        case get_settings_user_by_email(email) do
-          nil ->
-            %SettingsUser{}
-            |> SettingsUser.email_changeset(%{email: email}, validate_changed: false)
-            |> Ecto.Changeset.change(
-              display_name: display_name,
-              confirmed_at: DateTime.utc_now(:second)
-            )
-            |> Repo.insert()
-            |> maybe_sync_new_settings_user_access()
+      case get_settings_user_by_email(email) do
+        nil ->
+          %SettingsUser{}
+          |> SettingsUser.email_changeset(%{email: email}, validate_changed: false)
+          |> Ecto.Changeset.change(
+            display_name: display_name,
+            confirmed_at: DateTime.utc_now(:second)
+          )
+          |> Repo.insert()
+          |> maybe_sync_new_settings_user_access()
 
-          %SettingsUser{} = settings_user ->
-            attrs =
-              %{}
-              |> maybe_put_confirmed_at(settings_user)
-              |> maybe_put_display_name(settings_user, display_name)
+        %SettingsUser{} = settings_user ->
+          attrs =
+            %{}
+            |> maybe_put_confirmed_at(settings_user)
+            |> maybe_put_display_name(settings_user, display_name)
 
-            result =
-              if map_size(attrs) == 0 do
-                {:ok, settings_user}
-              else
-                settings_user
-                |> Ecto.Changeset.change(attrs)
-                |> Repo.update()
-              end
-
-            case result do
-              {:ok, updated_settings_user} ->
-                maybe_sync_and_authorize_settings_user(updated_settings_user)
-
-              other ->
-                other
+          result =
+            if map_size(attrs) == 0 do
+              {:ok, settings_user}
+            else
+              settings_user
+              |> Ecto.Changeset.change(attrs)
+              |> Repo.update()
             end
-        end
-      else
-        {:error, :not_allowed}
+
+          case result do
+            {:ok, updated_settings_user} ->
+              maybe_sync_and_authorize_settings_user(updated_settings_user)
+
+            other ->
+              other
+          end
       end
     end
   end
@@ -793,16 +788,6 @@ defmodule Assistant.Accounts do
     :ok
   end
 
-  defp maybe_validate_allowlist_registration(%Ecto.Changeset{} = changeset) do
-    email = Ecto.Changeset.get_field(changeset, :email)
-
-    if changeset.valid? and is_binary(email) and not email_allowed_by_allowlist?(email) do
-      Ecto.Changeset.add_error(changeset, :email, "is not on the allow list")
-    else
-      changeset
-    end
-  end
-
   defp maybe_sync_new_settings_user_access({:ok, %SettingsUser{} = settings_user}) do
     maybe_sync_and_authorize_settings_user(settings_user)
   end
@@ -813,12 +798,10 @@ defmodule Assistant.Accounts do
     if SettingsUser.disabled?(settings_user) do
       {:error, :disabled}
     else
-      with true <- email_allowed_by_allowlist?(settings_user.email),
-           {:ok, synced_settings_user} <- sync_settings_user_access_from_allowlist(settings_user),
+      with {:ok, synced_settings_user} <- sync_settings_user_access_from_allowlist(settings_user),
            {:ok, billable_settings_user} <- maybe_ensure_billing_account(synced_settings_user) do
         {:ok, billable_settings_user}
       else
-        false -> {:error, :not_allowed}
         {:error, _} = error -> error
       end
     end
@@ -878,13 +861,6 @@ defmodule Assistant.Accounts do
       {:ok, settings_user}
     end
   end
-
-  defp email_allowed_by_allowlist?(email) when is_binary(email) do
-    not allowlist_enforced?() or
-      match?(%SettingsUserAllowlistEntry{}, active_allowlist_entry_for_email(email))
-  end
-
-  defp email_allowed_by_allowlist?(_), do: false
 
   defp allowlist_enforced? do
     Repo.exists?(from(e in SettingsUserAllowlistEntry, where: e.active == true))

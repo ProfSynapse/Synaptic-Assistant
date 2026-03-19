@@ -3,6 +3,7 @@ defmodule AssistantWeb.Components.SettingsPage.Profile do
 
   use AssistantWeb, :html
 
+  alias Assistant.Deployment
   alias AssistantWeb.Components.SettingsPage.Helpers
 
   def profile_section(assigns) do
@@ -144,8 +145,12 @@ defmodule AssistantWeb.Components.SettingsPage.Profile do
           left on the last day.
         </p>
 
+        <p :if={Deployment.self_hosted?()} class="sa-muted" style="margin-top: 1rem;">
+          This deployment is self-hosted, so Stripe checkout and the cloud pricing catalog are not shown here.
+        </p>
+
         <div
-          :if={@billing_summary.can_manage? && @billing_summary.billing_mode == "standard"}
+          :if={Deployment.cloud?() && @billing_summary.can_manage? && @billing_summary.billing_mode == "standard"}
           class="sa-form-actions"
         >
           <form method="post" action={~p"/billing/checkout/pro"}>
@@ -160,7 +165,7 @@ defmodule AssistantWeb.Components.SettingsPage.Profile do
         </div>
 
         <p
-          :if={@billing_summary.can_manage? && @billing_summary.billing_mode != "standard"}
+          :if={Deployment.cloud?() && @billing_summary.can_manage? && @billing_summary.billing_mode != "standard"}
           class="sa-muted"
           style="margin-top: 1rem;"
         >
@@ -168,7 +173,7 @@ defmodule AssistantWeb.Components.SettingsPage.Profile do
           manage checkout or the Stripe portal.
         </p>
 
-        <p :if={!@billing_summary.can_manage?} class="sa-muted" style="margin-top: 1rem;">
+        <p :if={Deployment.cloud?() && !@billing_summary.can_manage?} class="sa-muted" style="margin-top: 1rem;">
           Billing changes are managed by a workspace billing admin.
         </p>
 

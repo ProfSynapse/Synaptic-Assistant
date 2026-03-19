@@ -11,6 +11,12 @@ parse_bool = fn
   _ -> false
 end
 
+parse_deployment_mode = fn
+  value when value in ["self_hosted", "self-hosted", "selfhosted"] -> :self_hosted
+  value when value in ["cloud", "saas"] -> :cloud
+  _ -> :cloud
+end
+
 # Load .env file in dev so `mix phx.server` works without manual exports.
 # Existing shell env vars take precedence over .env values.
 if config_env() == :dev && File.exists?(".env") do
@@ -39,6 +45,10 @@ end
 # PORT configuration for all environments
 config :assistant, AssistantWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT") || "4000")]
+
+config :assistant,
+       :deployment_mode,
+       parse_deployment_mode.(System.get_env("DEPLOYMENT_MODE"))
 
 if config_env() == :prod do
   database_url =

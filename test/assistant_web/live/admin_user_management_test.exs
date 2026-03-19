@@ -33,7 +33,7 @@ defmodule AssistantWeb.AdminUserManagementTest do
     email = attrs[:email] || unique_settings_user_email()
     attrs = Map.put(attrs, :email, email)
 
-    # Add to allowlist so registration succeeds (bootstrap_admin_access enforces allowlist)
+    # Keep the admin/allowlist metadata in sync for users created through test helpers.
     Accounts.upsert_settings_user_allowlist_entry(
       %{email: email, active: true, is_admin: false, scopes: []},
       nil,
@@ -964,7 +964,7 @@ defmodule AssistantWeb.AdminUserManagementTest do
 
     test "opening detail for a user without billing membership does not create a new billing account",
          %{conn: conn} do
-      target = create_target_user(%{email: "no-billing-account@example.com"})
+      target = unconfirmed_settings_user_fixture(%{email: "no-billing-account@example.com"})
       refute Repo.get!(SettingsUser, target.id).billing_account_id
 
       {:ok, lv, _html} = live(conn, admin_path())
@@ -1033,7 +1033,13 @@ defmodule AssistantWeb.AdminUserManagementTest do
     end
 
     test "handles duplicate email gracefully", %{conn: conn} do
-      _existing = create_target_user(%{email: "dupe-test@example.com"})
+      Accounts.upsert_settings_user_allowlist_entry(
+        %{email: "dupe-test@example.com", active: true, is_admin: false, scopes: []},
+        nil,
+        transaction?: false
+      )
+
+      _existing = unconfirmed_settings_user_fixture(%{email: "dupe-test@example.com"})
 
       {:ok, lv, _html} = live(conn, admin_path())
       switch_to_users_tab(lv)

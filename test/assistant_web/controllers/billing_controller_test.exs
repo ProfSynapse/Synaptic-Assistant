@@ -58,6 +58,22 @@ defmodule AssistantWeb.BillingControllerTest do
       assert redirected_to(conn) == ~p"/settings_users/register"
       assert get_session(conn, :settings_user_return_to) == ~p"/workspace"
     end
+
+    test "self-hosted mode skips the pricing entrypoint" do
+      previous_mode = Application.get_env(:assistant, :deployment_mode)
+      Application.put_env(:assistant, :deployment_mode, :self_hosted)
+
+      on_exit(fn ->
+        Application.put_env(:assistant, :deployment_mode, previous_mode || :cloud)
+      end)
+
+      conn = build_conn() |> get(~p"/pricing/free")
+
+      assert redirected_to(conn) == ~p"/settings_users/log-in"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
+               "Stripe billing is disabled in self-hosted deployments."
+    end
   end
 
   describe "GET /pricing/pro" do
@@ -84,6 +100,22 @@ defmodule AssistantWeb.BillingControllerTest do
       conn = get(conn, ~p"/pricing/pro")
 
       assert redirected_to(conn, 302) == "https://checkout.stripe.test/pro"
+    end
+
+    test "self-hosted mode skips the pro pricing entrypoint" do
+      previous_mode = Application.get_env(:assistant, :deployment_mode)
+      Application.put_env(:assistant, :deployment_mode, :self_hosted)
+
+      on_exit(fn ->
+        Application.put_env(:assistant, :deployment_mode, previous_mode || :cloud)
+      end)
+
+      conn = build_conn() |> get(~p"/pricing/pro")
+
+      assert redirected_to(conn) == ~p"/settings_users/log-in"
+
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) ==
+               "Stripe billing is disabled in self-hosted deployments."
     end
   end
 

@@ -96,7 +96,7 @@ defmodule Assistant.AccountsTest do
       assert is_nil(settings_user.password)
     end
 
-    test "rejects registration when allowlist is active and email is not listed" do
+    test "allows registration even when allowlist has other active entries" do
       {:ok, _entry} =
         Accounts.upsert_settings_user_allowlist_entry(%{
           email: "allowed@example.com",
@@ -105,10 +105,11 @@ defmodule Assistant.AccountsTest do
           scopes: ["chat"]
         })
 
-      {:error, changeset} =
-        Accounts.register_settings_user(%{email: unique_settings_user_email()})
+      assert {:ok, settings_user} =
+               Accounts.register_settings_user(%{email: unique_settings_user_email()})
 
-      assert "is not on the allow list" in errors_on(changeset).email
+      refute settings_user.is_admin
+      assert settings_user.access_scopes == []
     end
 
     test "syncs admin flag and access scopes from allowlist on registration" do

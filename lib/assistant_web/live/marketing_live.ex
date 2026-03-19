@@ -1,30 +1,43 @@
 defmodule AssistantWeb.MarketingLive do
   use AssistantWeb, :live_view
 
+  alias Assistant.Deployment
+  alias Assistant.Accounts
   import AssistantWeb.Components.MarketingPage, only: [marketing_page: 1]
 
   @impl true
   def mount(_params, _session, socket) do
     signed_in? = match?(%{settings_user: %{}} = _scope, socket.assigns[:current_scope])
 
-    socket =
-      socket
-      |> assign(:signed_in?, signed_in?)
-      |> assign(:primary_cta_href, primary_cta_href(signed_in?))
-      |> assign(:free_cta_href, free_cta_href())
-      |> assign(:pro_cta_href, pro_cta_href())
-      |> assign(:nav_app_href, nav_app_href(signed_in?))
-      |> assign(:nav_app_label, nav_app_label(signed_in?))
-      |> assign(:enterprise_contact_href, enterprise_contact_href())
-      |> assign(:self_hosted_repo_href, self_hosted_repo_href())
-      |> assign(:hero_video_src, hero_video_src())
-      |> assign(:hero_video_poster_src, hero_video_poster_src())
-      |> assign(:example_scenarios, example_scenarios())
-      |> assign(:connectors, connectors())
-      |> assign(:feature_cards, feature_cards())
-      |> assign(:faq_items, faq_items())
+    if Deployment.self_hosted?() do
+      target =
+        cond do
+          signed_in? -> ~p"/workspace"
+          Accounts.admin_bootstrap_available?() -> ~p"/setup"
+          true -> ~p"/settings_users/log-in"
+        end
 
-    {:ok, socket}
+      {:ok, redirect(socket, to: target)}
+    else
+      socket =
+        socket
+        |> assign(:signed_in?, signed_in?)
+        |> assign(:primary_cta_href, primary_cta_href(signed_in?))
+        |> assign(:free_cta_href, free_cta_href())
+        |> assign(:pro_cta_href, pro_cta_href())
+        |> assign(:nav_app_href, nav_app_href(signed_in?))
+        |> assign(:nav_app_label, nav_app_label(signed_in?))
+        |> assign(:enterprise_contact_href, enterprise_contact_href())
+        |> assign(:self_hosted_repo_href, self_hosted_repo_href())
+        |> assign(:hero_video_src, hero_video_src())
+        |> assign(:hero_video_poster_src, hero_video_poster_src())
+        |> assign(:example_scenarios, example_scenarios())
+        |> assign(:connectors, connectors())
+        |> assign(:feature_cards, feature_cards())
+        |> assign(:faq_items, faq_items())
+
+      {:ok, socket}
+    end
   end
 
   @impl true

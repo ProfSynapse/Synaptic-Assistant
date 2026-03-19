@@ -387,7 +387,7 @@ defmodule Assistant.AccountsAdminTest do
     end
 
     test "does not create a billing account as a read side effect" do
-      user = settings_user_fixture()
+      user = unconfirmed_settings_user_fixture()
       refute Repo.get!(SettingsUser, user.id).billing_account_id
 
       assert {:ok, detail} = Accounts.get_user_for_admin(user.id)

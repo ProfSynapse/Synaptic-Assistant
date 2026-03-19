@@ -73,4 +73,44 @@ defmodule AssistantWeb.SettingsLive.ProfileBillingTest do
     refute html =~ "Start Pro Checkout"
     refute html =~ "Open Billing Portal"
   end
+
+  test "profile billing card hides Stripe actions in self-hosted mode" do
+    previous_mode = Application.get_env(:assistant, :deployment_mode)
+    Application.put_env(:assistant, :deployment_mode, :self_hosted)
+
+    on_exit(fn ->
+      Application.put_env(:assistant, :deployment_mode, previous_mode || :cloud)
+    end)
+
+    html =
+      render_component(&Profile.profile_section/1,
+        profile: %{},
+        profile_form: to_form(%{}, as: :profile),
+        billing_summary: %{
+          account_name: "Workspace",
+          plan: "free",
+          billing_mode: "standard",
+          stripe_subscription_status: nil,
+          seat_count: 1,
+          seat_bonus: 0,
+          storage_bonus_bytes: 0,
+          billing_email: "owner@example.com",
+          current_period_end: nil,
+          complimentary_until: nil,
+          can_manage?: true
+        },
+        billing_storage: %{
+          included_label: "25 MB",
+          current_label: "1 MB",
+          projected_overage_label: "0 B",
+          plan_note: "Free workspaces stop taking on new retained storage once they hit 25 MB.",
+          metering_available?: true
+        },
+        orchestrator_prompt_html: "<p>Prompt</p>"
+      )
+
+    assert html =~ "self-hosted"
+    refute html =~ "Start Pro Checkout"
+    refute html =~ "Open Billing Portal"
+  end
 end

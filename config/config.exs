@@ -20,6 +20,7 @@ config :assistant, :scopes,
 
 # General application configuration
 config :assistant,
+  deployment_mode: :cloud,
   ecto_repos: [Assistant.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
