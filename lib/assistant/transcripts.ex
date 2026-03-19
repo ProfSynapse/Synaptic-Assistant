@@ -5,11 +5,13 @@ defmodule Assistant.Transcripts do
 
   import Ecto.Query
 
+  alias Assistant.Messages.Content, as: MessageContent
   alias Assistant.Repo
   alias Assistant.Schemas.{Conversation, Message, Task, TaskHistory}
 
   @default_limit 50
   @default_message_limit 400
+  @hosted_preview_placeholder "Preview unavailable in hosted mode"
 
   @spec list_transcripts(keyword()) :: [map()]
   def list_transcripts(opts \\ []) do
@@ -21,36 +23,7 @@ defmodule Assistant.Transcripts do
     since = Keyword.get(opts, :since)
 
     conversation_query =
-      from(c in Conversation,
-        as: :conversation,
-        left_join: m in Message,
-        on: m.conversation_id == c.id,
-        group_by: [
-          c.id,
-          c.channel,
-          c.status,
-          c.agent_type,
-          c.user_id,
-          c.inserted_at,
-          c.last_active_at
-        ],
-        select: %{
-          id: c.id,
-          channel: c.channel,
-          status: c.status,
-          agent_type: c.agent_type,
-          user_id: c.user_id,
-          inserted_at: c.inserted_at,
-          last_active_at: c.last_active_at,
-          message_count: count(m.id),
-          last_message_at: max(m.inserted_at),
-          preview:
-            fragment(
-              "COALESCE((SELECT m2.content FROM messages m2 WHERE m2.conversation_id = ? ORDER BY m2.inserted_at DESC LIMIT 1), '')",
-              c.id
-            )
-        }
-      )
+      conversation_listing_query()
       |> maybe_filter_channel(channel)
       |> maybe_filter_status(status)
       |> maybe_filter_agent_type(agent_type)
@@ -81,6 +54,7 @@ defmodule Assistant.Transcripts do
             limit: ^message_limit
           )
           |> Repo.all()
+          |> then(&MessageContent.hydrate_for_conversation!(conversation_id, &1))
           |> Enum.map(&map_message/1)
 
         related_tasks = related_tasks(conversation_id)
@@ -131,16 +105,20 @@ defmodule Assistant.Transcripts do
   defp maybe_filter_query(queryable, query) do
     pattern = "%#{query}%"
 
-    where(
-      queryable,
-      [c],
-      fragment("CAST(? AS text) ILIKE ?", c.id, ^pattern) or
-        fragment(
-          "EXISTS (SELECT 1 FROM messages m3 WHERE m3.conversation_id = ? AND COALESCE(m3.content, '') ILIKE ?)",
-          c.id,
-          ^pattern
-        )
-    )
+    if hosted_vault_transit_mode?() do
+      where(queryable, [c], fragment("CAST(? AS text) ILIKE ?", c.id, ^pattern))
+    else
+      where(
+        queryable,
+        [c],
+        fragment("CAST(? AS text) ILIKE ?", c.id, ^pattern) or
+          fragment(
+            "EXISTS (SELECT 1 FROM messages m3 WHERE m3.conversation_id = ? AND COALESCE(m3.content, '') ILIKE ?)",
+            c.id,
+            ^pattern
+          )
+      )
+    end
   end
 
   defp maybe_filter_channel(queryable, ""), do: queryable
@@ -165,6 +143,72 @@ defmodule Assistant.Transcripts do
   end
 
   defp maybe_filter_since(queryable, _invalid), do: queryable
+
+  defp conversation_listing_query do
+    if hosted_vault_transit_mode?() do
+      from(c in Conversation,
+        as: :conversation,
+        left_join: m in Message,
+        on: m.conversation_id == c.id,
+        group_by: [
+          c.id,
+          c.channel,
+          c.status,
+          c.agent_type,
+          c.user_id,
+          c.inserted_at,
+          c.last_active_at
+        ],
+        select: %{
+          id: c.id,
+          channel: c.channel,
+          status: c.status,
+          agent_type: c.agent_type,
+          user_id: c.user_id,
+          inserted_at: c.inserted_at,
+          last_active_at: c.last_active_at,
+          message_count: count(m.id),
+          last_message_at: max(m.inserted_at),
+          preview: ^@hosted_preview_placeholder
+        }
+      )
+    else
+      from(c in Conversation,
+        as: :conversation,
+        left_join: m in Message,
+        on: m.conversation_id == c.id,
+        group_by: [
+          c.id,
+          c.channel,
+          c.status,
+          c.agent_type,
+          c.user_id,
+          c.inserted_at,
+          c.last_active_at
+        ],
+        select: %{
+          id: c.id,
+          channel: c.channel,
+          status: c.status,
+          agent_type: c.agent_type,
+          user_id: c.user_id,
+          inserted_at: c.inserted_at,
+          last_active_at: c.last_active_at,
+          message_count: count(m.id),
+          last_message_at: max(m.inserted_at),
+          preview:
+            fragment(
+              "COALESCE((SELECT m2.content FROM messages m2 WHERE m2.conversation_id = ? ORDER BY m2.inserted_at DESC LIMIT 1), '')",
+              c.id
+            )
+        }
+      )
+    end
+  end
+
+  defp hosted_vault_transit_mode? do
+    MessageContent.hosted_vault_transit_mode?()
+  end
 
   defp map_message(message) do
     %{

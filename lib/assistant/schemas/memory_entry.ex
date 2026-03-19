@@ -15,6 +15,7 @@ defmodule Assistant.Schemas.MemoryEntry do
   schema "memory_entries" do
     field :title, :string
     field :content, :string
+    field :content_encrypted, :map
     field :tags, {:array, :string}, default: []
     field :search_queries, {:array, :string}, default: []
     field :category, :string

@@ -11,10 +11,29 @@ parse_bool = fn
   _ -> false
 end
 
+parse_positive_int = fn
+  nil, default ->
+    default
+
+  value, default ->
+    case Integer.parse(to_string(value)) do
+      {int, ""} when int > 0 -> int
+      _ -> default
+    end
+end
+
 parse_deployment_mode = fn
   value when value in ["self_hosted", "self-hosted", "selfhosted"] -> :self_hosted
   value when value in ["cloud", "saas"] -> :cloud
   _ -> :cloud
+end
+
+parse_content_crypto_mode = fn
+  nil -> :local_cloak
+  "" -> :local_cloak
+  value when value in ["local_cloak", "local-cloak", "local"] -> :local_cloak
+  value when value in ["vault_transit", "vault-transit", "vault"] -> :vault_transit
+  other -> raise "invalid CONTENT_CRYPTO_MODE: #{inspect(other)}"
 end
 
 # Load .env file in dev so `mix phx.server` works without manual exports.
@@ -49,6 +68,89 @@ config :assistant, AssistantWeb.Endpoint,
 config :assistant,
        :deployment_mode,
        parse_deployment_mode.(System.get_env("DEPLOYMENT_MODE"))
+
+content_crypto_mode =
+  System.get_env("CONTENT_CRYPTO_MODE")
+  |> parse_content_crypto_mode.()
+
+content_crypto_config =
+  case content_crypto_mode do
+    :local_cloak ->
+      local_key =
+        System.get_env("CONTENT_CRYPTO_LOCAL_KEY") ||
+          System.get_env("CLOAK_ENCRYPTION_KEY")
+
+      decoded_local_key =
+        case local_key do
+          nil ->
+            nil
+
+          key ->
+            case Base.decode64(key) do
+              {:ok, decoded} when byte_size(decoded) == 32 ->
+                decoded
+
+              _ ->
+                raise """
+                CONTENT_CRYPTO_LOCAL_KEY (or CLOAK_ENCRYPTION_KEY fallback) must be base64-encoded 32 bytes
+                when used for local content encryption.
+                """
+            end
+        end
+
+      [
+        mode: :local_cloak,
+        local: [
+          key: decoded_local_key
+        ]
+      ]
+
+    :vault_transit ->
+      vault_addr =
+        System.get_env("VAULT_ADDR") ||
+          raise """
+          CONTENT_CRYPTO_MODE=vault_transit requires VAULT_ADDR.
+          Example: https://vault.example.com
+          """
+
+      vault_auth_mode =
+        case System.get_env("VAULT_AUTH_MODE") || "agent" do
+          "agent" -> :agent
+          "token" -> :token
+          other -> raise "invalid VAULT_AUTH_MODE: #{inspect(other)}"
+        end
+
+      vault_token =
+        case vault_auth_mode do
+          :token ->
+            System.get_env("VAULT_TOKEN") ||
+              raise """
+              VAULT_AUTH_MODE=token requires VAULT_TOKEN.
+              """
+
+          :agent ->
+            nil
+        end
+
+      [
+        mode: :vault_transit,
+        vault: [
+          addr: String.trim_trailing(vault_addr, "/"),
+          auth_mode: vault_auth_mode,
+          token: vault_token,
+          namespace: System.get_env("VAULT_NAMESPACE"),
+          transit_mount: System.get_env("VAULT_TRANSIT_MOUNT") || "transit",
+          transit_key: System.get_env("VAULT_TRANSIT_KEY") || "assistant-content",
+          timeout_ms: parse_positive_int.(System.get_env("VAULT_TIMEOUT_MS"), 5_000)
+        ],
+        cache: [
+          ttl_ms: parse_positive_int.(System.get_env("CONTENT_CRYPTO_DEK_CACHE_TTL_MS"), 300_000),
+          max_entries: parse_positive_int.(System.get_env("CONTENT_CRYPTO_DEK_CACHE_MAX"), 10_000)
+        ]
+      ]
+  end
+
+config :assistant, :content_crypto, content_crypto_config
 
 if config_env() == :prod do
   database_url =

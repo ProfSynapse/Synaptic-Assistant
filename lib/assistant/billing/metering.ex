@@ -189,7 +189,12 @@ defmodule Assistant.Billing.Metering do
       where: u.billing_account_id == ^billing_account_id,
       select:
         type(
-          StorageAccounting.message_size_expr(m.content, m.tool_calls, m.tool_results),
+          StorageAccounting.message_size_expr(
+            m.content,
+            m.content_encrypted,
+            m.tool_calls,
+            m.tool_results
+          ),
           :integer
         )
   end

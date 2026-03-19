@@ -15,6 +15,7 @@ defmodule Assistant.Schemas.Message do
   schema "messages" do
     field :role, :string
     field :content, :string
+    field :content_encrypted, :map
     field :tool_calls, {:array, :map}
     field :tool_results, :map
     field :metadata, :map, default: %{}
@@ -31,6 +32,7 @@ defmodule Assistant.Schemas.Message do
   @required_fields [:role, :conversation_id]
   @optional_fields [
     :content,
+    :content_encrypted,
     :tool_calls,
     :tool_results,
     :metadata,

@@ -36,6 +36,7 @@ defmodule Assistant.Memory.Store do
   import Ecto.Query
 
   alias Assistant.Billing.Policy
+  alias Assistant.Messages.Content, as: MessageContent
   alias Assistant.Repo
   alias Assistant.Schemas.{Conversation, MemoryEntry, Message}
 
@@ -215,19 +216,24 @@ defmodule Assistant.Memory.Store do
   def batch_append_messages(conversation_id, messages) when is_list(messages) do
     now = DateTime.utc_now()
     user_id = conversation_user_id(conversation_id)
-    growth_bytes = Enum.reduce(messages, 0, &(Policy.message_retained_bytes(&1) + &2))
 
-    with :ok <- Policy.ensure_retained_write_allowed(user_id, growth_bytes) do
+    with {:ok, prepared_messages} <- prepare_message_batch(conversation_id, messages),
+         growth_bytes <-
+           Enum.reduce(prepared_messages, 0, &(Policy.message_retained_bytes(&1) + &2)),
+         :ok <- Policy.ensure_retained_write_allowed(user_id, growth_bytes) do
       multi =
-        messages
+        prepared_messages
         |> Enum.with_index()
         |> Enum.reduce(Ecto.Multi.new(), fn {msg_attrs, idx}, multi ->
-          attrs = Map.put(msg_attrs, :conversation_id, conversation_id)
+          {message_id, attrs} =
+            msg_attrs
+            |> Map.put(:conversation_id, conversation_id)
+            |> pop_message_id()
 
           Ecto.Multi.insert(
             multi,
             {:message, idx},
-            Message.changeset(%Message{}, attrs)
+            Message.changeset(%Message{id: message_id}, attrs)
           )
         end)
 
@@ -249,6 +255,7 @@ defmodule Assistant.Memory.Store do
             end)
             |> Enum.sort_by(fn {{:message, idx}, _msg} -> idx end)
             |> Enum.map(fn {_key, msg} -> msg end)
+            |> then(&MessageContent.hydrate_for_conversation!(conversation_id, &1))
 
           {:ok, inserted}
 
@@ -281,15 +288,19 @@ defmodule Assistant.Memory.Store do
   @spec append_message(binary(), map()) :: {:ok, Message.t()} | {:error, term()}
   def append_message(conversation_id, attrs) do
     now = DateTime.utc_now()
-    message_attrs = Map.put(attrs, :conversation_id, conversation_id)
 
-    with :ok <-
+    with {:ok, prepared_attrs} <- MessageContent.prepare_attrs(conversation_id, attrs),
+         {message_id, message_attrs} <-
+           prepared_attrs
+           |> Map.put(:conversation_id, conversation_id)
+           |> pop_message_id(),
+         :ok <-
            Policy.ensure_retained_write_allowed(
              conversation_user_id(conversation_id),
-             Policy.message_retained_bytes(attrs)
+             Policy.message_retained_bytes(message_attrs)
            ) do
       Ecto.Multi.new()
-      |> Ecto.Multi.insert(:message, Message.changeset(%Message{}, message_attrs))
+      |> Ecto.Multi.insert(:message, Message.changeset(%Message{id: message_id}, message_attrs))
       |> Ecto.Multi.update_all(
         :touch_conversation,
         from(c in Conversation, where: c.id == ^conversation_id),
@@ -297,8 +308,11 @@ defmodule Assistant.Memory.Store do
       )
       |> Repo.transaction()
       |> case do
-        {:ok, %{message: message}} -> {:ok, message}
-        {:error, :message, changeset, _changes} -> {:error, changeset}
+        {:ok, %{message: message}} ->
+          {:ok, MessageContent.hydrate_for_conversation!(conversation_id, [message]) |> hd()}
+
+        {:error, :message, changeset, _changes} ->
+          {:error, changeset}
       end
     end
   end
@@ -333,6 +347,7 @@ defmodule Assistant.Memory.Store do
       offset: ^offset
     )
     |> Repo.all()
+    |> then(&MessageContent.hydrate_for_conversation!(conversation_id, &1))
   end
 
   @doc """
@@ -381,7 +396,28 @@ defmodule Assistant.Memory.Store do
           order_by: [asc: m.inserted_at]
         )
         |> Repo.all()
+        |> then(&MessageContent.hydrate_for_conversation!(conversation_id, &1))
     end
+  end
+
+  defp prepare_message_batch(conversation_id, messages) do
+    messages
+    |> Enum.reduce_while({:ok, []}, fn attrs, {:ok, prepared} ->
+      case MessageContent.prepare_attrs(conversation_id, attrs) do
+        {:ok, prepared_attrs} -> {:cont, {:ok, [prepared_attrs | prepared]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, prepared} -> {:ok, Enum.reverse(prepared)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp pop_message_id(attrs) when is_map(attrs) do
+    message_id = Map.get(attrs, :id) || Map.get(attrs, "id") || Ecto.UUID.generate()
+
+    {message_id, attrs |> Map.delete(:id) |> Map.delete("id")}
   end
 
   # ---------------------------------------------------------------------------
@@ -415,42 +451,52 @@ defmodule Assistant.Memory.Store do
   def update_summary(conversation_id, summary_text, model_name, opts \\ []) do
     last_compacted_id = Keyword.get(opts, :last_compacted_message_id)
 
-    set_fields = [
-      summary: summary_text,
-      summary_model: model_name,
-      updated_at: DateTime.utc_now()
-    ]
+    with {:ok, encrypted_summary} <-
+           Assistant.Memory.ConversationSummary.maybe_encrypt(conversation_id, summary_text) do
+      set_fields = [
+        summary: summary_text,
+        summary_model: model_name,
+        updated_at: DateTime.utc_now()
+      ]
 
-    set_fields =
-      if last_compacted_id do
-        Keyword.put(set_fields, :last_compacted_message_id, last_compacted_id)
-      else
-        set_fields
+      set_fields =
+        if encrypted_summary do
+          Keyword.put(set_fields, :summary_encrypted, encrypted_summary)
+        else
+          set_fields
+        end
+
+      set_fields =
+        if last_compacted_id do
+          Keyword.put(set_fields, :last_compacted_message_id, last_compacted_id)
+        else
+          set_fields
+        end
+
+      Ecto.Multi.new()
+      |> Ecto.Multi.update_all(
+        :update_summary,
+        from(c in Conversation,
+          where: c.id == ^conversation_id,
+          select: c
+        ),
+        set: set_fields,
+        inc: [summary_version: 1]
+      )
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{update_summary: {0, _}}} ->
+          {:error, :not_found}
+
+        {:ok, %{update_summary: {1, [conversation]}}} ->
+          {:ok, conversation}
+
+        {:ok, %{update_summary: {_count, [conversation | _]}}} ->
+          {:ok, conversation}
+
+        {:error, _operation, reason, _changes} ->
+          {:error, reason}
       end
-
-    Ecto.Multi.new()
-    |> Ecto.Multi.update_all(
-      :update_summary,
-      from(c in Conversation,
-        where: c.id == ^conversation_id,
-        select: c
-      ),
-      set: set_fields,
-      inc: [summary_version: 1]
-    )
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{update_summary: {0, _}}} ->
-        {:error, :not_found}
-
-      {:ok, %{update_summary: {1, [conversation]}}} ->
-        {:ok, conversation}
-
-      {:ok, %{update_summary: {_count, [conversation | _]}}} ->
-        {:ok, conversation}
-
-      {:error, _operation, reason, _changes} ->
-        {:error, reason}
     end
   end
 
@@ -480,7 +526,8 @@ defmodule Assistant.Memory.Store do
            Policy.ensure_retained_write_allowed(
              user_id,
              Policy.memory_entry_retained_bytes(attrs)
-           ) do
+           ),
+         {:ok, attrs} <- Assistant.Memory.Content.prepare_attrs(user_id, attrs) do
       %MemoryEntry{}
       |> MemoryEntry.changeset(attrs)
       |> Repo.insert()
@@ -502,6 +549,7 @@ defmodule Assistant.Memory.Store do
         {:error, :not_found}
 
       entry ->
+        entry = Assistant.Memory.Content.hydrate!(entry)
         {:ok, Repo.preload(entry, :entity_mentions)}
     end
   end
@@ -528,8 +576,12 @@ defmodule Assistant.Memory.Store do
     )
     |> Repo.update_all(set: [accessed_at: now])
     |> case do
-      {0, _} -> {:error, :not_found}
-      {_count, [entry]} -> {:ok, entry}
+      {0, _} ->
+        {:error, :not_found}
+
+      {_count, [entry]} ->
+        entry = Assistant.Memory.Content.hydrate!(entry)
+        {:ok, entry}
     end
   end
 
@@ -568,6 +620,7 @@ defmodule Assistant.Memory.Store do
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
+    |> Assistant.Memory.Content.hydrate!()
   end
 
   # ---------------------------------------------------------------------------

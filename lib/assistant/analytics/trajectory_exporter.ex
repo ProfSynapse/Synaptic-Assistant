@@ -70,26 +70,30 @@ defmodule Assistant.Analytics.TrajectoryExporter do
   """
   @spec export_turn(map()) :: :ok
   def export_turn(attrs) when is_map(attrs) do
-    conversation_id = Map.get(attrs, :conversation_id, "unknown")
-    user_id = Map.get(attrs, :user_id, "unknown")
+    if hosted_vault_transit_mode?() do
+      :ok
+    else
+      conversation_id = Map.get(attrs, :conversation_id, "unknown")
+      user_id = Map.get(attrs, :user_id, "unknown")
 
-    entry = TrajectoryFormat.build_turn_entry(attrs)
-    line = Jason.encode!(entry) <> "\n"
+      entry = TrajectoryFormat.build_turn_entry(attrs)
+      line = Jason.encode!(entry) <> "\n"
 
-    path = trajectory_path(user_id, conversation_id)
-    File.mkdir_p!(Path.dirname(path))
+      path = trajectory_path(user_id, conversation_id)
+      File.mkdir_p!(Path.dirname(path))
 
-    case File.write(path, line, [:append]) do
-      :ok ->
-        :ok
+      case File.write(path, line, [:append]) do
+        :ok ->
+          :ok
 
-      {:error, reason} ->
-        Logger.warning("Failed to write trajectory",
-          conversation_id: conversation_id,
-          reason: inspect(reason)
-        )
+        {:error, reason} ->
+          Logger.warning("Failed to write trajectory",
+            conversation_id: conversation_id,
+            reason: inspect(reason)
+          )
 
-        :ok
+          :ok
+      end
     end
   rescue
     exception ->
@@ -120,29 +124,33 @@ defmodule Assistant.Analytics.TrajectoryExporter do
   """
   @spec export_conversation(binary(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def export_conversation(conversation_id, opts \\ []) do
-    alias Assistant.Memory.Store
+    if hosted_vault_transit_mode?() do
+      {:error, :disabled_in_hosted_mode}
+    else
+      alias Assistant.Memory.Store
 
-    case Store.get_conversation(conversation_id) do
-      {:ok, conversation} ->
-        messages = Store.list_messages(conversation_id, limit: 10_000, order: :asc)
-        user_id = conversation.user_id || "unknown"
+      case Store.get_conversation(conversation_id) do
+        {:ok, conversation} ->
+          messages = Store.list_messages(conversation_id, limit: 10_000, order: :asc)
+          user_id = conversation.user_id || "unknown"
 
-        path =
-          Keyword.get(opts, :output_path) ||
-            trajectory_path(user_id, conversation_id)
+          path =
+            Keyword.get(opts, :output_path) ||
+              trajectory_path(user_id, conversation_id)
 
-        entry = TrajectoryFormat.build_conversation_entry(conversation, messages)
-        line = Jason.encode!(entry) <> "\n"
+          entry = TrajectoryFormat.build_conversation_entry(conversation, messages)
+          line = Jason.encode!(entry) <> "\n"
 
-        File.mkdir_p!(Path.dirname(path))
+          File.mkdir_p!(Path.dirname(path))
 
-        case File.write(path, line, [:write]) do
-          :ok -> {:ok, path}
-          {:error, reason} -> {:error, reason}
-        end
+          case File.write(path, line, [:write]) do
+            :ok -> {:ok, path}
+            {:error, reason} -> {:error, reason}
+          end
 
-      {:error, reason} ->
-        {:error, reason}
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -167,4 +175,8 @@ defmodule Assistant.Analytics.TrajectoryExporter do
   end
 
   defp sanitize_path_segment(nil), do: "unknown"
+
+  defp hosted_vault_transit_mode? do
+    Assistant.Messages.Content.hosted_vault_transit_mode?()
+  end
 end
