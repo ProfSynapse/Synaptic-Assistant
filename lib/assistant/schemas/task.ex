@@ -18,6 +18,7 @@ defmodule Assistant.Schemas.Task do
     field :short_id, :string
     field :title, :string
     field :description, :string
+    field :description_encrypted, :map
     field :status, :string, default: "todo"
     field :priority, :string, default: "medium"
     field :tags, {:array, :string}, default: []
@@ -49,6 +50,7 @@ defmodule Assistant.Schemas.Task do
   @optional_fields [
     :short_id,
     :description,
+    :description_encrypted,
     :status,
     :priority,
     :tags,
