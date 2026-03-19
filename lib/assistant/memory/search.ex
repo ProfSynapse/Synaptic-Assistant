@@ -331,7 +331,7 @@ defmodule Assistant.Memory.Search do
     now = DateTime.utc_now()
 
     from(me in MemoryEntry, where: me.id in ^ids)
-    |> Repo.update_all(set: [accessed_at: now])
+    |> Repo.update_all(set: [accessed_at: now], inc: [access_count: 1])
 
     entries
   end

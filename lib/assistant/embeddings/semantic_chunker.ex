@@ -104,6 +104,7 @@ defmodule Assistant.Embeddings.SemanticChunker do
 
       [Enum.join(first, " "), Enum.join(second, " ")]
       |> Enum.reject(&(&1 == ""))
+      |> Enum.flat_map(&maybe_split_large/1)
     else
       [chunk]
     end
@@ -116,9 +117,11 @@ defmodule Assistant.Embeddings.SemanticChunker do
   end
 
   defp merge_small([chunk | rest], [prev | acc]) do
-    if estimate_tokens(chunk) < @min_tokens do
-      # Merge with previous chunk
-      merge_small(rest, [prev <> " " <> chunk | acc])
+    merged = prev <> " " <> chunk
+
+    if estimate_tokens(chunk) < @min_tokens and estimate_tokens(merged) <= @max_tokens do
+      # Merge with previous chunk only if combined size stays within limit
+      merge_small(rest, [merged | acc])
     else
       merge_small(rest, [chunk, prev | acc])
     end

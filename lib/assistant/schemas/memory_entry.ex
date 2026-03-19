@@ -68,7 +68,7 @@ defmodule Assistant.Schemas.MemoryEntry do
     |> validate_length(:title, max: 160)
     |> validate_inclusion(:source_type, @source_types)
     |> validate_number(:importance, greater_than_or_equal_to: 0, less_than_or_equal_to: 1)
-    |> validate_number(:decay_factor, greater_than_or_equal_to: 0, less_than_or_equal_to: 1)
+    |> validate_number(:decay_factor, greater_than_or_equal_to: 0, less_than_or_equal_to: 1.5)
     |> foreign_key_constraint(:user_id)
     |> foreign_key_constraint(:source_conversation_id)
     |> check_constraint(:source_type, name: :valid_source_type)

@@ -64,7 +64,7 @@ defmodule Assistant.Embeddings.EmbedMemoryWorkerTest do
       # Insert directly with empty content to bypass changeset content validation
       {:ok, entry} =
         %Assistant.Schemas.MemoryEntry{}
-        |> Ecto.Changeset.change(%{user_id: user.id, content: ""})
+        |> Ecto.Changeset.change(%{user_id: user.id, content: "", title: "Empty test"})
         |> Repo.insert()
 
       job = %Oban.Job{args: %{"memory_entry_id" => entry.id}}

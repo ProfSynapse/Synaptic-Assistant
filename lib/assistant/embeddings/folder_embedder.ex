@@ -47,6 +47,7 @@ defmodule Assistant.Embeddings.FolderEmbedder do
     n = length(embeddings)
 
     embeddings
+    |> Enum.map(&Pgvector.to_list/1)
     |> Enum.zip_with(fn vals -> Enum.sum(vals) / n end)
   end
 end
