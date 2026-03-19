@@ -29,7 +29,10 @@ defmodule AssistantWeb.Layouts do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="csrf-token" content={get_csrf_token()} />
         <title>Synaptic Assistant</title>
-        <link rel="stylesheet" href={~p"/assets/app.css?v=drive-scroll-fix2"} />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+        <link rel="stylesheet" href={~p"/assets/app.css?v=cloud-redesign-8"} />
       </head>
       <body>
         {@inner_content}

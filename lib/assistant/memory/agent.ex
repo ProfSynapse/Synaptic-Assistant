@@ -86,6 +86,8 @@ defmodule Assistant.Memory.Agent do
   alias Assistant.Memory.SkillExecutor
   alias Assistant.Orchestrator.{LLMHelpers, Limits, Sentinel}
   alias Assistant.SkillPermissions
+  alias Assistant.Policy
+  alias Assistant.Policy.Action
   alias Assistant.Skills.{Context, Registry, Result}
   alias Assistant.SpendingLimits
 
@@ -613,38 +615,22 @@ defmodule Assistant.Memory.Agent do
     if not SkillPermissions.enabled_for_user?(gen_state.user_id, skill_name) do
       {{tc, "Skill \"#{skill_name}\" is currently disabled by admin policy."}, executor_session}
     else
-      if skill_name in gen_state.memory_skills do
-        # Sentinel security gate
-        proposed_action = %{
-          skill_name: skill_name,
-          arguments: skill_args,
-          agent_id: "memory_agent:#{gen_state.user_id}"
-        }
+      case resolve_memory_policy(skill_name, skill_args, gen_state) do
+        {:deny, metadata} ->
+          {{tc, metadata[:reason] || "Action blocked by workspace policy."}, executor_session}
 
-        original_request = get_in(gen_state, [:current_mission, :original_request])
+        {:ask, metadata} ->
+          {{tc, policy_message(metadata)}, executor_session}
 
-        case Sentinel.check(
-               original_request,
-               "memory management",
-               proposed_action,
-               user_id: gen_state.user_id
-             ) do
-          {:ok, :approved} ->
-            execute_with_search_first(tc, skill_name, skill_args, gen_state, executor_session)
-
-          {:ok, {:rejected, reason}} ->
-            Logger.warning("Sentinel rejected memory agent action",
-              agent_id: "memory_agent:#{gen_state.user_id}",
-              skill: skill_name,
-              reason: reason
-            )
-
-            {{tc, "Action rejected by security gate: #{reason}"}, executor_session}
-        end
-      else
-        {{tc,
-          "Error: Skill \"#{skill_name}\" is not available. " <>
-            "Available skills: #{Enum.join(gen_state.memory_skills, ", ")}"}, executor_session}
+        {:allow, metadata} ->
+          with_sentinel_memory(
+            tc,
+            skill_name,
+            skill_args,
+            gen_state,
+            executor_session,
+            metadata
+          )
       end
     end
   end
@@ -677,6 +663,99 @@ defmodule Assistant.Memory.Agent do
         {{tc, "Skill execution failed: #{inspect(reason)}"}, updated_session}
     end
   end
+
+  defp with_sentinel_memory(tc, skill_name, skill_args, gen_state, executor_session, _metadata) do
+    if skill_name in gen_state.memory_skills do
+      proposed_action = %{
+        skill_name: skill_name,
+        arguments: skill_args,
+        agent_id: "memory_agent:#{gen_state.user_id}"
+      }
+
+      original_request = get_in(gen_state, [:current_mission, :original_request])
+
+      case Sentinel.check(
+             original_request,
+             "memory management",
+             proposed_action,
+             user_id: gen_state.user_id
+           ) do
+        {:ok, :approved} ->
+          execute_with_search_first(tc, skill_name, skill_args, gen_state, executor_session)
+
+        {:ok, {:rejected, reason}} ->
+          Logger.warning("Sentinel rejected memory agent action",
+            agent_id: "memory_agent:#{gen_state.user_id}",
+            skill: skill_name,
+            reason: reason
+          )
+
+          {{tc, "Action rejected by security gate: #{reason}"}, executor_session}
+      end
+    else
+      {{tc,
+        "Error: Skill \"#{skill_name}\" is not available. " <>
+          "Available skills: #{Enum.join(gen_state.memory_skills, ", ")}"}, executor_session}
+    end
+  end
+
+  defp resolve_memory_policy(skill_name, skill_args, gen_state) do
+    action = build_memory_action(skill_name, skill_args, gen_state)
+    context = %{user_id: gen_state.user_id, mission: "memory management"}
+    policy_rules = Map.get(gen_state, :policy_rules)
+
+    if policy_resolution_enabled?(context, policy_rules) and Code.ensure_loaded?(Policy) and
+         function_exported?(Policy, :resolve_action, 2) do
+      resolve_opts =
+        [scope: context]
+        |> maybe_put_policy_rules(policy_rules)
+
+      case Policy.resolve_action(action, resolve_opts) do
+        {:ok, effect, rule} when effect in [:allow, :ask, :deny] ->
+          {effect, %{rule: rule, reason: rule && rule.reason}}
+
+        _ ->
+          {:allow, %{}}
+      end
+    else
+      {:allow, %{}}
+    end
+  end
+
+  defp build_memory_action(skill_name, skill_args, gen_state) do
+    if Code.ensure_loaded?(Action) do
+      Action.skill_call(skill_name, skill_args, %{
+        user_id: gen_state.user_id,
+        mission: gen_state.current_mission.mission
+      })
+    else
+      %{
+        resource_type: :skill_call,
+        skill: skill_name,
+        domain: "memory",
+        action_class: :memory_write,
+        arguments: skill_args,
+        user_id: gen_state.user_id
+      }
+    end
+  end
+
+  defp policy_message(metadata) do
+    metadata[:reason] ||
+      (metadata[:rule] && metadata[:rule].reason) ||
+      metadata[:message] ||
+      "Action blocked by workspace policy."
+  end
+
+  defp policy_resolution_enabled?(context, policy_rules) do
+    is_list(policy_rules) or valid_policy_scope_id?(context[:user_id])
+  end
+
+  defp maybe_put_policy_rules(opts, nil), do: opts
+  defp maybe_put_policy_rules(opts, policy_rules), do: Keyword.put(opts, :rules, policy_rules)
+
+  defp valid_policy_scope_id?(value) when is_binary(value), do: String.trim(value) != ""
+  defp valid_policy_scope_id?(_value), do: false
 
   # --- Context Building ---
 

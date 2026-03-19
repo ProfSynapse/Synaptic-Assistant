@@ -63,8 +63,11 @@ defmodule Assistant.Orchestrator.ApprovalGate do
     dispatch_params = Keyword.fetch!(opts, :dispatch_params)
     genserver_pid = Keyword.fetch!(opts, :genserver_pid)
     approval_index = Keyword.get(opts, :approval_index)
+    policy_meta = Keyword.get(opts, :policy_meta, %{})
+    policy_effect = Keyword.get(opts, :policy_effect)
 
     reason = build_approval_reason(skill_name, skill_args, skill_def, approval_index)
+    reason = reason <> build_policy_note(policy_effect, policy_meta)
 
     # Synthetic tool_call_id for the pause mechanism. Uses a monotonic integer
     # rather than UUID format because this ID is only used internally by the
@@ -198,6 +201,23 @@ defmodule Assistant.Orchestrator.ApprovalGate do
     "[APPROVAL_REQUIRED] Skill \"#{skill_name}\" requires user approval.\n\n" <>
       "Proposed action:\n#{args_text}" <>
       batch_note
+  end
+
+  defp build_policy_note(_effect, policy_meta) when policy_meta in [nil, %{}], do: ""
+
+  defp build_policy_note(effect, policy_meta) do
+    effect_text =
+      case effect || policy_meta[:effect] do
+        nil -> "ask"
+        value -> to_string(value)
+      end
+
+    reason =
+      policy_meta[:reason] ||
+        (policy_meta[:rule] && policy_meta[:rule].reason) ||
+        "(no rule reason provided)"
+
+    "\n\nPolicy effect: #{String.upcase(effect_text)}\nPolicy reason: #{reason}"
   end
 
   # Format a value for display in the approval reason. Uses inspect for

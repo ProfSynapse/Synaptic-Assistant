@@ -1,9 +1,10 @@
 defmodule Assistant.Skills.Web.FetchTest do
-  use ExUnit.Case, async: false
+  use Assistant.DataCase, async: false
 
   alias Assistant.Skills.Context
   alias Assistant.Skills.Result
   alias Assistant.Skills.Web.Fetch
+  alias Assistant.Schemas.{SyncedFile, User}
   alias Assistant.Sync.FileManager
 
   defmodule FetcherStub do
@@ -60,7 +61,9 @@ defmodule Assistant.Skills.Web.FetchTest do
   end
 
   test "fetches readable text and saves it to the workspace" do
-    context = build_context()
+    user = insert_user("web-fetch")
+    insert_synced_file(user.id, "research/example.md")
+    context = build_context(user.id)
 
     assert {:ok, %Result{status: :ok, content: content, files_produced: files}} =
              Fetch.execute(
@@ -86,7 +89,7 @@ defmodule Assistant.Skills.Web.FetchTest do
   end
 
   test "returns a clear error for disallowed hosts" do
-    context = build_context(web_fetcher: DisallowedHostFetcherStub)
+    context = build_context(nil, web_fetcher: DisallowedHostFetcherStub)
 
     assert {:ok, %Result{status: :error, content: content}} =
              Fetch.execute(%{"url" => "https://blocked.example"}, context)
@@ -95,7 +98,7 @@ defmodule Assistant.Skills.Web.FetchTest do
   end
 
   test "returns a clear error when the fetched page exceeds the size limit" do
-    context = build_context(web_fetcher: TooLargeFetcherStub)
+    context = build_context(nil, web_fetcher: TooLargeFetcherStub)
 
     assert {:ok, %Result{status: :error, content: content}} =
              Fetch.execute(%{"url" => "https://example.com/large"}, context)
@@ -104,7 +107,7 @@ defmodule Assistant.Skills.Web.FetchTest do
   end
 
   test "returns a clear error for redirect loops" do
-    context = build_context(web_fetcher: RedirectLoopFetcherStub)
+    context = build_context(nil, web_fetcher: RedirectLoopFetcherStub)
 
     assert {:ok, %Result{status: :error, content: content}} =
              Fetch.execute(%{"url" => "https://example.com/loop"}, context)
@@ -113,13 +116,13 @@ defmodule Assistant.Skills.Web.FetchTest do
     assert content =~ "3"
   end
 
-  defp build_context(overrides \\ %{}) do
+  defp build_context(user_id \\ Ecto.UUID.generate(), overrides \\ %{}) do
     overrides = Map.new(overrides)
 
     %Context{
       conversation_id: Ecto.UUID.generate(),
       execution_id: Ecto.UUID.generate(),
-      user_id: "test-user",
+      user_id: user_id,
       integrations:
         Map.merge(
           %{
@@ -129,5 +132,33 @@ defmodule Assistant.Skills.Web.FetchTest do
           overrides
         )
     }
+  end
+
+  defp insert_user(prefix) do
+    %User{}
+    |> User.changeset(%{
+      external_id: "#{prefix}-#{System.unique_integer([:positive])}",
+      channel: "test"
+    })
+    |> Repo.insert!()
+  end
+
+  defp insert_synced_file(user_id, local_path) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    %SyncedFile{}
+    |> SyncedFile.changeset(%{
+      user_id: user_id,
+      drive_file_id: "drive-#{System.unique_integer([:positive])}",
+      drive_file_name: Path.basename(local_path),
+      drive_mime_type: "text/markdown",
+      local_path: local_path,
+      local_format: "md",
+      local_modified_at: now,
+      remote_modified_at: now,
+      sync_status: "synced",
+      last_synced_at: now
+    })
+    |> Repo.insert!()
   end
 end

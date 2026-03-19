@@ -8,6 +8,7 @@ defmodule Assistant.Memory.PrefetchTest do
 
   describe "module compilation" do
     test "Prefetch module is loaded and exports resolve/3" do
+      assert Code.ensure_loaded?(Prefetch)
       assert function_exported?(Prefetch, :resolve, 3)
     end
   end
@@ -31,7 +32,7 @@ defmodule Assistant.Memory.PrefetchTest do
         Store.create_memory_entry(%{
           user_id: user.id,
           content: "Alice Chen is a senior backend engineer specializing in distributed systems",
-          source_type: "user",
+          source_type: "user_explicit",
           category: "person",
           tags: ["person", "engineering"],
           search_queries: [
@@ -45,7 +46,7 @@ defmodule Assistant.Memory.PrefetchTest do
         Store.create_memory_entry(%{
           user_id: user.id,
           content: "Project Neptune is a Kubernetes infrastructure overhaul planned for Q2",
-          source_type: "user",
+          source_type: "user_explicit",
           category: "project",
           tags: ["project", "kubernetes"],
           search_queries: [
@@ -59,7 +60,7 @@ defmodule Assistant.Memory.PrefetchTest do
         Store.create_memory_entry(%{
           user_id: user.id,
           content: "The user prefers morning standup meetings at 9am",
-          source_type: "user",
+          source_type: "user_explicit",
           category: "preference",
           tags: ["preference", "meetings"],
           search_queries: [

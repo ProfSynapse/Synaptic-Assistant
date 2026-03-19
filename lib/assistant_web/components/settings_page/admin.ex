@@ -12,6 +12,8 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
   import AssistantWeb.Components.SettingsPage.UserDetail,
     only: [user_detail_section: 1, user_create_section: 1]
 
+  import AssistantWeb.Components.SettingsPage.Policies, only: [policies_section: 1]
+
   @managed_integration_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
   def admin_section(assigns) do
@@ -40,7 +42,8 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
             {tab_id, tab_label} <- [
               {"integrations", "Integrations"},
               {"models", "Models"},
-              {"users", "Users"}
+              {"users", "Users"},
+              {"policies", "Policies"}
             ]
           }
           type="button"
@@ -111,6 +114,10 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
           <.admin_role_defaults {assigns} />
           <.models_section {assigns} />
         </div>
+      </div>
+
+      <div :if={@admin_tab == "policies"}>
+        <.policies_section {assigns} />
       </div>
 
       <div :if={@admin_tab == "users"} class="space-y-6">

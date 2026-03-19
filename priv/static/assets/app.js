@@ -629,6 +629,132 @@
     }, 500)
   })
 
+  Hooks.MarketingReveal = {
+    mounted() {
+      const page = this.el
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-revealed')
+            observer.unobserve(entry.target)
+          }
+        })
+      }, { threshold: 0.1 })
+      page.querySelectorAll('[data-reveal]').forEach(el => {
+        el.style.opacity = '0'
+        el.style.transform = 'translateY(40px)'
+        el.style.transition = 'opacity 0.7s ease, transform 0.7s ease'
+        observer.observe(el)
+      })
+      this._observer = observer
+    },
+    destroyed() {
+      if (this._observer) this._observer.disconnect()
+    }
+  }
+
+  Hooks.HeroBeaker = {
+    mounted() {
+      const canvas = this.el
+      const ctx = canvas.getContext('2d')
+      let frame = 0
+      let running = true
+      const frames = []
+      let loaded = 0
+
+      function resize() {
+        canvas.width = canvas.offsetWidth
+        canvas.height = canvas.offsetHeight
+      }
+
+      function draw() {
+        const img = frames[frame]
+        if (!img || !img.complete || !img.naturalWidth) return
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        const scale = canvas.height / img.naturalHeight
+        const drawW = img.naturalWidth * scale
+        const drawH = img.naturalHeight * scale
+        const x = (canvas.width - drawW) / 2
+        ctx.drawImage(img, x, 0, drawW, drawH)
+      }
+
+      function tick() {
+        if (!running) return
+        draw()
+        frame = (frame + 1) % 183
+        setTimeout(tick, 80)
+      }
+
+      resize()
+      window.addEventListener('resize', resize)
+
+      for (let i = 0; i < 183; i++) {
+        const img = new Image()
+        img.src = `/images/frames/frame_${String(i + 1).padStart(4, '0')}.jpg`
+        img.onload = img.onerror = () => {
+          loaded++
+          if (loaded === 183) tick()
+        }
+        frames.push(img)
+      }
+
+      this._cleanup = () => {
+        running = false
+        window.removeEventListener('resize', resize)
+      }
+    },
+    destroyed() { if (this._cleanup) this._cleanup() }
+  }
+
+  Hooks.ExampleCarousel = {
+    mounted() {
+      const el = this.el
+      let current = 0
+      const slides = Array.from(el.querySelectorAll('.sa-carousel-slide'))
+      const dots = Array.from(el.querySelectorAll('[data-dot]'))
+      const count = slides.length
+
+      function goTo(index) {
+        const next = (index + count) % count
+        slides[current].classList.remove('is-active')
+        dots[current]?.classList.remove('is-active')
+        current = next
+        slides[current].classList.add('is-active')
+        dots[current]?.classList.add('is-active')
+        const bubbles = slides[current].querySelectorAll('[data-bubble]')
+        bubbles.forEach((b, i) => {
+          b.style.opacity = '0'
+          b.style.transform = 'translateY(8px)'
+          setTimeout(() => {
+            b.style.transition = 'opacity 0.3s ease, transform 0.3s ease'
+            b.style.opacity = '1'
+            b.style.transform = 'translateY(0)'
+          }, 100 + i * 120)
+        })
+      }
+
+      el.querySelector('.sa-carousel-prev')?.addEventListener('click', () => goTo(current - 1))
+      el.querySelector('.sa-carousel-next')?.addEventListener('click', () => goTo(current + 1))
+      dots.forEach((dot, i) => dot.addEventListener('click', () => goTo(i)))
+
+      goTo(0)
+    }
+  }
+
+  Hooks.MarketingNav = {
+    mounted() {
+      const nav = this.el
+      const onScroll = () => {
+        nav.classList.toggle('is-scrolled', window.scrollY > 20)
+      }
+      window.addEventListener('scroll', onScroll, { passive: true })
+      this._cleanup = () => window.removeEventListener('scroll', onScroll)
+    },
+    destroyed() {
+      if (this._cleanup) this._cleanup()
+    }
+  }
+
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")
   const LiveSocket =
     window.LiveSocket || window.LiveView?.LiveSocket || window.Phoenix?.LiveView?.LiveSocket || window.Phoenix?.LiveSocket

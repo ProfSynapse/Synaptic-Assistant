@@ -122,10 +122,10 @@ defmodule Assistant.Integrations.OpenRouter do
           {:error, {:rate_limited, retry_after}}
 
         {:ok, %{status: 402, body: resp_body}} ->
-          {:error, {:insufficient_credits, get_in(resp_body, ["error", "message"])}}
+          {:error, {:insufficient_credits, error_message_from_body(resp_body)}}
 
         {:ok, %{status: status, body: resp_body}} when status >= 400 ->
-          error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+          error_message = error_message_from_body(resp_body)
 
           Logger.error("OpenRouter API error: status=#{status} #{error_message}",
             status: status,
@@ -208,7 +208,7 @@ defmodule Assistant.Integrations.OpenRouter do
 
         {:ok, %{status: status, body: resp_body}} when status >= 400 ->
           Process.delete(:openrouter_stream_usage)
-          error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+          error_message = error_message_from_body(resp_body)
           {:error, {:api_error, status, error_message}}
 
         {:error, reason} ->
@@ -236,7 +236,7 @@ defmodule Assistant.Integrations.OpenRouter do
         :ok
 
       {:ok, %{status: status, body: body}} when status >= 400 ->
-        {:error, {:api_error, status, get_in(body, ["error", "message"])}}
+        {:error, {:api_error, status, error_message_from_body(body)}}
 
       {:error, reason} ->
         {:error, {:request_failed, reason}}
@@ -263,7 +263,7 @@ defmodule Assistant.Integrations.OpenRouter do
         {:ok, model_ids}
 
       {:ok, %{status: status, body: body}} when status >= 400 ->
-        {:error, {:api_error, status, get_in(body, ["error", "message"])}}
+        {:error, {:api_error, status, error_message_from_body(body)}}
 
       {:error, reason} ->
         {:error, {:request_failed, reason}}
@@ -290,10 +290,10 @@ defmodule Assistant.Integrations.OpenRouter do
           {:error, {:rate_limited, retry_after}}
 
         {:ok, %{status: 402, body: resp_body}} ->
-          {:error, {:insufficient_credits, get_in(resp_body, ["error", "message"])}}
+          {:error, {:insufficient_credits, error_message_from_body(resp_body)}}
 
         {:ok, %{status: status, body: resp_body}} when status >= 400 ->
-          error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+          error_message = error_message_from_body(resp_body)
           {:error, {:api_error, status, error_message}}
 
         {:error, %Req.TransportError{reason: reason}} ->
@@ -363,7 +363,7 @@ defmodule Assistant.Integrations.OpenRouter do
         {:ok, models}
 
       {:ok, %{status: status, body: body}} when status >= 400 ->
-        {:error, {:api_error, status, get_in(body, ["error", "message"])}}
+        {:error, {:api_error, status, error_message_from_body(body)}}
 
       {:error, reason} ->
         {:error, {:request_failed, reason}}
@@ -406,10 +406,10 @@ defmodule Assistant.Integrations.OpenRouter do
           {:error, {:rate_limited, retry_after}}
 
         {:ok, %{status: 402, body: resp_body}} ->
-          {:error, {:insufficient_credits, get_in(resp_body, ["error", "message"])}}
+          {:error, {:insufficient_credits, error_message_from_body(resp_body)}}
 
         {:ok, %{status: status, body: resp_body}} when status >= 400 ->
-          error_message = get_in(resp_body, ["error", "message"]) || "Unknown error"
+          error_message = error_message_from_body(resp_body)
 
           Logger.error("OpenRouter image API error: status=#{status} #{error_message}",
             status: status,
@@ -926,7 +926,7 @@ defmodule Assistant.Integrations.OpenRouter do
   defp do_request(body, override_key) do
     http = ConfigLoader.http_config()
     req = build_req_client(http, :request, override_key)
-    Req.post(req, url: "/chat/completions", json: body)
+    Req.post(req, url: "/chat/completions", json: body, retry: false)
   end
 
   defp build_req_client(http, mode, override_key) do
@@ -974,6 +974,17 @@ defmodule Assistant.Integrations.OpenRouter do
   end
 
   defp extract_retry_after(_), do: 60
+
+  defp error_message_from_body(%{"error" => %{"message" => message}})
+       when is_binary(message) and message != "",
+       do: message
+
+  defp error_message_from_body(%{"message" => message})
+       when is_binary(message) and message != "",
+       do: message
+
+  defp error_message_from_body(body) when is_binary(body) and body != "", do: body
+  defp error_message_from_body(_), do: "Unknown error"
 
   defp empty_usage do
     %{

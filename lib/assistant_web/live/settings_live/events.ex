@@ -34,6 +34,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias AssistantWeb.SettingsLive.Loaders
   alias AssistantWeb.SettingsLive.Profile
   alias AssistantWeb.SettingsUserAuth
+  alias AssistantWeb.SettingsLive.PolicyClient
 
   require Logger
 
@@ -42,8 +43,54 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("switch_admin_tab", %{"tab" => tab}, socket)
-      when tab in ~w(integrations models users) do
-    {:noreply, assign(socket, :admin_tab, tab)}
+      when tab in ~w(integrations models users policies) do
+    socket = assign(socket, :admin_tab, tab)
+
+    socket =
+      if tab == "policies" do
+        Loaders.load_admin_policies(socket)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("set_policy_preset", %{"preset" => preset}, socket) do
+    socket =
+      case PolicyClient.apply_preset(socket.assigns[:current_scope], preset) do
+        {:ok, _} ->
+          socket
+          |> assign(:policy_preset, preset)
+          |> Loaders.load_admin_policies()
+          |> put_flash(:info, "#{String.capitalize(preset)} preset applied.")
+
+        {:error, :not_available} ->
+          put_flash(socket, :error, "Policy presets are not available yet.")
+
+        _ ->
+          put_flash(socket, :error, "Unable to save policy preset.")
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("resolve_approval", %{"id" => id, "effect" => effect}, socket) do
+    socket =
+      case PolicyClient.resolve_approval(Context.current_settings_user(socket), id, effect) do
+        {:ok, _} ->
+          socket
+          |> Loaders.load_approvals()
+          |> put_flash(:info, "Approval recorded.")
+
+        {:error, :not_available} ->
+          put_flash(socket, :error, "Approvals are not available yet.")
+
+        _ ->
+          put_flash(socket, :error, "Unable to resolve approval.")
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("start_add_user", _params, socket) do

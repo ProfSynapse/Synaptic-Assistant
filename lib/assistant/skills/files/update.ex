@@ -167,7 +167,7 @@ defmodule Assistant.Skills.Files.Update do
 
   defp apply_replacement(content, search, replace, replace_all?) do
     global = replace_all? == true || replace_all? == "true"
-    opts = if global, do: [:global], else: []
+    opts = if global, do: [global: true], else: [global: false]
     updated = String.replace(content, search, replace, opts)
 
     if updated == content do

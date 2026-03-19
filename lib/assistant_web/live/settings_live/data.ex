@@ -1,7 +1,7 @@
 defmodule AssistantWeb.SettingsLive.Data do
   @moduledoc false
 
-  @sections ~w(profile analytics memory apps workflows admin help)
+  @sections ~w(profile analytics memory apps approvals workflows admin help)
   @admin_integration_groups ~w(google_workspace telegram slack discord google_chat hubspot elevenlabs)
 
   @app_catalog [

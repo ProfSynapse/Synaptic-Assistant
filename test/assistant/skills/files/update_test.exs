@@ -1,5 +1,5 @@
 defmodule Assistant.Skills.Files.UpdateTest do
-  use ExUnit.Case, async: true
+  use Assistant.DataCase, async: false
 
   alias Assistant.Skills.Files.Update
   alias Assistant.Skills.Result
@@ -55,7 +55,7 @@ defmodule Assistant.Skills.Files.UpdateTest do
 
   defp build_context do
     %{
-      user_id: "user-1",
+      user_id: Ecto.UUID.generate(),
       integrations: %{file_manager: FakeFileManager, state_store: FakeStateStore},
       metadata: %{}
     }
@@ -83,11 +83,12 @@ defmodule Assistant.Skills.Files.UpdateTest do
   test "replaces first occurrence by default" do
     Process.put(:fake_synced_file, fake_synced_file())
     Process.put(:fake_file_content, "hello world hello")
+    context = build_context()
 
     {:ok, %Result{status: :ok} = result} =
       Update.execute(
         %{"path" => "docs/example.md", "search" => "hello", "replace" => "hi"},
-        build_context()
+        context
       )
 
     assert result.content =~ "Updated Example.md"
@@ -98,11 +99,12 @@ defmodule Assistant.Skills.Files.UpdateTest do
   test "replaces all occurrences with --all flag" do
     Process.put(:fake_synced_file, fake_synced_file())
     Process.put(:fake_file_content, "hello world hello")
+    context = build_context()
 
     {:ok, %Result{status: :ok} = result} =
       Update.execute(
         %{"path" => "docs/example.md", "search" => "hello", "replace" => "hi", "all" => true},
-        build_context()
+        context
       )
 
     assert result.content =~ "replaced 2 occurrence"
@@ -112,11 +114,12 @@ defmodule Assistant.Skills.Files.UpdateTest do
   test "returns unchanged when pattern not found" do
     Process.put(:fake_synced_file, fake_synced_file())
     Process.put(:fake_file_content, "hello world")
+    context = build_context()
 
     {:ok, %Result{status: :ok, content: content}} =
       Update.execute(
         %{"path" => "docs/example.md", "search" => "missing", "replace" => "x"},
-        build_context()
+        context
       )
 
     assert content =~ "No changes made"
@@ -126,11 +129,12 @@ defmodule Assistant.Skills.Files.UpdateTest do
   test "marks file as local_ahead after update" do
     Process.put(:fake_synced_file, fake_synced_file())
     Process.put(:fake_file_content, "hello world")
+    context = build_context()
 
     {:ok, %Result{status: :ok}} =
       Update.execute(
         %{"path" => "docs/example.md", "search" => "hello", "replace" => "hi"},
-        build_context()
+        context
       )
 
     assert_received {:update_synced_file, "sf-1", %{sync_status: "local_ahead"}}
@@ -139,27 +143,33 @@ defmodule Assistant.Skills.Files.UpdateTest do
   test "resolves file by Drive file ID" do
     Process.put(:fake_synced_file, fake_synced_file())
     Process.put(:fake_file_content, "hello world")
+    context = build_context()
+    user_id = context.user_id
 
     {:ok, %Result{status: :ok}} =
       Update.execute(
         %{"id" => "drive-file-1", "search" => "hello", "replace" => "hi"},
-        build_context()
+        context
       )
 
-    assert_received {:get_by_id, "user-1", "drive-file-1"}
+    assert_received {:get_by_id, ^user_id, "drive-file-1"}
     assert_received {:write_file, "docs/example.md", "hi world"}
   end
 
   test "returns error when search param is missing" do
+    context = build_context()
+
     {:ok, %Result{status: :error, content: content}} =
-      Update.execute(%{"path" => "docs/example.md", "replace" => "hi"}, build_context())
+      Update.execute(%{"path" => "docs/example.md", "replace" => "hi"}, context)
 
     assert content =~ "Missing required parameter: --search"
   end
 
   test "returns error when replace param is missing" do
+    context = build_context()
+
     {:ok, %Result{status: :error, content: content}} =
-      Update.execute(%{"path" => "docs/example.md", "search" => "hello"}, build_context())
+      Update.execute(%{"path" => "docs/example.md", "search" => "hello"}, context)
 
     assert content =~ "Missing required parameter: --replace"
   end
@@ -177,10 +187,12 @@ defmodule Assistant.Skills.Files.UpdateTest do
   end
 
   test "returns error when file not found" do
+    context = build_context()
+
     {:ok, %Result{status: :error, content: content}} =
       Update.execute(
         %{"path" => "missing.md", "search" => "hello", "replace" => "hi"},
-        build_context()
+        context
       )
 
     assert content =~ "File not found"

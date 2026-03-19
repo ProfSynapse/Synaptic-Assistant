@@ -29,6 +29,9 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.Workflows
   alias AssistantWeb.SettingsLive.Context
   alias AssistantWeb.SettingsLive.Data
+  alias AssistantWeb.SettingsLive.PolicyClient
+
+  @policy_default_presets ["permissive", "default", "strict"]
 
   def load_section_data(socket, "profile"),
     do: socket |> load_profile() |> load_orchestrator_prompt()
@@ -50,7 +53,13 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       |> load_connector_states()
       |> load_connection_status()
 
-  def load_section_data(socket, "admin"), do: load_admin(socket)
+  def load_section_data(socket, "admin") do
+    socket
+    |> load_admin()
+    |> maybe_load_admin_policies()
+  end
+
+  def load_section_data(socket, "approvals"), do: load_approvals(socket)
   def load_section_data(socket, _section), do: socket
 
   def reload_workflows(socket) do
@@ -255,6 +264,63 @@ defmodule AssistantWeb.SettingsLive.Loaders do
         filtered_admin_users: [],
         integration_settings: []
       )
+    end
+  end
+
+  def load_admin_policies(socket) do
+    current_scope = socket.assigns[:current_scope]
+    settings_user = Context.current_settings_user(socket)
+
+    {preset_options, preset_ok} =
+      case PolicyClient.policy_presets() do
+        {:ok, list} -> {list, true}
+        _ -> {@policy_default_presets, false}
+      end
+
+    {current_preset, current_ok} =
+      case PolicyClient.current_preset(current_scope) do
+        {:ok, preset} -> {preset, true}
+        _ -> {"default", false}
+      end
+
+    {rules, rules_ok} =
+      case PolicyClient.list_policy_rules(current_scope) do
+        {:ok, items} -> {items, true}
+        _ -> {[], false}
+      end
+
+    {approvals, approvals_ok} =
+      case PolicyClient.list_pending_approvals(settings_user) do
+        {:ok, items} -> {items, true}
+        _ -> {[], false}
+      end
+
+    available = preset_ok or current_ok or rules_ok or approvals_ok
+
+    socket
+    |> assign(:policy_preset_options, preset_options)
+    |> assign(:policy_preset, current_preset)
+    |> assign(:policy_rules, rules)
+    |> assign(:policy_approvals, approvals)
+    |> assign(:policy_api_available, available)
+  end
+
+  def load_approvals(socket) do
+    {approvals, ok} =
+      case PolicyClient.list_pending_approvals(Context.current_settings_user(socket)) do
+        {:ok, items} -> {items, true}
+        _ -> {[], false}
+      end
+
+    assign(socket, :policy_approvals, approvals)
+    |> assign(:policy_api_available, ok)
+  end
+
+  defp maybe_load_admin_policies(socket) do
+    if socket.assigns[:admin_tab] == "policies" do
+      load_admin_policies(socket)
+    else
+      socket
     end
   end
 

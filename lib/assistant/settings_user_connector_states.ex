@@ -47,6 +47,9 @@ defmodule Assistant.SettingsUserConnectorStates do
       not is_binary(integration_group) or integration_group == "" ->
         default
 
+      match?(:error, Ecto.UUID.cast(user_id)) ->
+        default
+
       true ->
         case Repo.get_by(SettingsUserConnectorState,
                user_id: user_id,

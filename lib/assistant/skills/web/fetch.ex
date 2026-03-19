@@ -23,7 +23,7 @@ defmodule Assistant.Skills.Web.Fetch do
     max_chars = parse_max_chars(Map.get(flags, "max_chars"))
 
     with :ok <- validate_url(url),
-         {:ok, fetched} <- fetcher.fetch(url),
+         {:ok, fetched} <- fetch_url(fetcher, url, context),
          {:ok, extracted} <- extract_document(fetched, extractor, selector),
          {:ok, saved_files, save_side_effects} <-
            maybe_save(context.user_id, save_to, fetched, extracted) do
@@ -103,6 +103,16 @@ defmodule Assistant.Skills.Web.Fetch do
            content: "The website returned HTTP #{status}."
          }}
 
+      {:error, {:policy_denied, message}} ->
+        {:ok, %Result{status: :error, content: "Policy blocked the fetch: #{message}"}}
+
+      {:error, {:policy_requires_approval, message}} ->
+        {:ok,
+         %Result{
+           status: :error,
+           content: "This fetch needs admin approval before it can run: #{message}"
+         }}
+
       {:error, {:unsupported_content_type, type}} ->
         {:ok,
          %Result{
@@ -135,6 +145,27 @@ defmodule Assistant.Skills.Web.Fetch do
         {:ok, %Result{status: :error, content: "Web fetch failed: #{inspect(reason)}"}}
     end
   end
+
+  defp fetch_url(fetcher, url, context) do
+    opts =
+      []
+      |> maybe_put_opt(:user_id, context.user_id)
+      |> maybe_put_opt(:workspace_id, Map.get(context, :workspace_id))
+
+    cond do
+      function_exported?(fetcher, :fetch, 2) ->
+        fetcher.fetch(url, opts)
+
+      function_exported?(fetcher, :fetch, 1) ->
+        fetcher.fetch(url)
+
+      true ->
+        {:error, :fetcher_not_available}
+    end
+  end
+
+  defp maybe_put_opt(opts, _key, nil), do: opts
+  defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp validate_url(url) when is_binary(url) do
     if String.trim(url) == "" do
