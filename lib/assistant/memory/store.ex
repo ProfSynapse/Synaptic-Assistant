@@ -528,9 +528,30 @@ defmodule Assistant.Memory.Store do
              Policy.memory_entry_retained_bytes(attrs)
            ),
          {:ok, attrs} <- Assistant.Memory.Content.prepare_attrs(user_id, attrs) do
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(attrs)
-      |> Repo.insert()
+      if Assistant.Encryption.mode() == :vault_transit do
+        Ecto.Multi.new()
+        |> Ecto.Multi.insert(:entry, MemoryEntry.changeset(%MemoryEntry{}, attrs))
+        |> Ecto.Multi.run(:index, fn _repo, %{entry: entry} ->
+          case Assistant.Memory.Content.billing_account_id_for_user(user_id) do
+            {:ok, billing_account_id} ->
+              plaintext_content = Map.get(attrs, :content) || Map.get(attrs, "content") || ""
+              Assistant.Memory.Indexer.index_memory_entry(entry, plaintext_content, billing_account_id)
+              {:ok, nil}
+
+            {:error, reason} ->
+              {:error, reason}
+          end
+        end)
+        |> Repo.transaction()
+        |> case do
+          {:ok, %{entry: entry}} -> {:ok, entry}
+          {:error, _name, value, _changes} -> {:error, value}
+        end
+      else
+        %MemoryEntry{}
+        |> MemoryEntry.changeset(attrs)
+        |> Repo.insert()
+      end
     end
   end
 

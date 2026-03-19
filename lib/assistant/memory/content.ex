@@ -124,7 +124,7 @@ defmodule Assistant.Memory.Content do
 
   defp hydrate_entry(_billing_account_id, entry), do: {:ok, entry}
 
-  defp billing_account_id_for_user(user_id) do
+  def billing_account_id_for_user(user_id) do
     user_id
     |> billing_account_query()
     |> Repo.one()
