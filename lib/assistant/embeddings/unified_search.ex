@@ -62,7 +62,7 @@ defmodule Assistant.Embeddings.UnifiedSearch do
     folder_boosts =
       if folder_ids != [] do
         from(df in DocumentFolder,
-          where: df.drive_folder_id in ^folder_ids,
+          where: df.user_id == ^user_id and df.drive_folder_id in ^folder_ids,
           select: {df.drive_folder_id, df.activation_boost}
         )
         |> Repo.all()
@@ -90,7 +90,7 @@ defmodule Assistant.Embeddings.UnifiedSearch do
     # Trigger spreading activation post-retrieval (fire-and-forget with error logging)
     Task.Supervisor.start_child(Assistant.Skills.TaskSupervisor, fn ->
       try do
-        DocumentActivation.spread(results)
+        DocumentActivation.spread(user_id, results)
       rescue
         e -> Logger.error("DocumentActivation.spread failed: #{inspect(e)}")
       end

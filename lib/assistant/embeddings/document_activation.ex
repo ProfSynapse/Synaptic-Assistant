@@ -11,8 +11,9 @@ defmodule Assistant.Embeddings.DocumentActivation do
   @doc """
   When chunks from a document are retrieved, boost sibling documents
   in the same folder. Non-recursive — only direct folder siblings.
+  Scoped to the given user to prevent cross-user contamination.
   """
-  def spread(retrieved_chunks) when is_list(retrieved_chunks) do
+  def spread(user_id, retrieved_chunks) when is_binary(user_id) and is_list(retrieved_chunks) do
     retrieved_chunks
     |> Enum.group_by(fn chunk ->
       case chunk do
@@ -23,17 +24,17 @@ defmodule Assistant.Embeddings.DocumentActivation do
     end)
     |> Enum.each(fn
       {nil, _chunks} -> :skip
-      {folder_id, chunks} -> spread_in_folder(folder_id, chunks)
+      {folder_id, chunks} -> spread_in_folder(user_id, folder_id, chunks)
     end)
   end
 
-  def spread(_), do: :ok
+  def spread(_, _), do: :ok
 
-  defp spread_in_folder(folder_id, retrieved_chunks) do
+  defp spread_in_folder(user_id, folder_id, retrieved_chunks) do
     boost = @spread_rate * length(retrieved_chunks)
 
     from(df in DocumentFolder,
-      where: df.drive_folder_id == ^folder_id,
+      where: df.user_id == ^user_id and df.drive_folder_id == ^folder_id,
       update: [set: [activation_boost: fragment("LEAST(?, COALESCE(activation_boost, 1.0) + ?)", ^@max_boost, ^boost)]]
     )
     |> Repo.update_all([])
