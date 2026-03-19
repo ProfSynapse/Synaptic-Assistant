@@ -18,7 +18,9 @@ defmodule Assistant.Embeddings.SemanticChunker do
         []
 
       [single] ->
-        [build_chunk(single, 0, text)]
+        [single]
+        |> enforce_size_limits()
+        |> add_metadata(text)
 
       sentences ->
         sentences
@@ -99,12 +101,21 @@ defmodule Assistant.Embeddings.SemanticChunker do
     if token_count > @max_tokens do
       # Split roughly in half at a sentence boundary
       sentences = String.split(chunk, ~r/(?<=[.!?])\s+/)
-      mid = div(length(sentences), 2)
-      {first, second} = Enum.split(sentences, max(mid, 1))
 
-      [Enum.join(first, " "), Enum.join(second, " ")]
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.flat_map(&maybe_split_large/1)
+      if length(sentences) <= 1 do
+        # No sentence boundaries — hard-split at character limit
+        max_chars = @max_tokens * @approx_chars_per_token
+        [String.slice(chunk, 0, max_chars), String.slice(chunk, max_chars..-1//1)]
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.flat_map(&maybe_split_large/1)
+      else
+        mid = div(length(sentences), 2)
+        {first, second} = Enum.split(sentences, max(mid, 1))
+
+        [Enum.join(first, " "), Enum.join(second, " ")]
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.flat_map(&maybe_split_large/1)
+      end
     else
       [chunk]
     end
