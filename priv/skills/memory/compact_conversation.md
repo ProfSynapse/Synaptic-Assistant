@@ -50,6 +50,7 @@ Returns a JSON object:
   "memories_created": [
     {
       "id": "uuid",
+      "title": "Launch timeline decision",
       "content": "Summary of discussion segment",
       "topics": ["topic1", "topic2"],
       "source_type": "compaction"
@@ -84,4 +85,5 @@ Returns a JSON object:
   to prioritize certain themes.
 - Compaction is idempotent per conversation+range — re-compacting the same range
   should not create duplicates (check source_conversation_id + source_message_range).
+- Each created memory should include a short human-readable title suitable for the knowledge graph.
 - Each memory entry should be self-contained and understandable without the original messages.

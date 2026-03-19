@@ -13,17 +13,19 @@ defmodule Assistant.Memory.Activation do
   This models GNN message-passing: retrieved nodes boost nearby nodes' decay_factor.
   """
   def spread(user_id, retrieved_entries) when is_list(retrieved_entries) do
-    retrieved_ids = Enum.map(retrieved_entries, fn
-      %{entry: entry} -> entry.id
-      %{id: id} -> id
-    end)
+    retrieved_ids =
+      Enum.map(retrieved_entries, fn
+        %{entry: entry} -> entry.id
+        %{id: id} -> id
+      end)
 
     retrieved_entries
     |> Enum.each(fn entry ->
-      embedding = case entry do
-        %{entry: %{embedding: emb}} -> emb
-        %{embedding: emb} -> emb
-      end
+      embedding =
+        case entry do
+          %{entry: %{embedding: emb}} -> emb
+          %{embedding: emb} -> emb
+        end
 
       if embedding do
         spread_from(user_id, embedding, retrieved_ids)
@@ -52,7 +54,15 @@ defmodule Assistant.Memory.Activation do
         LIMIT $7
       )
       """,
-      [@max_decay_factor, @spread_rate, embedding_param, user_id_bin, excluded_id_bins, @min_similarity, @neighbor_count]
+      [
+        @max_decay_factor,
+        @spread_rate,
+        embedding_param,
+        user_id_bin,
+        excluded_id_bins,
+        @min_similarity,
+        @neighbor_count
+      ]
     )
   end
 end

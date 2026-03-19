@@ -23,7 +23,7 @@ defmodule AssistantWeb.SettingsUserLive.RegistrationTest do
         conn
         |> log_in_settings_user(settings_user_fixture())
         |> live(~p"/settings_users/register")
-        |> follow_redirect(conn, ~p"/")
+        |> follow_redirect(conn, ~p"/workspace")
 
       assert {:ok, _conn} = result
     end

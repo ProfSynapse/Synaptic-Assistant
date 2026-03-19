@@ -34,7 +34,7 @@ defmodule AssistantWeb.SettingsUserAuthTest do
       assert get_session(conn, :live_socket_id) ==
                "settings_users_sessions:#{Base.url_encode64(token)}"
 
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/workspace"
       assert Accounts.get_settings_user_by_session_token(token)
     end
 
@@ -101,7 +101,7 @@ defmodule AssistantWeb.SettingsUserAuthTest do
       assert max_age == @remember_me_cookie_max_age
     end
 
-    test "redirects to settings when settings_user is already logged in", %{
+    test "redirects to the workspace when settings_user is already logged in", %{
       conn: conn,
       settings_user: settings_user
     } do
@@ -110,7 +110,7 @@ defmodule AssistantWeb.SettingsUserAuthTest do
         |> assign(:current_scope, Scope.for_settings_user(settings_user))
         |> SettingsUserAuth.log_in_settings_user(settings_user)
 
-      assert redirected_to(conn) == ~p"/settings_users/settings"
+      assert redirected_to(conn) == ~p"/workspace"
     end
 
     test "writes a cookie if remember_me was set in previous session", %{

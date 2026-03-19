@@ -22,9 +22,10 @@ defmodule Assistant.Embeddings do
     if enabled?() do
       # Submit all texts concurrently so Nx.Serving can batch them together.
       # Sequential calls from a single process bypass the batching window.
-      tasks = Enum.map(texts, fn text ->
-        Task.async(fn -> Nx.Serving.batched_run(__MODULE__, truncate(text)) end)
-      end)
+      tasks =
+        Enum.map(texts, fn text ->
+          Task.async(fn -> Nx.Serving.batched_run(__MODULE__, truncate(text)) end)
+        end)
 
       embeddings =
         tasks

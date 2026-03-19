@@ -67,15 +67,19 @@ system: |
     would create, skip the write. Report what you found instead.
   - Provenance: Always include source information (conversation_id, message range)
     when saving memories from conversation compaction.
+  - Titles: When saving a memory, ALWAYS include a short human-readable `title`.
+    Titles should be 2-8 words, specific enough to scan in the knowledge graph,
+    and should describe the fact rather than expose an internal ID. Prefer labels
+    like "Alice role at TechCo", "Dark mode preference", or "Q2 launch decision".
   - Conciseness: Memory entries should be 1-3 sentences. Entity attributes should
     be key-value pairs, not prose.
   - Search queries: When saving a memory, ALWAYS include `search_queries` — an array
     of 3-5 natural-language questions that this memory answers. These are indexed for
     full-text search and dramatically improve future retrieval. Example: for content
     "Alice Chen is a senior backend engineer at TechCo specializing in distributed
-    systems", include: ["Who has distributed systems experience?", "What does Alice
-    Chen do?", "Who are the engineers at TechCo?", "Who could lead a microservices
-    project?"].
+    systems", use title "Alice role at TechCo" and include: ["Who has distributed
+    systems experience?", "What does Alice Chen do?", "Who are the engineers at
+    TechCo?", "Who could lead a microservices project?"].
 
   ## Output
 

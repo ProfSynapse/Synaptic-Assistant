@@ -19,13 +19,15 @@ defmodule Assistant.Embeddings.UnifiedSearch do
 
     if Embeddings.enabled?() do
       # Fan out in parallel under supervisor to isolate failures
-      memory_task = Task.Supervisor.async_nolink(Assistant.Skills.TaskSupervisor, fn ->
-        search_memories(user_id, query, limit: limit)
-      end)
+      memory_task =
+        Task.Supervisor.async_nolink(Assistant.Skills.TaskSupervisor, fn ->
+          search_memories(user_id, query, limit: limit)
+        end)
 
-      doc_task = Task.Supervisor.async_nolink(Assistant.Skills.TaskSupervisor, fn ->
-        search_documents(user_id, query, limit: limit * 2)
-      end)
+      doc_task =
+        Task.Supervisor.async_nolink(Assistant.Skills.TaskSupervisor, fn ->
+          search_documents(user_id, query, limit: limit * 2)
+        end)
 
       memories = safe_await(memory_task, [])
       docs = safe_await(doc_task, [])

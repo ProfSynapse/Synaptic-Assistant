@@ -7,6 +7,10 @@ tags:
   - write
   - storage
 parameters:
+  - name: "title"
+    type: "string"
+    required: false
+    description: "Short human-readable label for the memory. If omitted, one is generated from the content."
   - name: "content"
     type: "string"
     required: true
@@ -48,6 +52,7 @@ to verify no duplicate or conflicting entry exists (search-first enforcement).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| title | string | no | Short human-readable label for the memory |
 | content | string | yes | The memory content to store (factual, concise) |
 | topics | array[string] | yes | Topic labels for categorization and retrieval |
 | source_type | string | no | Origin: "conversation", "compaction", "manual" (default: "conversation") |
@@ -63,6 +68,7 @@ Returns a JSON object:
 ```json
 {
   "id": "uuid",
+  "title": "Alice role",
   "content": "Stored memory text",
   "topics": ["topic1"],
   "created_at": "2026-02-18T12:00:00Z"

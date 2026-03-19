@@ -105,6 +105,7 @@ defmodule Assistant.Embeddings.SemanticChunker do
       if length(sentences) <= 1 do
         # No sentence boundaries — hard-split at character limit
         max_chars = @max_tokens * @approx_chars_per_token
+
         [String.slice(chunk, 0, max_chars), String.slice(chunk, max_chars..-1//1)]
         |> Enum.reject(&(&1 == ""))
         |> Enum.flat_map(&maybe_split_large/1)
@@ -169,5 +170,4 @@ defmodule Assistant.Embeddings.SemanticChunker do
   defp estimate_tokens(text) do
     div(byte_size(text), @approx_chars_per_token)
   end
-
 end

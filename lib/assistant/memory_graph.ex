@@ -386,7 +386,7 @@ defmodule Assistant.MemoryGraph do
     %{
       id: "memory:#{memory.id}",
       kind: "memory",
-      label: truncate_text(memory.content, 84),
+      label: truncate_text(memory.title || memory.content, 84),
       category: memory.category,
       color: "#29abe2",
       val: 6
@@ -434,7 +434,7 @@ defmodule Assistant.MemoryGraph do
 
   defp maybe_filter_memory_query(queryable, query) do
     pattern = "%#{query}%"
-    where(queryable, [m], ilike(m.content, ^pattern))
+    where(queryable, [m], ilike(m.title, ^pattern) or ilike(m.content, ^pattern))
   end
 
   defp maybe_filter_entity_since(queryable, nil), do: queryable

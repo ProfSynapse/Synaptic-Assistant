@@ -27,6 +27,7 @@ defmodule Assistant.MemoryExplorer do
         limit: ^limit,
         select: %{
           id: m.id,
+          title: m.title,
           content: m.content,
           tags: m.tags,
           category: m.category,
@@ -66,6 +67,7 @@ defmodule Assistant.MemoryExplorer do
         {:ok,
          %{
            id: memory.id,
+           title: memory.title,
            content: memory.content,
            tags: memory.tags || [],
            category: memory.category,
@@ -134,7 +136,7 @@ defmodule Assistant.MemoryExplorer do
 
   defp maybe_filter_query(queryable, query) do
     pattern = "%#{query}%"
-    where(queryable, [m], ilike(m.content, ^pattern))
+    where(queryable, [m], ilike(m.title, ^pattern) or ilike(m.content, ^pattern))
   end
 
   defp maybe_filter_category(queryable, ""), do: queryable

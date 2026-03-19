@@ -126,9 +126,20 @@ defmodule Assistant.Memory.StoreTest do
       assert {:ok, %MemoryEntry{} = entry} =
                Store.create_memory_entry(%{content: "Remember: user prefers dark mode"})
 
+      assert entry.title == "Remember: user prefers dark mode"
       assert entry.content == "Remember: user prefers dark mode"
       assert entry.tags == []
       assert entry.importance == Decimal.new("0.50")
+    end
+
+    test "keeps an explicit title when provided" do
+      assert {:ok, %MemoryEntry{} = entry} =
+               Store.create_memory_entry(%{
+                 title: "Theme preference",
+                 content: "Remember: user prefers dark mode"
+               })
+
+      assert entry.title == "Theme preference"
     end
 
     test "validates importance range" do

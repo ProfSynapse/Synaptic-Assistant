@@ -134,8 +134,11 @@ defmodule Assistant.Embeddings.RRFPropertyTest do
       Enum.each(result, fn item ->
         expected = Map.get(expected_scores, item.id)
         assert expected != nil, "Item #{item.id} not found in expected scores"
-        assert_in_delta item.score, expected, 1.0e-10,
-          "Score mismatch for #{item.id}: got #{item.score}, expected #{expected}"
+
+        assert_in_delta item.score,
+                        expected,
+                        1.0e-10,
+                        "Score mismatch for #{item.id}: got #{item.score}, expected #{expected}"
       end)
     end
   end
@@ -163,8 +166,9 @@ defmodule Assistant.Embeddings.RRFPropertyTest do
 
       assert shared != nil
       assert single != nil
+
       assert shared.score > single.score,
-        "Shared score #{shared.score} should exceed single score #{single.score}"
+             "Shared score #{shared.score} should exceed single score #{single.score}"
     end
   end
 

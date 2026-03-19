@@ -78,7 +78,7 @@ defmodule AssistantWeb.SettingsUserLive.ConfirmationTest do
       assert Accounts.get_settings_user!(settings_user.id).confirmed_at
       # we are logged in now
       assert get_session(conn, :settings_user_token)
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/workspace"
 
       # log out, new conn
       conn = build_conn()

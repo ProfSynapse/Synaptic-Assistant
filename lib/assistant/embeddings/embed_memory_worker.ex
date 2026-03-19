@@ -16,7 +16,8 @@ defmodule Assistant.Embeddings.EmbedMemoryWorker do
         %MemoryEntry{embedding: existing} when not is_nil(existing) ->
           :ok
 
-        %MemoryEntry{content: content} = entry when is_binary(content) and byte_size(content) > 0 ->
+        %MemoryEntry{content: content} = entry
+        when is_binary(content) and byte_size(content) > 0 ->
           case Embeddings.generate(content) do
             {:ok, embedding} ->
               entry

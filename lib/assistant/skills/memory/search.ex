@@ -37,6 +37,7 @@ defmodule Assistant.Skills.Memory.Search do
           Enum.map(entries, fn e ->
             %{
               id: e.id,
+              title: e.title,
               content: e.content,
               tags: e.tags,
               category: e.category,

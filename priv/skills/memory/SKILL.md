@@ -15,7 +15,7 @@ and compacting conversation history into structured memory.
 | Skill | Type | Purpose |
 |-------|------|---------|
 | memory.search_memories | Read | Semantic search across stored memory entries |
-| memory.save_memory | Write | Persist a new memory entry with topics |
+| memory.save_memory | Write | Persist a new memory entry with a human-readable title and topics |
 | memory.extract_entities | Write | Extract entities and relations from text |
 | memory.close_relation | Write | Close a relation and optionally open a replacement |
 | memory.query_entity_graph | Read | Fetch active relations for an entity |

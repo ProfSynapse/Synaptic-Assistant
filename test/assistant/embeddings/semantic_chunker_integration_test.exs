@@ -47,7 +47,7 @@ defmodule Assistant.Embeddings.SemanticChunkerIntegrationTest do
       # With real embeddings, the chunker should detect the topic shift
       # between programming and cooking, producing at least 2 chunks
       assert length(result) >= 2,
-        "Expected at least 2 chunks for distinct topics, got #{length(result)}: #{inspect(Enum.map(result, &String.slice(&1.text, 0..50)))}"
+             "Expected at least 2 chunks for distinct topics, got #{length(result)}: #{inspect(Enum.map(result, &String.slice(&1.text, 0..50)))}"
 
       # The programming content and cooking content should be in different chunks
       programming_chunks = Enum.filter(result, fn c -> String.contains?(c.text, "BEAM") end)
@@ -82,7 +82,7 @@ defmodule Assistant.Embeddings.SemanticChunkerIntegrationTest do
       # they should have high similarity and stay in fewer chunks
       # (may still split due to size limits, but should be <= 2 chunks)
       assert length(result) <= 2,
-        "Expected tightly related content in 1-2 chunks, got #{length(result)}"
+             "Expected tightly related content in 1-2 chunks, got #{length(result)}"
     end
 
     test "handles three distinct topic transitions" do
@@ -103,7 +103,7 @@ defmodule Assistant.Embeddings.SemanticChunkerIntegrationTest do
 
       # Should detect at least 2 boundaries (3+ chunks) for 3 distinct topics
       assert length(result) >= 2,
-        "Expected at least 2 chunks for 3 distinct topics, got #{length(result)}"
+             "Expected at least 2 chunks for 3 distinct topics, got #{length(result)}"
     end
 
     test "custom threshold affects boundary sensitivity" do

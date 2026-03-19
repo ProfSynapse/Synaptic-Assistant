@@ -52,6 +52,23 @@ defmodule Assistant.Memory.SearchTest do
       assert hd(results).content =~ "dark mode"
     end
 
+    test "matches a memory by title" do
+      user = create_test_user()
+
+      %MemoryEntry{}
+      |> MemoryEntry.changeset(%{
+        title: "Dark mode preference",
+        content: "The user prefers dark mode for all interfaces",
+        user_id: user.id,
+        category: "preference"
+      })
+      |> Repo.insert!()
+
+      assert {:ok, results} = Search.search_memories(user.id, query: "preference")
+      assert length(results) == 1
+      assert hd(results).title == "Dark mode preference"
+    end
+
     test "filters by tags" do
       user = create_test_user()
 

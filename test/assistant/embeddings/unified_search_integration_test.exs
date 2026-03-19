@@ -22,7 +22,9 @@ defmodule Assistant.Embeddings.UnifiedSearchIntegrationTest do
 
     test "returns FTS results for a matching query" do
       user = user_fixture()
-      _entry = memory_fixture!(user, "Elixir is a functional programming language", tags: ["tech"])
+
+      _entry =
+        memory_fixture!(user, "Elixir is a functional programming language", tags: ["tech"])
 
       results = UnifiedSearch.search(user.id, "Elixir")
 
@@ -76,8 +78,12 @@ defmodule Assistant.Embeddings.UnifiedSearchIntegrationTest do
 
     test "results have expected structure" do
       user = user_fixture()
-      _entry = memory_fixture!(user, "OTP supervision trees handle fault tolerance",
-        category: "fact", importance: Decimal.new("0.80"))
+
+      _entry =
+        memory_fixture!(user, "OTP supervision trees handle fault tolerance",
+          category: "fact",
+          importance: Decimal.new("0.80")
+        )
 
       results = UnifiedSearch.search(user.id, "OTP supervision")
 

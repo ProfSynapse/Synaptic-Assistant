@@ -391,8 +391,7 @@ defmodule AssistantWeb.MarketingLive do
       %{
         icon_name: "hero-chat-bubble-left-right",
         title: "Chat From Anywhere",
-        body:
-          "Work in the app, Slack, Telegram, or Google Chat without restarting the thread."
+        body: "Work in the app, Slack, Telegram, or Google Chat without restarting the thread."
       },
       %{
         icon_name: "hero-command-line",
@@ -409,8 +408,7 @@ defmodule AssistantWeb.MarketingLive do
       %{
         icon_name: "hero-cpu-chip",
         title: "Memory That Persists",
-        body:
-          "Keep what matters across conversations so the agent gets more useful over time."
+        body: "Keep what matters across conversations so the agent gets more useful over time."
       },
       %{
         icon_name: "hero-bolt",

@@ -45,6 +45,7 @@ defmodule Assistant.Skills.Memory.Get do
 
           result = %{
             id: entry.id,
+            title: entry.title,
             content: entry.content,
             tags: entry.tags,
             category: entry.category,

@@ -18,12 +18,15 @@ defmodule Assistant.Memory.DecayCoolingWorker do
   defp cool_memory_decay_factors do
     from(me in MemoryEntry,
       where: not is_nil(me.decay_factor) and me.decay_factor != 1.0,
-      update: [set: [
-        decay_factor: fragment(
-          "1.0 + (COALESCE(decay_factor, 1.0) - 1.0) * ?",
-          ^@cooling_rate
-        )
-      ]]
+      update: [
+        set: [
+          decay_factor:
+            fragment(
+              "1.0 + (COALESCE(decay_factor, 1.0) - 1.0) * ?",
+              ^@cooling_rate
+            )
+        ]
+      ]
     )
     |> Repo.update_all([])
   end
@@ -31,12 +34,15 @@ defmodule Assistant.Memory.DecayCoolingWorker do
   defp cool_folder_activation_boosts do
     from(df in "document_folders",
       where: fragment("activation_boost != 1.0"),
-      update: [set: [
-        activation_boost: fragment(
-          "1.0 + (COALESCE(activation_boost, 1.0) - 1.0) * ?",
-          ^@cooling_rate
-        )
-      ]]
+      update: [
+        set: [
+          activation_boost:
+            fragment(
+              "1.0 + (COALESCE(activation_boost, 1.0) - 1.0) * ?",
+              ^@cooling_rate
+            )
+        ]
+      ]
     )
     |> Repo.update_all([])
   end

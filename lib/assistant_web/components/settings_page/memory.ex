@@ -188,7 +188,7 @@ defmodule AssistantWeb.Components.SettingsPage.Memory do
             <table :if={@memories != []} class="sa-table">
               <thead>
                 <tr>
-                  <th>ID</th>
+                  <th>Title</th>
                   <th>Category</th>
                   <th>Source</th>
                   <th>Tags</th>
@@ -201,7 +201,7 @@ defmodule AssistantWeb.Components.SettingsPage.Memory do
               </thead>
               <tbody>
                 <tr :for={memory <- @memories} class="sa-click-row" phx-click="view_memory" phx-value-id={memory.id}>
-                  <td>{Helpers.short_id(memory.id)}</td>
+                  <td>{memory.title}</td>
                   <td>{Helpers.humanize(memory.category)}</td>
                   <td>{Helpers.humanize(memory.source_type)}</td>
                   <td>{Helpers.format_tags(memory.tags)}</td>
@@ -218,13 +218,14 @@ defmodule AssistantWeb.Components.SettingsPage.Memory do
 
             <section :if={not is_nil(@selected_memory)} class="sa-subcard">
               <div class="sa-row">
-                <h3>Memory {Helpers.short_id(@selected_memory.id)}</h3>
+                <h3>{@selected_memory.title}</h3>
                 <button type="button" class="sa-btn secondary" phx-click="close_memory">
                   Close
                 </button>
               </div>
 
               <div class="sa-chip-row">
+                <span class="sa-chip">Memory ID: {Helpers.short_id(@selected_memory.id)}</span>
                 <span class="sa-chip">Category: {Helpers.humanize(@selected_memory.category)}</span>
                 <span class="sa-chip">Source: {Helpers.humanize(@selected_memory.source_type)}</span>
                 <span class="sa-chip">Importance: {Helpers.format_importance(@selected_memory.importance)}</span>

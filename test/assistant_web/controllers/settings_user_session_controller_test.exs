@@ -24,13 +24,12 @@ defmodule AssistantWeb.SettingsUserSessionControllerTest do
         })
 
       assert get_session(conn, :settings_user_token)
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/workspace"
 
       # Now do a logged in request and assert on the menu
-      conn = get(conn, ~p"/")
+      conn = get(conn, ~p"/workspace")
       response = html_response(conn, 200)
-      assert response =~ settings_user.email
-      assert response =~ ~p"/settings_users/settings"
+      assert response =~ "Synaptic Assistant"
       assert response =~ ~p"/settings_users/log-out"
     end
 
@@ -47,7 +46,7 @@ defmodule AssistantWeb.SettingsUserSessionControllerTest do
         })
 
       assert conn.resp_cookies["_assistant_web_settings_user_remember_me"]
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/workspace"
     end
 
     test "logs the settings_user in with return to", %{conn: conn, settings_user: settings_user} do
@@ -91,13 +90,12 @@ defmodule AssistantWeb.SettingsUserSessionControllerTest do
         })
 
       assert get_session(conn, :settings_user_token)
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/workspace"
 
       # Now do a logged in request and assert on the menu
-      conn = get(conn, ~p"/")
+      conn = get(conn, ~p"/workspace")
       response = html_response(conn, 200)
-      assert response =~ settings_user.email
-      assert response =~ ~p"/settings_users/settings"
+      assert response =~ "Synaptic Assistant"
       assert response =~ ~p"/settings_users/log-out"
     end
 
@@ -115,7 +113,7 @@ defmodule AssistantWeb.SettingsUserSessionControllerTest do
         })
 
       assert get_session(conn, :settings_user_token)
-      assert redirected_to(conn) == ~p"/"
+      assert redirected_to(conn) == ~p"/workspace"
 
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~
                "Settings user confirmed successfully."
@@ -123,10 +121,9 @@ defmodule AssistantWeb.SettingsUserSessionControllerTest do
       assert Accounts.get_settings_user!(settings_user.id).confirmed_at
 
       # Now do a logged in request and assert on the menu
-      conn = get(conn, ~p"/")
+      conn = get(conn, ~p"/workspace")
       response = html_response(conn, 200)
-      assert response =~ settings_user.email
-      assert response =~ ~p"/settings_users/settings"
+      assert response =~ "Synaptic Assistant"
       assert response =~ ~p"/settings_users/log-out"
     end
 

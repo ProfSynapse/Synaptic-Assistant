@@ -35,7 +35,12 @@ defmodule Assistant.Embeddings.DocumentActivation do
 
     from(df in DocumentFolder,
       where: df.user_id == ^user_id and df.drive_folder_id == ^folder_id,
-      update: [set: [activation_boost: fragment("LEAST(?, COALESCE(activation_boost, 1.0) + ?)", ^@max_boost, ^boost)]]
+      update: [
+        set: [
+          activation_boost:
+            fragment("LEAST(?, COALESCE(activation_boost, 1.0) + ?)", ^@max_boost, ^boost)
+        ]
+      ]
     )
     |> Repo.update_all([])
   end

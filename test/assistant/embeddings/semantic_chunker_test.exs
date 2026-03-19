@@ -29,7 +29,9 @@ defmodule Assistant.Embeddings.SemanticChunkerTest do
 
   describe "chunk/2 fallback behavior (embeddings disabled)" do
     test "produces chunks from multiple sentences when embeddings disabled" do
-      text = "First sentence about Elixir. Second sentence about Phoenix. Third sentence about OTP."
+      text =
+        "First sentence about Elixir. Second sentence about Phoenix. Third sentence about OTP."
+
       result = SemanticChunker.chunk(text)
 
       # With embeddings disabled, all similarities default to 1.0 (no boundaries)
@@ -66,7 +68,9 @@ defmodule Assistant.Embeddings.SemanticChunkerTest do
   describe "chunk/2 with markdown" do
     test "detects markdown source_type when headers present after newline" do
       # source_type detection checks String.contains?(original_text, "\\n#")
-      text = "Some intro text.\n# Introduction\nThis is the intro.\n\n## Details\nSome details here."
+      text =
+        "Some intro text.\n# Introduction\nThis is the intro.\n\n## Details\nSome details here."
+
       result = SemanticChunker.chunk(text)
       assert Enum.any?(result, fn chunk -> chunk.source_type == :markdown end)
     end
@@ -82,6 +86,7 @@ defmodule Assistant.Embeddings.SemanticChunkerTest do
     test "plain source_type when no newline-preceded headers" do
       text = "Just a plain sentence. And another one."
       result = SemanticChunker.chunk(text)
+
       Enum.each(result, fn chunk ->
         assert chunk.source_type == :plain
       end)

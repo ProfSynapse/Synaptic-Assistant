@@ -52,6 +52,7 @@ defmodule Assistant.Skills.Memory.Save do
              content:
                Jason.encode!(%{
                  id: entry.id,
+                 title: entry.title,
                  content: entry.content,
                  tags: entry.tags,
                  category: entry.category,
@@ -73,6 +74,7 @@ defmodule Assistant.Skills.Memory.Save do
 
   defp build_attrs(flags, context) do
     %{
+      title: parse_title(flags["title"]),
       content: flags["content"],
       user_id: context.user_id,
       source_conversation_id: context.conversation_id,
@@ -89,6 +91,17 @@ defmodule Assistant.Skills.Memory.Save do
   defp parse_search_queries(nil), do: []
   defp parse_search_queries(queries) when is_list(queries), do: queries
   defp parse_search_queries(_), do: []
+
+  defp parse_title(nil), do: nil
+
+  defp parse_title(title) when is_binary(title) do
+    case String.trim(title) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp parse_title(_), do: nil
 
   defp parse_tags(nil), do: []
   defp parse_tags(tags) when is_list(tags), do: tags

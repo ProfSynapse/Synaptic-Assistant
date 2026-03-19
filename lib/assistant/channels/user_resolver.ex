@@ -31,6 +31,7 @@ defmodule Assistant.Channels.UserResolver do
 
   alias Assistant.Repo
   alias Assistant.Accounts.SettingsUser
+  alias Assistant.Billing
   alias Assistant.Memory.Store
   alias Assistant.Schemas.{User, UserIdentity}
 
@@ -510,6 +511,8 @@ defmodule Assistant.Channels.UserResolver do
         where: su.user_id == ^pseudo_user_id
       )
       |> Repo.update_all(set: [user_id: real_user_id])
+
+      Billing.sync_linked_user_billing_account_by_user_id(real_user_id)
 
       do_upgrade_pseudo_user(pseudo_user_id, real_user_id, nil)
       real_user_id

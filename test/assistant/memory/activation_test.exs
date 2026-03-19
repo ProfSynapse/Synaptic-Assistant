@@ -128,6 +128,7 @@ defmodule Assistant.Memory.ActivationTest do
       Activation.spread(user.id, [%{id: retrieved.id, embedding: retrieved.embedding}])
 
       similar_decay = Decimal.to_float(Repo.get!(MemoryEntry, similar_neighbor.id).decay_factor)
+
       dissimilar_decay =
         Decimal.to_float(Repo.get!(MemoryEntry, dissimilar_neighbor.id).decay_factor)
 

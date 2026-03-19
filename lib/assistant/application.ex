@@ -12,64 +12,68 @@ defmodule Assistant.Application do
   @impl true
   def start(_type, _args) do
     children =
-      Enum.reject([
-        # Config loader (must be first — other children depend on ETS config)
-        Assistant.Config.Loader,
+      Enum.reject(
+        [
+          # Config loader (must be first — other children depend on ETS config)
+          Assistant.Config.Loader,
 
-        # Prompt template loader (after Config.Loader — reads priv/config/prompts/*.yaml)
-        Assistant.Config.PromptLoader,
+          # Prompt template loader (after Config.Loader — reads priv/config/prompts/*.yaml)
+          Assistant.Config.PromptLoader,
 
-        # Encryption vault (must start before Repo consumers that use Cloak types)
-        Assistant.Vault,
+          # Encryption vault (must start before Repo consumers that use Cloak types)
+          Assistant.Vault,
 
-        # Infrastructure
-        Assistant.Repo,
+          # Infrastructure
+          Assistant.Repo,
 
-        # Embedding model serving (only when embeddings enabled)
-        if(Application.get_env(:assistant, :embeddings, []) |> Keyword.get(:enabled, false),
-          do: Assistant.Embeddings.Serving),
-        {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},
-        {Phoenix.PubSub, name: Assistant.PubSub},
+          # Embedding model serving (only when embeddings enabled)
+          if(Application.get_env(:assistant, :embeddings, []) |> Keyword.get(:enabled, false),
+            do: Assistant.Embeddings.Serving
+          ),
+          {DNSCluster, query: Application.get_env(:assistant, :dns_cluster_query) || :ignore},
+          {Phoenix.PubSub, name: Assistant.PubSub},
 
-        # Integration settings cache (after Repo + PubSub — warms from DB, subscribes to PubSub)
-        Assistant.IntegrationSettings.Cache,
+          # Integration settings cache (after Repo + PubSub — warms from DB, subscribes to PubSub)
+          Assistant.IntegrationSettings.Cache,
 
-        # Cron scheduler (before Oban — scheduled jobs may enqueue Oban work)
-        Assistant.Scheduler,
+          # Cron scheduler (before Oban — scheduled jobs may enqueue Oban work)
+          Assistant.Scheduler,
 
-        # Job processing
-        {Oban, Application.fetch_env!(:assistant, Oban)},
+          # Job processing
+          {Oban, Application.fetch_env!(:assistant, Oban)},
 
-        # Workflow cron loader (after Scheduler + Oban — registers cron jobs for workflows)
-        Assistant.Scheduler.QuantumLoader,
+          # Workflow cron loader (after Scheduler + Oban — registers cron jobs for workflows)
+          Assistant.Scheduler.QuantumLoader,
 
-        # Skill system (Task.Supervisor must start before Registry and Executor)
-        {Task.Supervisor, name: Assistant.Skills.TaskSupervisor},
-        Assistant.Skills.Registry,
-        Assistant.Skills.Watcher,
+          # Skill system (Task.Supervisor must start before Registry and Executor)
+          {Task.Supervisor, name: Assistant.Skills.TaskSupervisor},
+          Assistant.Skills.Registry,
+          Assistant.Skills.Watcher,
 
-        # Channel infrastructure (circuit breaker for adapter resilience)
-        Assistant.Channels.CircuitBreaker,
+          # Channel infrastructure (circuit breaker for adapter resilience)
+          Assistant.Channels.CircuitBreaker,
 
-        # Orchestrator (process registries + DynamicSupervisor for per-conversation engines)
-        {Registry, keys: :unique, name: Assistant.Orchestrator.EngineRegistry},
-        {Registry, keys: :unique, name: Assistant.SubAgent.Registry},
-        {DynamicSupervisor,
-         name: Assistant.Orchestrator.ConversationSupervisor, strategy: :one_for_one},
+          # Orchestrator (process registries + DynamicSupervisor for per-conversation engines)
+          {Registry, keys: :unique, name: Assistant.Orchestrator.EngineRegistry},
+          {Registry, keys: :unique, name: Assistant.SubAgent.Registry},
+          {DynamicSupervisor,
+           name: Assistant.Orchestrator.ConversationSupervisor, strategy: :one_for_one},
 
-        # Memory agent (must start before monitors that dispatch to it)
-        {Assistant.Memory.Agent, user_id: "dev-user"},
+          # Memory agent (must start before monitors that dispatch to it)
+          {Assistant.Memory.Agent, user_id: "dev-user"},
 
-        # Memory background triggers (subscribe to PubSub events from Engine)
-        Assistant.Memory.ContextMonitor,
-        Assistant.Memory.TurnClassifier,
+          # Memory background triggers (subscribe to PubSub events from Engine)
+          Assistant.Memory.ContextMonitor,
+          Assistant.Memory.TurnClassifier,
 
-        # Notification router (dedup + rule-based dispatch to channels)
-        Assistant.Notifications.Router,
+          # Notification router (dedup + rule-based dispatch to channels)
+          Assistant.Notifications.Router,
 
-        # Web endpoint (last — depends on everything above)
-        AssistantWeb.Endpoint
-      ], &is_nil/1)
+          # Web endpoint (last — depends on everything above)
+          AssistantWeb.Endpoint
+        ],
+        &is_nil/1
+      )
 
     opts = [strategy: :one_for_one, name: Assistant.Supervisor]
     Supervisor.start_link(children, opts)

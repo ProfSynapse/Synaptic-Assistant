@@ -141,6 +141,7 @@ defmodule Assistant.Embeddings.FolderEmbedderTest do
 
       # Single chunk: mean embedding == the chunk embedding itself
       stored = Pgvector.to_list(updated.embedding)
+
       for {expected, actual} <- Enum.zip(embedding, stored) do
         assert_in_delta expected, actual, 1.0e-5
       end
@@ -192,30 +193,32 @@ defmodule Assistant.Embeddings.FolderEmbedderTest do
       insert_arcana_chunk!(doc_other, fake_embedding(2))
 
       # Verify the raw query returns correct count for each user
-      result = Repo.query!(
-        """
-        SELECT COUNT(*) FROM arcana_chunks ac
-        INNER JOIN arcana_documents ad ON ac.document_id = ad.id
-        WHERE ad.metadata->>'parent_folder_id' = $1
-          AND ad.metadata->>'user_id' = $2
-          AND ac.embedding IS NOT NULL
-        """,
-        ["shared-folder", to_string(user.id)]
-      )
+      result =
+        Repo.query!(
+          """
+          SELECT COUNT(*) FROM arcana_chunks ac
+          INNER JOIN arcana_documents ad ON ac.document_id = ad.id
+          WHERE ad.metadata->>'parent_folder_id' = $1
+            AND ad.metadata->>'user_id' = $2
+            AND ac.embedding IS NOT NULL
+          """,
+          ["shared-folder", to_string(user.id)]
+        )
 
       [[count]] = result.rows
       assert count == 1
 
-      result_other = Repo.query!(
-        """
-        SELECT COUNT(*) FROM arcana_chunks ac
-        INNER JOIN arcana_documents ad ON ac.document_id = ad.id
-        WHERE ad.metadata->>'parent_folder_id' = $1
-          AND ad.metadata->>'user_id' = $2
-          AND ac.embedding IS NOT NULL
-        """,
-        ["shared-folder", to_string(other_user.id)]
-      )
+      result_other =
+        Repo.query!(
+          """
+          SELECT COUNT(*) FROM arcana_chunks ac
+          INNER JOIN arcana_documents ad ON ac.document_id = ad.id
+          WHERE ad.metadata->>'parent_folder_id' = $1
+            AND ad.metadata->>'user_id' = $2
+            AND ac.embedding IS NOT NULL
+          """,
+          ["shared-folder", to_string(other_user.id)]
+        )
 
       [[other_count]] = result_other.rows
       assert other_count == 1

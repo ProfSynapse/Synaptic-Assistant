@@ -945,7 +945,8 @@ defmodule Assistant.Memory.Agent do
     1. Search existing memories for this conversation to avoid duplicate compaction.
     2. Summarize the message range into concise, self-contained memory entries.
     3. Extract entities and relations from the conversation content.
-    4. Save the resulting memories with source_type "compaction" and provenance metadata.
+    4. For each memory entry, generate a short human-readable title that will be shown in the knowledge graph.
+    5. Save the resulting memories with source_type "compaction" and provenance metadata.
     """
   end
 
@@ -963,8 +964,9 @@ defmodule Assistant.Memory.Agent do
     Steps:
     1. Search existing memories for related content to avoid duplicates.
     2. Identify facts, decisions, preferences, or important context worth remembering.
-    3. Save concise memory entries for anything new or updated.
-    4. Skip saving if the exchange contains no memorable information.
+    3. For each new memory, produce a short human-readable title that a user can scan in the knowledge graph.
+    4. Save concise memory entries for anything new or updated, including both the title and the content.
+    5. Skip saving if the exchange contains no memorable information.
     """
   end
 
@@ -982,12 +984,13 @@ defmodule Assistant.Memory.Agent do
     Steps:
     1. Search existing memories for related content to avoid duplicates.
     2. Identify facts, decisions, preferences, or important context worth remembering.
-    3. Save concise memory entries for anything new or updated.
-    4. Query the entity graph for any entities mentioned in the text.
-    5. Identify people, projects, tools, concepts, and organizations.
-    6. Extract relations between entities (works_on, uses, knows, part_of, related_to).
-    7. For existing entities with changed attributes, close old relations and open new ones.
-    8. Create new entities and relations for anything not yet in the graph.
+    3. For each new memory, produce a short human-readable title that a user can scan in the knowledge graph.
+    4. Save concise memory entries for anything new or updated, including both the title and the content.
+    5. Query the entity graph for any entities mentioned in the text.
+    6. Identify people, projects, tools, concepts, and organizations.
+    7. Extract relations between entities (works_on, uses, knows, part_of, related_to).
+    8. For existing entities with changed attributes, close old relations and open new ones.
+    9. Create new entities and relations for anything not yet in the graph.
     """
   end
 

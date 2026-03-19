@@ -33,6 +33,7 @@ defmodule AssistantWeb.OAuthController do
   alias Assistant.Auth.MagicLink
   alias Assistant.Auth.OAuth
   alias Assistant.Auth.TokenStore
+  alias Assistant.Billing
 
   require Logger
 
@@ -307,7 +308,9 @@ defmodule AssistantWeb.OAuthController do
         |> Ecto.Changeset.change(user_id: chat_user_id)
         |> Assistant.Repo.update()
         |> case do
-          {:ok, _} ->
+          {:ok, updated_settings_user} ->
+            :ok = Billing.sync_linked_user_billing_account(updated_settings_user)
+
             Logger.info("OAuth callback: linked settings_user to chat user",
               provider_email: provider_email,
               chat_user_id: chat_user_id

@@ -82,6 +82,7 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorker do
       content = build_content(agent_id, mission, transcript, status)
 
       attrs = %{
+        title: build_title(agent_id, mission, status),
         content: content,
         user_id: user_id,
         source_conversation_id: conversation_id,
@@ -132,6 +133,17 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorker do
       end
 
     header <> mission_section <> transcript_section
+  end
+
+  defp build_title(agent_id, mission, status) do
+    mission_text =
+      case mission do
+        text when is_binary(text) and text != "" -> ": #{text}"
+        _ -> ""
+      end
+
+    "Agent #{agent_id} (#{status})#{mission_text}"
+    |> String.slice(0, 160)
   end
 
   defp build_tags(agent_id, status) do

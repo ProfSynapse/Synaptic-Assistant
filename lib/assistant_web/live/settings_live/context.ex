@@ -7,6 +7,7 @@ defmodule AssistantWeb.SettingsLive.Context do
   require Logger
 
   alias Assistant.Accounts.Scope
+  alias Assistant.Billing
   alias Assistant.Repo
   alias Assistant.Schemas.User
 
@@ -134,8 +135,12 @@ defmodule AssistantWeb.SettingsLive.Context do
     |> Ecto.Changeset.change(user_id: user_id)
     |> Repo.update()
     |> case do
-      {:ok, _} -> {:ok, user_id}
-      {:error, changeset} -> {:error, changeset}
+      {:ok, updated_settings_user} ->
+        :ok = Billing.sync_linked_user_billing_account(updated_settings_user)
+        {:ok, user_id}
+
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 
@@ -143,7 +148,8 @@ defmodule AssistantWeb.SettingsLive.Context do
     user_attrs = %{
       external_id: "settings:#{settings_user.id}",
       channel: "settings",
-      display_name: settings_user.display_name
+      display_name: settings_user.display_name,
+      billing_account_id: settings_user.billing_account_id
     }
 
     case %User{}

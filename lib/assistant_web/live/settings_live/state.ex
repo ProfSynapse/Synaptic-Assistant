@@ -25,6 +25,7 @@ defmodule AssistantWeb.SettingsLive.State do
     )
     |> assign(:profile, Data.blank_profile())
     |> assign(:profile_form, to_form(Data.blank_profile(), as: :profile))
+    |> assign(:billing_summary, Data.empty_billing_summary())
     |> assign(:orchestrator_prompt_text, "")
     |> assign(:orchestrator_prompt_html, "")
     |> assign(:model_options, [])

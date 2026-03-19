@@ -72,8 +72,10 @@ defmodule Assistant.Skills.Memory.HandlersTest do
 
       ctx = %{ctx | user_id: user.id, conversation_id: conv.id}
 
-      assert {:ok, %Result{status: :ok, side_effects: [:memory_saved]}} =
+      assert {:ok, %Result{status: :ok, side_effects: [:memory_saved], content: content}} =
                Save.execute(%{"content" => "Test memory", "tags" => "test,smoke"}, ctx)
+
+      assert %{"title" => "Test memory"} = Jason.decode!(content)
     end
   end
 

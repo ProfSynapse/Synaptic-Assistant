@@ -302,14 +302,14 @@ defmodule AssistantWeb.SettingsUserAuth do
   end
 
   @doc "Returns the path to redirect to after log in."
-  # the settings_user was already logged in, redirect to settings
+  # the settings_user was already logged in, redirect to the workspace
   def signed_in_path(%Plug.Conn{
         assigns: %{current_scope: %Scope{settings_user: %Accounts.SettingsUser{}}}
       }) do
-    ~p"/settings_users/settings"
+    ~p"/workspace"
   end
 
-  def signed_in_path(_), do: ~p"/"
+  def signed_in_path(_), do: ~p"/workspace"
 
   @doc """
   Plug for routes that require the settings_user to be authenticated.

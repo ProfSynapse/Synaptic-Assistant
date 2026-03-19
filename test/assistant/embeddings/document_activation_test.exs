@@ -69,6 +69,7 @@ defmodule Assistant.Embeddings.DocumentActivationTest do
 
     test "skips chunks without parent_folder_id" do
       user = user_fixture()
+
       chunks = [
         %{metadata: %{}, document_id: "doc-1"},
         %{metadata: %{"other_key" => "value"}, document_id: "doc-2"}
@@ -80,6 +81,7 @@ defmodule Assistant.Embeddings.DocumentActivationTest do
 
     test "handles nil parent_folder_id" do
       user = user_fixture()
+
       chunks = [
         %{metadata: %{"parent_folder_id" => nil}, document_id: "doc-1"}
       ]

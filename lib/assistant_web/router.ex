@@ -113,7 +113,6 @@ defmodule AssistantWeb.Router do
 
     live_session :require_authenticated_settings_user,
       on_mount: [{AssistantWeb.SettingsUserAuth, :require_authenticated}] do
-      live "/", SettingsLive, :profile
       live "/workspace", WorkspaceLive, :index
       live "/settings", SettingsLive, :profile
       live "/settings/workflows/:name/edit", WorkflowEditorLive, :edit
@@ -142,6 +141,7 @@ defmodule AssistantWeb.Router do
 
     live_session :current_settings_user,
       on_mount: [{AssistantWeb.SettingsUserAuth, :mount_current_scope}] do
+      live "/", MarketingLive, :index
       live "/cloud", MarketingLive, :index
       live "/setup", SettingsUserLive.Setup, :index
       live "/settings_users/register", SettingsUserLive.Registration, :new

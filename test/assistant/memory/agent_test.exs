@@ -328,8 +328,7 @@ defmodule Assistant.Memory.AgentTest do
 
       GenServer.cast(
         pid,
-        {:mission, :unknown_action,
-         %{conversation_id: "conv-unknown", user_id: user_id}}
+        {:mission, :unknown_action, %{conversation_id: "conv-unknown", user_id: user_id}}
       )
 
       wait_for_idle(user_id, 2_000)

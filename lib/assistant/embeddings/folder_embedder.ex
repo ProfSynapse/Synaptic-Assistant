@@ -12,7 +12,8 @@ defmodule Assistant.Embeddings.FolderEmbedder do
   def recompute(user_id, drive_folder_id) do
     child_embeddings =
       from(ac in "arcana_chunks",
-        join: ad in "arcana_documents", on: ac.document_id == ad.id,
+        join: ad in "arcana_documents",
+        on: ac.document_id == ad.id,
         where:
           fragment("?->>'parent_folder_id' = ?", ad.metadata, ^drive_folder_id) and
             fragment("?->>'user_id' = ?", ad.metadata, ^to_string(user_id)) and
