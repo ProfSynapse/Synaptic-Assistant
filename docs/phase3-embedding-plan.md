@@ -555,23 +555,105 @@ Mix task `mix assistant.backfill_embeddings`:
 
 ---
 
-### Phase 3d: Document ingestion via Arcana
+### Phase 3d: Document ingestion + folder activation model
 
-**Goal**: Chunk synced documents with the semantic chunker, embed + store via Arcana.
+**Goal**: Chunk synced documents with the semantic chunker, embed + store via Arcana, and implement folder-based spreading activation for documents.
 
-#### 1. Create a default Arcana collection
+#### The folder-as-graph model
 
-On app startup or first use:
-```elixir
-Arcana.create_collection("user_documents", description: "Synced user documents")
+Folders are implicit graph structure — documents in the same folder are "associated" like memories near each other in embedding space. We treat folders as nodes and folder membership as edges.
+
+```
+                    ┌─────────────────────────────────┐
+                    │  Folder: "Project Alpha"         │
+                    │  embedding = mean(child embeddings)│
+                    │  activation_boost = 1.0           │
+                    │                                   │
+                    │  ┌─────────┐  ┌──────────────┐   │
+                    │  │ req.md  │  │ arch.md      │   │
+                    │  │ 8 chunks│  │ 12 chunks    │   │
+  query hits ──────►│  │ ★ hit   │  │ gets boost   │   │
+  chunk from req.md │  └─────────┘  └──────────────┘   │
+                    │  ┌─────────┐  ┌──────────────┐   │
+                    │  │ api.json│  │ notes.md     │   │
+                    │  │ 4 chunks│  │ 6 chunks     │   │
+                    │  │gets boost│  │ gets boost   │   │
+                    │  └─────────┘  └──────────────┘   │
+                    └─────────────────────────────────┘
+
+  Folder: "Onboarding"  ← NOT boosted (different folder)
+    ├── setup.md
+    └── faq.md
 ```
 
-#### 2. Hook into FileSyncWorker
+**Three levels of association (non-recursive):**
 
-After successful file sync:
-1. Check if content is text-based (md, csv, txt, json — the sync pipeline already converts Google Docs/Sheets/Slides to these)
-2. Enqueue `EmbedDocumentWorker` Oban job
-3. Worker calls:
+| Level | Association | Mechanism |
+|-------|-------------|-----------|
+| Chunk ↔ Chunk (same doc) | Arcana handles natively | Same `document_id` in arcana_chunks |
+| Doc ↔ Doc (same folder) | **NEW**: sibling activation | Retrieve chunk → boost sibling docs' `activation_boost` |
+| Folder ↔ Query (folder as node) | **NEW**: folder embeddings | Folder embedding = mean of child doc embeddings, searchable |
+
+#### 1. Migration: persist folder info + add document activation fields
+
+Currently `synced_files` has NO folder reference (parent folder is transient from Drive API). We need to persist it, plus add a folder nodes table.
+
+```elixir
+# Migration 1: Add parent_folder_id to synced_files
+alter table(:synced_files) do
+  add :parent_folder_id, :string    # Google Drive folder ID
+  add :parent_folder_name, :string  # Human-readable folder name
+end
+
+create index(:synced_files, [:parent_folder_id])
+create index(:synced_files, [:user_id, :parent_folder_id])
+
+# Migration 2: Document folders table (folder nodes)
+create table(:document_folders, primary_key: false) do
+  add :id, :binary_id, primary_key: true
+  add :user_id, references(:users, type: :binary_id, on_delete: :delete_all), null: false
+  add :drive_folder_id, :string, null: false    # Google Drive folder ID
+  add :drive_id, :string                         # shared drive ID or nil
+  add :name, :string, null: false
+  add :embedding, :vector, size: 384             # mean of child doc embeddings
+  add :activation_boost, :float, default: 1.0    # spreading activation multiplier
+  add :child_count, :integer, default: 0
+  timestamps(type: :utc_datetime_usec)
+end
+
+create unique_index(:document_folders, [:user_id, :drive_folder_id])
+create index(:document_folders, [:embedding],
+  using: "hnsw",
+  options: "WITH (m = 16, ef_construction = 64)",
+  where: "embedding IS NOT NULL"
+)
+```
+
+Schema: `lib/assistant/schemas/document_folder.ex`
+
+#### 2. Persist parent folder during sync
+
+In `FileSyncWorker` — the Drive Changes API already returns `parents` for each file. Currently discarded after scope check. Now persist it:
+
+```elixir
+# In file_sync_worker.ex, after successful sync:
+Repo.update(synced_file,
+  parent_folder_id: change.parents |> List.first(),
+  parent_folder_name: resolve_folder_name(change.parents |> List.first())
+)
+```
+
+Also upsert the `document_folders` entry:
+```elixir
+DocumentFolder.upsert(%{
+  user_id: user_id,
+  drive_folder_id: parent_folder_id,
+  drive_id: drive_id,
+  name: folder_name
+})
+```
+
+#### 3. Arcana ingestion (same as before, plus folder metadata)
 
 ```elixir
 Arcana.ingest(content,
@@ -579,16 +661,183 @@ Arcana.ingest(content,
   source_id: synced_file.drive_file_id,
   metadata: %{
     user_id: synced_file.user_id,
-    file_name: synced_file.name,
-    mime_type: synced_file.mime_type,
-    drive_id: synced_file.drive_id
+    file_name: synced_file.drive_file_name,
+    mime_type: synced_file.drive_mime_type,
+    drive_id: synced_file.drive_id,
+    parent_folder_id: synced_file.parent_folder_id,    # NEW
+    parent_folder_name: synced_file.parent_folder_name  # NEW
   }
 )
 ```
 
-4. On re-sync: delete old Arcana document by `source_id`, re-ingest
+On re-sync: delete old Arcana document by `source_id`, re-ingest.
 
-#### 3. Document search via Arcana
+#### 4. Folder embedding (aggregate of child docs)
+
+After any document in a folder is ingested/re-ingested, recompute the folder's embedding as the **mean of its children's document-level embeddings**:
+
+New module: `lib/assistant/embeddings/folder_embedder.ex`
+
+```elixir
+defmodule Assistant.Embeddings.FolderEmbedder do
+  @moduledoc false
+
+  def recompute(user_id, drive_folder_id) do
+    # Get all chunks for documents in this folder, average their embeddings
+    child_embeddings =
+      from(ac in "arcana_chunks",
+        join: ad in "arcana_documents", on: ac.document_id == ad.id,
+        where: fragment("?->>'parent_folder_id' = ?", ad.metadata, ^drive_folder_id)
+          and fragment("?->>'user_id' = ?", ad.metadata, ^to_string(user_id))
+          and not is_nil(ac.embedding),
+        select: ac.embedding
+      )
+      |> Repo.all()
+
+    case child_embeddings do
+      [] -> :noop
+      embeddings ->
+        # Mean pooling: average all chunk embeddings
+        folder_embedding = mean_embedding(embeddings)
+
+        from(df in DocumentFolder,
+          where: df.user_id == ^user_id and df.drive_folder_id == ^drive_folder_id
+        )
+        |> Repo.update_all(set: [
+          embedding: folder_embedding,
+          child_count: length(embeddings)
+        ])
+    end
+  end
+
+  defp mean_embedding(embeddings) do
+    n = length(embeddings)
+    embeddings
+    |> Enum.zip_with(fn vals -> Enum.sum(vals) / n end)
+  end
+end
+```
+
+This runs after `EmbedDocumentWorker` completes, as a follow-up step.
+
+#### 5. Document spreading activation (folder-scoped)
+
+New module: `lib/assistant/embeddings/document_activation.ex`
+
+```elixir
+defmodule Assistant.Embeddings.DocumentActivation do
+  @moduledoc false
+
+  @spread_rate 0.03
+  @max_boost 1.3
+
+  @doc """
+  When chunks from a document are retrieved, boost sibling documents
+  in the same folder. Non-recursive — only direct folder siblings.
+  """
+  def spread(retrieved_chunks) do
+    # Group retrieved chunks by parent_folder_id
+    retrieved_chunks
+    |> Enum.group_by(fn chunk -> chunk.metadata["parent_folder_id"] end)
+    |> Enum.each(fn {nil, _} -> :skip  # no folder = no spreading
+                     {folder_id, chunks} -> spread_in_folder(folder_id, chunks)
+    end)
+  end
+
+  defp spread_in_folder(folder_id, retrieved_chunks) do
+    retrieved_doc_ids = retrieved_chunks |> Enum.map(& &1.document_id) |> Enum.uniq()
+
+    # Boost sibling documents in the same folder (via Arcana metadata)
+    # We update the folder's activation_boost
+    from(df in DocumentFolder,
+      where: df.drive_folder_id == ^folder_id
+    )
+    |> Repo.update_all(set: [
+      activation_boost: fragment(
+        "LEAST(?, COALESCE(activation_boost, 1.0) + ?)",
+        ^@max_boost, ^(@spread_rate * length(retrieved_chunks))
+      )
+    ])
+  end
+end
+```
+
+#### 6. Folder-aware document search
+
+Enhanced Arcana search that factors in folder activation:
+
+```elixir
+def search_documents(user_id, query_text, opts \\ []) do
+  limit = Keyword.get(opts, :limit, 10)
+
+  # Step 1: Arcana semantic + FTS search
+  arcana_results = Arcana.search(query_text,
+    collection: "user_documents",
+    mode: :hybrid,
+    semantic_weight: 0.7,
+    fulltext_weight: 0.3,
+    limit: limit * 2,  # overfetch for re-ranking
+    where: [metadata: %{user_id: to_string(user_id)}]
+  )
+
+  # Step 2: Load folder activation boosts
+  folder_ids = arcana_results
+    |> Enum.map(fn r -> r.metadata["parent_folder_id"] end)
+    |> Enum.uniq()
+    |> Enum.reject(&is_nil/1)
+
+  folder_boosts = from(df in DocumentFolder,
+    where: df.drive_folder_id in ^folder_ids,
+    select: {df.drive_folder_id, df.activation_boost}
+  ) |> Repo.all() |> Map.new()
+
+  # Step 3: Re-rank with folder boost
+  arcana_results
+  |> Enum.map(fn result ->
+    folder_id = result.metadata["parent_folder_id"]
+    boost = Map.get(folder_boosts, folder_id, 1.0)
+    %{result | score: result.score * boost}
+  end)
+  |> Enum.sort_by(& &1.score, :desc)
+  |> Enum.take(limit)
+  |> tap(&DocumentActivation.spread/1)  # spreading activation post-retrieval
+end
+
+  # Step 4 (bonus): Also search folder embeddings for topic-level matches
+  def search_folders(user_id, query_text, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 3)
+    {:ok, query_embedding} = Embeddings.generate(query_text)
+
+    from(df in DocumentFolder,
+      where: df.user_id == ^user_id and not is_nil(df.embedding),
+      order_by: fragment("embedding <=> ?::vector", ^query_embedding),
+      limit: ^limit,
+      select: %{
+        folder: df,
+        similarity: fragment("1 - (embedding <=> ?::vector)", ^query_embedding)
+      }
+    )
+    |> Repo.all()
+  end
+```
+
+#### 7. Folder activation cooling
+
+Add to the existing `DecayCoolingWorker` cron:
+
+```elixir
+# Cool folder boosts 10% toward 1.0 each day
+from(df in DocumentFolder,
+  where: df.activation_boost != 1.0
+)
+|> Repo.update_all(
+  set: [activation_boost: fragment("1.0 + (activation_boost - 1.0) * 0.9")]
+)
+```
+
+#### 8. Document search via Arcana (direct, no folder boost)
+
+For cases where you just want raw Arcana search without folder re-ranking:
 
 ```elixir
 Arcana.search(query,
@@ -597,11 +846,9 @@ Arcana.search(query,
   semantic_weight: 0.7,
   fulltext_weight: 0.3,
   limit: 10,
-  where: [metadata: %{user_id: user_id}]  # scope to user
+  where: [metadata: %{user_id: user_id}]
 )
 ```
-
-Returns chunks with text, similarity score, and document metadata (file name, path, etc.).
 
 ---
 
@@ -682,8 +929,10 @@ These are optional enhancements. The core pipeline (chunk → embed → search) 
 
 - **SemanticChunker tests**: Verify boundary detection with known topic-shift texts, edge cases (single sentence, very long section, empty input)
 - **ArcanaEmbedder tests**: Mock `Nx.Serving.batched_run/2`, verify delegation
-- **Activation model tests**: Verify score formula weighting, spreading activation boost/cap/cooling, access_count increment
-- **Memory hybrid search tests**: Mock embeddings, verify 5-signal scoring, verify spreading activation fires post-retrieval
+- **Memory activation tests**: Verify 5-signal scoring, spreading activation boost/cap/cooling, access_count increment
+- **Document activation tests**: Verify folder boost applied to search results, folder embedding recompute, sibling activation
+- **Folder embedder tests**: Verify mean pooling of child doc embeddings, recompute on doc change
+- **Memory hybrid search tests**: Mock embeddings, verify spreading activation fires post-retrieval
 - **Arcana ingest/search tests**: Use test collection, verify end-to-end with mock embedder
 - **Config toggle**: All embedding tests skip when `embeddings.enabled == false`
 
@@ -704,15 +953,20 @@ config :arcana, embedder: {Assistant.Embeddings.MockEmbedder, dimensions: 384}
 | pgvector HNSW search (10K) | <5ms | Cosine distance |
 | Arcana hybrid search | ~20ms | Single CTE query (FTS + vector) |
 | Memory hybrid search (5-signal) | ~30ms | FTS + vector + importance + recency + activation |
-| Spreading activation (post-retrieval) | ~15ms | 5 neighbor lookups × pgvector scan |
+| Memory spreading activation | ~15ms | 5 neighbor lookups × pgvector scan |
+| Folder-aware doc search | ~25ms | Arcana search + folder boost lookup |
+| Document spreading activation | ~5ms | Single UPDATE on folder activation_boost |
+| Folder embedding recompute | ~10ms | Mean of child embeddings (post-ingest) |
 | Unified search (parallel) | ~35ms | Max of memory + doc, not sum |
-| Decay cooling cron | <100ms | Single UPDATE on decay_factor != 1.0 |
+| Cooling cron (memories + folders) | <100ms | Two UPDATEs on != 1.0 rows |
 
 Model memory: ~70MB for gte-small. Single serving shared by all consumers.
 
 ---
 
-## The Activation Model at a Glance
+## The Dual Activation Model at a Glance
+
+### Memory Activation (embedding-space graph)
 
 ```
   Query: "How do GenServers work?"
@@ -720,7 +974,7 @@ Model memory: ~70MB for gte-small. Single serving shared by all consumers.
     ┌───────────────┴───────────────┐
     │     5-Signal Scoring          │
     │                               │
-    │  35% semantic similarity      │  ← "GNN message" (cosine sim)
+    │  35% semantic similarity      │  ← cosine sim (implicit edges)
     │  20% FTS rank                 │  ← lexical match
     │  15% importance               │  ← user-set node weight
     │  15% recency decay            │  ← Ebbinghaus curve (e^-λt)
@@ -729,44 +983,69 @@ Model memory: ~70MB for gte-small. Single serving shared by all consumers.
     └───────────────┬───────────────┘
                     │
     ┌───────────────┴───────────────┐
-    │     Retrieved: top 10         │
-    │                               │
-    │  "GenServer basics"     0.92  │
-    │  "handle_call patterns" 0.85  │
-    │  "OTP overview"         0.71  │
-    │  ...                          │
-    └───────────────┬───────────────┘
-                    │
-    ┌───────────────┴───────────────┐
-    │  Spreading Activation         │
-    │  (async, post-retrieval)      │
+    │  Post-Retrieval Spreading     │
     │                               │
     │  For each retrieved memory:   │
-    │    → Find 5 nearest neighbors │
+    │    → 5 nearest neighbors      │
     │    → Bump their decay_factor  │
     │    → Cap at 1.5               │
-    │                               │
-    │  "Supervisor trees"  1.0→1.04 │
-    │  "Process linking"   1.0→1.03 │
-    │  "Registry patterns" 1.1→1.12 │
-    └───────────────────────────────┘
-                    │
-    ┌───────────────┴───────────────┐
-    │  Daily Cooling Cron           │
-    │                               │
-    │  decay_factor → 1.0 + 0.9×Δ  │
-    │  (10% exponential cooldown)   │
-    │  1.3 → 1.27 → 1.24 → 1.0    │
     └───────────────────────────────┘
 ```
 
-This models a GNN's behavior:
-- **Node features** = importance + access_count + recency
-- **Edge weights** = cosine similarity in embedding space
-- **Message passing** = spreading activation on retrieval
-- **Temporal dynamics** = Ebbinghaus decay + cooling cron
+### Document Activation (folder-structure graph)
 
-Without any of the infrastructure: no graph DB, no adjacency matrix, no PyTorch Geometric. Just SQL + pgvector.
+```
+  Query: "API authentication flow"
+                    │
+    ┌───────────────┴───────────────┐
+    │  Arcana Hybrid Search         │
+    │  (semantic + FTS)             │
+    │       × folder activation_boost│  ← folder-level multiplier
+    └───────────────┬───────────────┘
+                    │
+    ┌───────────────┴───────────────┐
+    │  Retrieved: chunk from        │
+    │  "Project Alpha/api-spec.json"│
+    └───────────────┬───────────────┘
+                    │
+    ┌───────────────┴───────────────┐
+    │  Folder Spreading             │
+    │  (non-recursive)              │
+    │                               │
+    │  "Project Alpha" folder:      │
+    │    activation_boost 1.0→1.03  │
+    │                               │
+    │  Next search: ALL docs in     │
+    │  "Project Alpha" score higher │
+    │  (arch.md, req.md, notes.md)  │
+    └───────────────────────────────┘
+                    │
+    ┌───────────────┴───────────────┐
+    │  Folder as Searchable Node    │
+    │                               │
+    │  "Project Alpha" folder has   │
+    │  its own embedding (mean of   │
+    │  child doc embeddings).       │
+    │                               │
+    │  search_folders("auth") →     │
+    │  "Project Alpha" (sim=0.82)   │
+    │  → surfaces whole folder as   │
+    │    relevant topic cluster     │
+    └───────────────────────────────┘
+```
+
+### GNN analogy (both systems)
+
+| GNN Concept | Memory System | Document System |
+|-------------|---------------|-----------------|
+| **Nodes** | Memory entries | Documents + Folders |
+| **Edges** | Cosine similarity (implicit) | Folder membership (explicit) + cosine similarity |
+| **Node features** | importance, access_count, recency | content embedding, file metadata |
+| **Message passing** | Spreading activation via embedding neighbors | Folder activation boost on sibling retrieval |
+| **Aggregation** | — | Folder embedding = mean(child embeddings) |
+| **Temporal dynamics** | Ebbinghaus decay + cooling cron | Folder activation cooling cron |
+
+No graph DB, no adjacency matrix, no PyTorch Geometric. Just SQL + pgvector + folder structure.
 
 ---
 
@@ -774,9 +1053,9 @@ Without any of the infrastructure: no graph DB, no adjacency matrix, no PyTorch 
 
 1. **3a** — Foundation: deps, pgvector, serving, Arcana install. Zero behavior change.
 2. **3b** — Semantic chunker: custom `Arcana.Chunker` with boundary detection.
-3. **3c** — Memory embeddings + activation model: embedding column, access_count, 5-signal hybrid search, spreading activation, decay cooling cron.
-4. **3d** — Document ingestion: Arcana pipeline, hook into file sync.
-5. **3e** — Unified search + skills: context builder, file search, memory search.
+3. **3c** — Memory embeddings + activation: embedding column, access_count, 5-signal hybrid search, spreading activation, decay cooling cron.
+4. **3d** — Document ingestion + folder activation: persist parent_folder_id, document_folders table, Arcana pipeline, folder embeddings, folder-scoped spreading activation.
+5. **3e** — Unified search + skills: context builder, file search, memory search, folder search.
 
 Each phase independently deployable. FTS continues working throughout.
 
@@ -790,11 +1069,16 @@ Each phase independently deployable. FTS continues working throughout.
 - `lib/assistant/embeddings/arcana_embedder.ex` — Arcana.Embedder adapter
 - `lib/assistant/embeddings/semantic_chunker.ex` — Arcana.Chunker with boundary detection
 - `lib/assistant/embeddings/embed_memory_worker.ex` — Oban worker for memories
-- `lib/assistant/embeddings/embed_document_worker.ex` — Oban worker for doc ingestion
-- `lib/assistant/embeddings/unified_search.ex` — cross-source search
-- `lib/assistant/memory/activation.ex` — spreading activation (GNN message-passing)
-- `lib/assistant/memory/decay_cooling_worker.ex` — Oban cron for decay_factor cooldown
+- `lib/assistant/embeddings/embed_document_worker.ex` — Oban worker for doc ingestion + folder embedding recompute
+- `lib/assistant/embeddings/folder_embedder.ex` — mean-pool child embeddings into folder node
+- `lib/assistant/embeddings/document_activation.ex` — folder-scoped spreading activation for documents
+- `lib/assistant/embeddings/unified_search.ex` — cross-source search (memories + docs + folders)
+- `lib/assistant/memory/activation.ex` — embedding-space spreading activation for memories
+- `lib/assistant/memory/decay_cooling_worker.ex` — Oban cron for memory decay_factor + folder activation_boost cooldown
+- `lib/assistant/schemas/document_folder.ex` — Ecto schema for folder nodes
 - Migration: enable pgvector + add embedding + access_count to memory_entries
+- Migration: add parent_folder_id/name to synced_files
+- Migration: create document_folders table
 - Arcana-generated migrations (collections, documents, chunks)
 - Test files for each module
 
@@ -806,7 +1090,8 @@ Each phase independently deployable. FTS continues working throughout.
 - `lib/assistant/memory/search.ex` — add hybrid_search with 5-signal scoring
 - `lib/assistant/memory/store.ex` — enqueue embed job after create, update touch_access to inc access_count
 - `lib/assistant/memory/context_builder.ex` — use unified search
-- `lib/assistant/sync/workers/file_sync_worker.ex` — enqueue doc ingestion
-- `lib/assistant/skills/files/search.ex` — semantic search mode
+- `lib/assistant/sync/workers/file_sync_worker.ex` — persist parent_folder_id, enqueue doc ingestion
+- `lib/assistant/skills/files/search.ex` — semantic search mode with folder boost
 - `lib/assistant/skills/memory/search.ex` — hybrid search mode
 - `lib/assistant/schemas/memory_entry.ex` — add :embedding, :access_count fields
+- `lib/assistant/schemas/synced_file.ex` — add :parent_folder_id, :parent_folder_name fields
