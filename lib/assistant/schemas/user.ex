@@ -24,6 +24,7 @@ defmodule Assistant.Schemas.User do
     field :timezone, :string, default: "UTC"
     field :preferences, :map, default: %{}
 
+    belongs_to :billing_account, Assistant.Schemas.BillingAccount
     has_many :identities, Assistant.Schemas.UserIdentity
     has_many :conversations, Assistant.Schemas.Conversation
     has_many :tasks, Assistant.Schemas.Task, foreign_key: :assignee_id
@@ -45,7 +46,15 @@ defmodule Assistant.Schemas.User do
   # in user_identities. Existing callers still provide these fields — this
   # change only relaxes the validation constraint.
   @required_fields []
-  @optional_fields [:external_id, :channel, :email, :display_name, :timezone, :preferences]
+  @optional_fields [
+    :external_id,
+    :channel,
+    :email,
+    :display_name,
+    :timezone,
+    :preferences,
+    :billing_account_id
+  ]
 
   def changeset(user, attrs) do
     user

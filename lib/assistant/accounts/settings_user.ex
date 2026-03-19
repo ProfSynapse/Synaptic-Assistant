@@ -5,6 +5,7 @@ defmodule Assistant.Accounts.SettingsUser do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
   @model_default_roles ~w(orchestrator sub_agent sentinel compaction)
+  @billing_roles ~w(owner admin member)
 
   schema "settings_users" do
     field :full_name, :string
@@ -26,8 +27,10 @@ defmodule Assistant.Accounts.SettingsUser do
     field :openai_expires_at, :utc_datetime
     field :openai_auth_type, :string
     field :disabled_at, :utc_datetime
+    field :billing_role, :string, default: "member"
 
     belongs_to :user, Assistant.Schemas.User
+    belongs_to :billing_account, Assistant.Schemas.BillingAccount
 
     timestamps(type: :utc_datetime)
   end
@@ -227,6 +230,19 @@ defmodule Assistant.Accounts.SettingsUser do
   """
   def model_defaults_access_changeset(settings_user, enabled?) when is_boolean(enabled?) do
     change(settings_user, can_manage_model_defaults: enabled?)
+  end
+
+  @doc """
+  A changeset for assigning the settings user to a billing account.
+  """
+  def billing_membership_changeset(settings_user, billing_account_id, billing_role)
+      when is_binary(billing_role) do
+    settings_user
+    |> change(%{
+      billing_account_id: billing_account_id,
+      billing_role: billing_role
+    })
+    |> validate_inclusion(:billing_role, @billing_roles)
   end
 
   @doc """

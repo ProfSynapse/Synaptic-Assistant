@@ -8,6 +8,7 @@ defmodule Assistant.Sync.Workers.FileSyncWorker do
 
   require Logger
 
+  alias Assistant.Billing.Policy
   alias Assistant.Repo
   alias Assistant.Schemas.SyncedFile
   alias Assistant.Sync.{ChangeDetector, Converter, Helpers, StateStore}
@@ -210,13 +211,17 @@ defmodule Assistant.Sync.Workers.FileSyncWorker do
         local_state
       )
 
-    local_state
-    |> Ecto.Changeset.change(Map.put(attrs, :content, converted_content))
-    |> Repo.update()
-    |> case do
-      {:ok, _synced_file} ->
-        :ok
-
+    with :ok <-
+           Policy.ensure_retained_write_allowed(
+             user_id,
+             Policy.synced_file_growth(local_state.content, converted_content)
+           ),
+         {:ok, _synced_file} <-
+           local_state
+           |> Ecto.Changeset.change(Map.put(attrs, :content, converted_content))
+           |> Repo.update() do
+      :ok
+    else
       {:error, reason} ->
         Logger.error("FileSyncWorker: Failed to update synced file - #{inspect(reason)}")
         record_error(user_id, file_id, change, inspect(reason))

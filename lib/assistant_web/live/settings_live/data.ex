@@ -196,6 +196,29 @@ defmodule AssistantWeb.SettingsLive.Data do
 
   @blank_profile %{"display_name" => "", "email" => "", "timezone" => "UTC"}
 
+  @empty_billing_summary %{
+    account_id: nil,
+    account_name: nil,
+    plan: "free",
+    billing_mode: "standard",
+    stripe_subscription_status: nil,
+    seat_count: 0,
+    seat_bonus: 0,
+    storage_bonus_bytes: 0,
+    billing_email: nil,
+    current_period_end: nil,
+    complimentary_until: nil,
+    can_manage?: false
+  }
+
+  @empty_billing_storage %{
+    included_label: "Not yet available",
+    current_label: "Not yet measured",
+    projected_overage_label: "Not yet available",
+    metering_available?: false,
+    plan_note: "Storage metering is not active yet."
+  }
+
   @blank_model_form %{
     "id" => "",
     "name" => "",
@@ -258,6 +281,8 @@ defmodule AssistantWeb.SettingsLive.Data do
 
   def help_articles, do: @help_articles
   def empty_analytics, do: @empty_analytics
+  def empty_billing_summary, do: @empty_billing_summary
+  def empty_billing_storage, do: @empty_billing_storage
   def blank_profile, do: @blank_profile
   def blank_model_form, do: @blank_model_form
   def blank_transcript_filters, do: @blank_transcript_filters

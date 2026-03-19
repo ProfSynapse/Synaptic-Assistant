@@ -19,6 +19,7 @@ defmodule Assistant.Sync.FileManager do
   require Logger
   import Ecto.Query
 
+  alias Assistant.Billing.Policy
   alias Assistant.Repo
   alias Assistant.Schemas.SyncedFile
 
@@ -36,11 +37,17 @@ defmodule Assistant.Sync.FileManager do
           {:error, :enoent}
 
         record ->
-          record
-          |> Ecto.Changeset.change(%{content: content})
-          |> Repo.update()
-          |> case do
-            {:ok, _} -> {:ok, path}
+          with :ok <-
+                 Policy.ensure_retained_write_allowed(
+                   user_id,
+                   Policy.synced_file_growth(record.content, content)
+                 ),
+               {:ok, _updated_record} <-
+                 record
+                 |> Ecto.Changeset.change(%{content: content})
+                 |> Repo.update() do
+            {:ok, path}
+          else
             {:error, changeset} -> {:error, changeset}
           end
       end

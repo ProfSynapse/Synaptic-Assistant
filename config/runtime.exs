@@ -175,6 +175,23 @@ if api_key = System.get_env("HUBSPOT_API_KEY") do
   config :assistant, :hubspot_api_key, api_key
 end
 
+# Stripe billing
+if secret_key = System.get_env("STRIPE_SECRET_KEY") do
+  config :assistant, :stripe_secret_key, secret_key
+end
+
+if webhook_secret = System.get_env("STRIPE_WEBHOOK_SECRET") do
+  config :assistant, :stripe_webhook_secret, webhook_secret
+end
+
+if price_id = System.get_env("STRIPE_PRO_PRICE_ID") do
+  config :assistant, :stripe_pro_price_id, price_id
+end
+
+if meter_event_name = System.get_env("STRIPE_STORAGE_METER_EVENT_NAME") do
+  config :assistant, :stripe_storage_meter_event_name, meter_event_name
+end
+
 # Cloak encryption key for Ecto field encryption.
 # Required in production — OAuth tokens are encrypted at rest via Cloak AES-GCM.
 # In dev/test, omitting this env var means the Vault starts with no ciphers

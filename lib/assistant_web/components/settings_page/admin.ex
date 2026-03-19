@@ -27,7 +27,8 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
       <div>
         <h2>Initial Admin Bootstrap</h2>
         <p>
-          No admin accounts exist yet. Claim admin access for your account to unlock the admin UI.
+          No admin accounts exist yet. Claim admin access for your account to become the first
+          workspace admin and billing owner.
         </p>
       </div>
       <.button id="claim-admin-btn" phx-click="claim_bootstrap_admin">
@@ -140,6 +141,11 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
               <.icon name="hero-plus" class="h-4 w-4" /> Add User
             </button>
           </div>
+
+          <p class="sa-muted" style="margin-bottom: 1rem;">
+            Admins manage one shared workspace account here. New users you add join this same
+            workspace and count toward the shared plan seats.
+          </p>
 
           <div style="margin-bottom: 1rem; max-width: 20rem;">
             <form phx-change="search_admin_users" phx-submit="search_admin_users">

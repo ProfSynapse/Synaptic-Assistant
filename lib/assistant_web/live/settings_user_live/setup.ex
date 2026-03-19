@@ -28,6 +28,10 @@ defmodule AssistantWeb.SettingsUserLive.Setup do
 
       <section class="sa-auth-card sa-auth-card-compact">
         <h1 class="sa-auth-title" style="font-size: 1.3rem;">Admin Setup</h1>
+        <p class="sa-muted" style="margin-bottom: 1rem;">
+          The first account created here becomes the workspace admin. After setup, you can add the
+          rest of your team inside the shared account from the Admin section.
+        </p>
 
         <.form for={@form} id="setup_form" phx-submit="save" phx-change="validate">
           <.field

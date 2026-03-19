@@ -10,6 +10,7 @@ defmodule AssistantWeb.SettingsLive.Events do
   alias Assistant.Auth.MagicLink
   alias Assistant.Auth.OAuth
   alias Assistant.Auth.TokenStore
+  alias Assistant.Billing
   alias Assistant.IntegrationSettings
   alias Assistant.IntegrationSettings.Registry
   alias Assistant.Integrations.OpenAI
@@ -892,22 +893,41 @@ defmodule AssistantWeb.SettingsLive.Events do
         access_scopes: List.wrap(Map.get(params, "scopes", []))
       }
 
-      case Accounts.create_settings_user_from_admin(attrs) do
-        {:ok, settings_user} ->
-          socket = maybe_save_spending_limit(socket, settings_user.id, params)
+      actor = socket.assigns.current_scope.settings_user
 
-          {:noreply,
-           socket
-           |> assign(:creating_new_user, false)
-           |> put_flash(:info, "User created successfully.")
-           |> reload_current_user_scope()
-           |> Loaders.load_admin()}
+      case Billing.ensure_billing_account(actor) do
+        {:ok, {_, billing_account}} ->
+          case Accounts.create_settings_user_from_admin(attrs,
+                 billing_account_id: billing_account.id
+               ) do
+            {:ok, settings_user} ->
+              socket = maybe_save_spending_limit(socket, settings_user.id, params)
 
-        {:error, %Ecto.Changeset{} = changeset} ->
-          {:noreply, assign(socket, :allowlist_form, to_form(changeset, as: "allowlist_entry"))}
+              {:noreply,
+               socket
+               |> assign(:creating_new_user, false)
+               |> put_flash(:info, "User created successfully.")
+               |> reload_current_user_scope()
+               |> Loaders.load_admin()}
+
+            {:error, %Ecto.Changeset{} = changeset} ->
+              {:noreply,
+               assign(socket, :allowlist_form, to_form(changeset, as: "allowlist_entry"))}
+
+            {:error, :billing_account_conflict} ->
+              {:noreply,
+               put_flash(
+                 socket,
+                 :error,
+                 "That user already belongs to a different billing workspace."
+               )}
+
+            {:error, _} ->
+              {:noreply, put_flash(socket, :error, "Unable to create user.")}
+          end
 
         {:error, _} ->
-          {:noreply, put_flash(socket, :error, "Unable to create user.")}
+          {:noreply, put_flash(socket, :error, "Unable to load the workspace billing account.")}
       end
     else
       case Accounts.upsert_settings_user_allowlist_entry(
@@ -1087,6 +1107,49 @@ defmodule AssistantWeb.SettingsLive.Events do
      socket
      |> assign(:current_admin_user, nil)
      |> assign(:creating_new_user, false)}
+  end
+
+  def handle_event(
+        "save_workspace_billing",
+        %{"user_id" => user_id, "workspace_billing" => params},
+        socket
+      ) do
+    settings_user = socket.assigns.current_scope.settings_user
+
+    unless settings_user.is_admin and Billing.manages_billing?(settings_user) do
+      {:noreply, put_flash(socket, :error, "Not authorized.")}
+    else
+      with {:ok, user} <- Loaders.admin_user_detail(user_id),
+           %{billing_account: %{id: billing_account_id}} <- user,
+           {:ok, _billing_account} <-
+             Billing.update_billing_account_overrides(billing_account_id, params) do
+        {:noreply,
+         socket
+         |> put_flash(:info, "Workspace billing updated.")
+         |> Loaders.reload_admin_users()}
+      else
+        {:error, :not_found} ->
+          {:noreply, put_flash(socket, :error, "User not found.")}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          message =
+            changeset.errors
+            |> Keyword.keys()
+            |> List.first()
+            |> case do
+              nil ->
+                "Unable to update workspace billing."
+
+              field ->
+                "Unable to update workspace billing: #{Phoenix.Naming.humanize(field)} is invalid."
+            end
+
+          {:noreply, put_flash(socket, :error, message)}
+
+        _ ->
+          {:noreply, put_flash(socket, :error, "Unable to update workspace billing.")}
+      end
+    end
   end
 
   def handle_event("toggle_user_disabled", %{"id" => user_id}, socket) do

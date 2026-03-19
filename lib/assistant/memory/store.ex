@@ -35,6 +35,7 @@ defmodule Assistant.Memory.Store do
 
   import Ecto.Query
 
+  alias Assistant.Billing.Policy
   alias Assistant.Repo
   alias Assistant.Schemas.{Conversation, MemoryEntry, Message}
 
@@ -213,43 +214,47 @@ defmodule Assistant.Memory.Store do
 
   def batch_append_messages(conversation_id, messages) when is_list(messages) do
     now = DateTime.utc_now()
+    user_id = conversation_user_id(conversation_id)
+    growth_bytes = Enum.reduce(messages, 0, &(Policy.message_retained_bytes(&1) + &2))
 
-    multi =
-      messages
-      |> Enum.with_index()
-      |> Enum.reduce(Ecto.Multi.new(), fn {msg_attrs, idx}, multi ->
-        attrs = Map.put(msg_attrs, :conversation_id, conversation_id)
+    with :ok <- Policy.ensure_retained_write_allowed(user_id, growth_bytes) do
+      multi =
+        messages
+        |> Enum.with_index()
+        |> Enum.reduce(Ecto.Multi.new(), fn {msg_attrs, idx}, multi ->
+          attrs = Map.put(msg_attrs, :conversation_id, conversation_id)
 
-        Ecto.Multi.insert(
+          Ecto.Multi.insert(
+            multi,
+            {:message, idx},
+            Message.changeset(%Message{}, attrs)
+          )
+        end)
+
+      multi =
+        Ecto.Multi.update_all(
           multi,
-          {:message, idx},
-          Message.changeset(%Message{}, attrs)
+          :touch_conversation,
+          from(c in Conversation, where: c.id == ^conversation_id),
+          set: [last_active_at: now]
         )
-      end)
 
-    multi =
-      Ecto.Multi.update_all(
-        multi,
-        :touch_conversation,
-        from(c in Conversation, where: c.id == ^conversation_id),
-        set: [last_active_at: now]
-      )
+      case Repo.transaction(multi) do
+        {:ok, results} ->
+          inserted =
+            results
+            |> Enum.filter(fn
+              {{:message, _idx}, _msg} -> true
+              _ -> false
+            end)
+            |> Enum.sort_by(fn {{:message, idx}, _msg} -> idx end)
+            |> Enum.map(fn {_key, msg} -> msg end)
 
-    case Repo.transaction(multi) do
-      {:ok, results} ->
-        inserted =
-          results
-          |> Enum.filter(fn
-            {{:message, _idx}, _msg} -> true
-            _ -> false
-          end)
-          |> Enum.sort_by(fn {{:message, idx}, _msg} -> idx end)
-          |> Enum.map(fn {_key, msg} -> msg end)
+          {:ok, inserted}
 
-        {:ok, inserted}
-
-      {:error, {:message, _idx}, changeset, _changes} ->
-        {:error, changeset}
+        {:error, {:message, _idx}, changeset, _changes} ->
+          {:error, changeset}
+      end
     end
   end
 
@@ -278,17 +283,23 @@ defmodule Assistant.Memory.Store do
     now = DateTime.utc_now()
     message_attrs = Map.put(attrs, :conversation_id, conversation_id)
 
-    Ecto.Multi.new()
-    |> Ecto.Multi.insert(:message, Message.changeset(%Message{}, message_attrs))
-    |> Ecto.Multi.update_all(
-      :touch_conversation,
-      from(c in Conversation, where: c.id == ^conversation_id),
-      set: [last_active_at: now]
-    )
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{message: message}} -> {:ok, message}
-      {:error, :message, changeset, _changes} -> {:error, changeset}
+    with :ok <-
+           Policy.ensure_retained_write_allowed(
+             conversation_user_id(conversation_id),
+             Policy.message_retained_bytes(attrs)
+           ) do
+      Ecto.Multi.new()
+      |> Ecto.Multi.insert(:message, Message.changeset(%Message{}, message_attrs))
+      |> Ecto.Multi.update_all(
+        :touch_conversation,
+        from(c in Conversation, where: c.id == ^conversation_id),
+        set: [last_active_at: now]
+      )
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{message: message}} -> {:ok, message}
+        {:error, :message, changeset, _changes} -> {:error, changeset}
+      end
     end
   end
 
@@ -463,9 +474,17 @@ defmodule Assistant.Memory.Store do
   """
   @spec create_memory_entry(map()) :: {:ok, MemoryEntry.t()} | {:error, Ecto.Changeset.t()}
   def create_memory_entry(attrs) do
-    %MemoryEntry{}
-    |> MemoryEntry.changeset(attrs)
-    |> Repo.insert()
+    user_id = Map.get(attrs, :user_id) || Map.get(attrs, "user_id")
+
+    with :ok <-
+           Policy.ensure_retained_write_allowed(
+             user_id,
+             Policy.memory_entry_retained_bytes(attrs)
+           ) do
+      %MemoryEntry{}
+      |> MemoryEntry.changeset(attrs)
+      |> Repo.insert()
+    end
   end
 
   @doc """
@@ -513,6 +532,12 @@ defmodule Assistant.Memory.Store do
       {_count, [entry]} -> {:ok, entry}
     end
   end
+
+  defp conversation_user_id(conversation_id) when is_binary(conversation_id) do
+    Repo.one(from c in Conversation, where: c.id == ^conversation_id, select: c.user_id)
+  end
+
+  defp conversation_user_id(_conversation_id), do: nil
 
   @doc """
   Lists memory entries with optional filters.

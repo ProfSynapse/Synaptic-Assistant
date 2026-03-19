@@ -92,6 +92,13 @@ defmodule AssistantWeb.Router do
     post "/discord", DiscordController, :interaction
   end
 
+  # Stripe webhook — signature verified in controller against the cached raw body
+  scope "/webhooks", AssistantWeb do
+    pipe_through :api
+
+    post "/stripe", StripeWebhookController, :webhook
+  end
+
   ## Authentication routes
 
   scope "/", AssistantWeb do
@@ -101,6 +108,8 @@ defmodule AssistantWeb.Router do
     get "/settings_users/auth/openai/callback", OpenAIOAuthController, :callback
     get "/auth/callback", OpenAIOAuthController, :callback
     get "/settings_users/auth/openai/device/poll", OpenAIOAuthController, :device_poll
+    post "/billing/checkout/pro", BillingController, :create_checkout_session
+    post "/billing/portal", BillingController, :create_portal_session
 
     live_session :require_authenticated_settings_user,
       on_mount: [{AssistantWeb.SettingsUserAuth, :require_authenticated}] do

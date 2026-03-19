@@ -71,7 +71,11 @@ config :assistant, Oban,
        # Prune sync history entries older than retention period (daily at 04:00 UTC)
        {"0 4 * * *", Assistant.Sync.Workers.HistoryPruningWorker},
        # Archive stale conversations (inactive > 30 days) daily at 05:00 UTC
-       {"0 5 * * *", Assistant.Channels.ConversationArchiver}
+       {"0 5 * * *", Assistant.Channels.ConversationArchiver},
+       # Capture retained-storage snapshots hourly for billing/account usage.
+       {"10 * * * *", Assistant.Workers.BillingUsageSnapshotWorker},
+       # Report current-period average storage overage to Stripe hourly.
+       {"15 * * * *", Assistant.Workers.BillingUsageReportWorker}
      ]}
   ]
 

@@ -15,6 +15,7 @@
 defmodule Assistant.Memory.FileCache do
   @moduledoc false
 
+  alias Assistant.Billing.Policy
   alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.Integrations.LLMRouter
   alias Assistant.Memory.{Search, Store}
@@ -124,13 +125,23 @@ defmodule Assistant.Memory.FileCache do
         |> Map.put("version", prev_version + 1)
         |> Map.put("versions", versions)
 
-      existing
-      |> MemoryEntry.changeset(%{
+      attrs = %{
         content: summary,
         search_queries: queries,
         metadata: new_metadata
-      })
-      |> Repo.update()
+      }
+
+      with :ok <-
+             Policy.ensure_retained_write_allowed(
+               existing.user_id,
+               Policy.memory_entry_growth(existing, attrs)
+             ),
+           {:ok, entry} <-
+             existing
+             |> MemoryEntry.changeset(attrs)
+             |> Repo.update() do
+        {:ok, entry}
+      end
     end
   end
 

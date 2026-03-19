@@ -6,6 +6,8 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   require Logger
 
   alias Assistant.Accounts
+  alias Assistant.Billing
+  alias Assistant.Billing.StorageAccounting
   alias Assistant.Accounts.{SettingsUser, SettingsUserAllowlistEntry}
   alias Assistant.Analytics
   alias Assistant.Auth.TokenStore
@@ -24,6 +26,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   alias Assistant.ModelCatalog
   alias Assistant.ModelDefaults
   alias Assistant.OrchestratorSystemPrompt
+  alias Assistant.Schemas.BillingAccount
   alias Assistant.SkillPermissions
   alias Assistant.Transcripts
   alias Assistant.Workflows
@@ -366,12 +369,20 @@ defmodule AssistantWeb.SettingsLive.Loaders do
          %SettingsUser{} = settings_user <- Accounts.get_settings_user(user_id) do
       spending_data = SpendingLimits.current_usage(user_id)
       spending_limit = SpendingLimits.get_spending_limit(user_id)
+      billing_snapshot = Billing.billing_snapshot(settings_user)
 
       {:ok,
        user
        |> Map.merge(admin_user_model_defaults(settings_user))
        |> Map.put(:spending_usage, spending_data)
-       |> Map.put(:spending_limit, spending_limit)}
+       |> Map.put(:spending_limit, spending_limit)
+       |> Map.put(:billing_account, billing_snapshot.billing_account)
+       |> Map.put(:billing_summary, billing_snapshot.billing_summary)
+       |> Map.put(:storage_policy, billing_snapshot.storage_policy)
+       |> Map.put(
+         :billing_override_form,
+         Billing.billing_override_form(billing_snapshot.billing_account)
+       )}
     else
       _ -> {:error, :not_found}
     end
@@ -648,8 +659,11 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   end
 
   def load_profile(socket) do
+    settings_user = Context.current_settings_user(socket)
+    billing_snapshot = Billing.billing_snapshot(settings_user, ensure?: true)
+
     profile =
-      case Context.current_settings_user(socket) do
+      case settings_user do
         nil ->
           Data.blank_profile()
 
@@ -661,10 +675,105 @@ defmodule AssistantWeb.SettingsLive.Loaders do
           }
       end
 
+    billing_storage = billing_storage_summary(billing_snapshot)
+
     socket
     |> assign(:profile, profile)
     |> assign(:profile_form, to_form(profile, as: :profile))
+    |> assign(:billing_summary, billing_snapshot.billing_summary)
+    |> assign(:billing_storage, billing_storage)
   end
+
+  defp billing_storage_summary(%{storage_policy: policy, billing_account: billing_account}) do
+    usage =
+      billing_account
+      |> normalize_billing_account_usage()
+
+    projection =
+      with %{} <- usage,
+           %BillingAccount{} <- billing_account,
+           {:ok, projected} <- Billing.projected_storage_overage(billing_account) do
+        projected
+      else
+        _ -> nil
+      end
+
+    current_bytes =
+      storage_usage_bytes(usage, [
+        :current_retained_bytes,
+        :retained_bytes,
+        :current_bytes,
+        :bytes,
+        :total_bytes
+      ])
+
+    projected_overage_bytes =
+      storage_usage_bytes(projection, [
+        :projected_overage_bytes,
+        :estimated_overage_bytes,
+        :average_overage_bytes,
+        :overage_bytes
+      ]) ||
+        storage_usage_bytes(usage, [
+          :projected_overage_bytes,
+          :estimated_overage_bytes,
+          :average_overage_bytes,
+          :overage_bytes
+        ])
+
+    policy
+    |> Map.merge(%{
+      included_label:
+        StorageAccounting.humanize_bytes(policy.included_bytes) || "Not yet available",
+      current_label: StorageAccounting.humanize_bytes(current_bytes) || "Not yet measured",
+      projected_overage_label:
+        StorageAccounting.humanize_bytes(projected_overage_bytes) || "Not yet available",
+      metering_available?: not is_nil(current_bytes) or not is_nil(projected_overage_bytes),
+      plan_note: storage_plan_note(policy)
+    })
+  rescue
+    _ -> Data.empty_billing_storage()
+  end
+
+  defp normalize_billing_account_usage(%BillingAccount{} = billing_account) do
+    billing_account
+    |> Billing.current_storage_usage()
+    |> normalize_storage_usage()
+  end
+
+  defp normalize_billing_account_usage(_), do: nil
+
+  defp normalize_storage_usage({:ok, usage}) when is_map(usage), do: usage
+  defp normalize_storage_usage(%{} = usage), do: usage
+  defp normalize_storage_usage({:error, :metering_not_implemented}), do: nil
+  defp normalize_storage_usage(_), do: nil
+
+  defp storage_usage_bytes(nil, _keys), do: nil
+  defp storage_usage_bytes(value, _keys) when is_integer(value) and value >= 0, do: value
+
+  defp storage_usage_bytes(usage, keys) when is_map(usage) do
+    Enum.find_value(keys, fn key ->
+      Map.get(usage, key) || Map.get(usage, to_string(key))
+    end)
+    |> case do
+      value when is_integer(value) and value >= 0 -> value
+      _ -> nil
+    end
+  end
+
+  defp storage_usage_bytes(_usage, _keys), do: nil
+
+  defp storage_plan_note(%{plan: "pro", included_bytes: included_bytes, seat_count: seat_count}) do
+    seat_label = if seat_count == 1, do: "seat", else: "seats"
+
+    "Pro includes #{StorageAccounting.humanize_bytes(included_bytes) || "10 GB"} across #{seat_count} active #{seat_label} and bills overage on monthly average retained storage."
+  end
+
+  defp storage_plan_note(%{plan: "free"}) do
+    "Free workspaces stop taking on new retained storage once they hit 25 MB."
+  end
+
+  defp storage_plan_note(_), do: "Storage is billed on monthly average retained storage."
 
   def load_orchestrator_prompt(socket) do
     prompt = OrchestratorSystemPrompt.get_prompt()

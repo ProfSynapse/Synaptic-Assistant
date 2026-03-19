@@ -3,6 +3,7 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
 
   use AssistantWeb, :html
 
+  alias Assistant.Billing.StorageAccounting
   alias AssistantWeb.Components.SettingsPage.Helpers
 
   attr :allowlist_form, :any, required: true
@@ -33,6 +34,11 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
             </span>
           </div>
         </div>
+
+        <p style="font-size: 0.9rem; color: var(--sa-text-muted, #71717a); margin: 0 0 20px 0;">
+          This adds the person to your shared workspace account. They use the same workspace plan
+          and can be promoted to admin if needed.
+        </p>
 
         <.form
           for={@allowlist_form}
@@ -575,6 +581,144 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
           </p>
         </div>
       </div>
+
+      <div class="sa-card">
+        <h3 style="font-size: 1.1rem; font-weight: 600; margin: 0 0 8px 0;">Workspace Billing</h3>
+        <p style="font-size: 0.85rem; color: var(--sa-text-muted, #71717a); margin: 0 0 16px 0;">
+          These settings apply to the entire shared workspace account, not just {@user.email}.
+          Use complimentary or manual mode for internal exceptions. Changing this here does not
+          cancel any existing Stripe subscription.
+        </p>
+
+        <div class="sa-detail-grid" style="margin-bottom: 20px;">
+          <div class="sa-detail-item">
+            <span class="sa-detail-label">Workspace</span>
+            <span class="sa-detail-value">{workspace_name(@user)}</span>
+          </div>
+          <div class="sa-detail-item">
+            <span class="sa-detail-label">Effective Plan</span>
+            <span class="sa-detail-value">{String.capitalize(@user.billing_summary.plan || "free")}</span>
+          </div>
+          <div class="sa-detail-item">
+            <span class="sa-detail-label">Billing Mode</span>
+            <span class="sa-detail-value">{Helpers.humanize(@user.billing_summary.billing_mode || "standard")}</span>
+          </div>
+          <div class="sa-detail-item">
+            <span class="sa-detail-label">Stripe Status</span>
+            <span class="sa-detail-value">
+              {if @user.billing_summary.stripe_subscription_status,
+                do: Helpers.humanize(@user.billing_summary.stripe_subscription_status),
+                else: "None"}
+            </span>
+          </div>
+          <div class="sa-detail-item">
+            <span class="sa-detail-label">Active Seats</span>
+            <span class="sa-detail-value">{@user.billing_summary.seat_count}</span>
+          </div>
+          <div class="sa-detail-item">
+            <span class="sa-detail-label">Included Storage</span>
+            <span class="sa-detail-value">{format_storage_bytes(@user.storage_policy.included_bytes)}</span>
+          </div>
+        </div>
+
+        <.form
+          for={to_form(@user.billing_override_form, as: :workspace_billing)}
+          id={"workspace-billing-form-#{@user.id}"}
+          phx-submit="save_workspace_billing"
+        >
+          <input type="hidden" name="user_id" value={@user.id} />
+
+          <div class="sa-detail-grid" style="margin-bottom: 16px;">
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Plan Override
+              </label>
+              <select name="workspace_billing[plan]" class="sa-input">
+                <option value="free" selected={@user.billing_override_form["plan"] == "free"}>Free</option>
+                <option value="pro" selected={@user.billing_override_form["plan"] == "pro"}>Pro</option>
+              </select>
+            </div>
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Billing Mode
+              </label>
+              <select name="workspace_billing[billing_mode]" class="sa-input">
+                <option value="standard" selected={@user.billing_override_form["billing_mode"] == "standard"}>
+                  Standard (Stripe-backed)
+                </option>
+                <option value="complimentary" selected={@user.billing_override_form["billing_mode"] == "complimentary"}>
+                  Complimentary
+                </option>
+                <option value="manual" selected={@user.billing_override_form["billing_mode"] == "manual"}>
+                  Manual exception
+                </option>
+              </select>
+            </div>
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Complimentary Until (UTC ISO8601)
+              </label>
+              <input
+                type="text"
+                name="workspace_billing[complimentary_until]"
+                value={@user.billing_override_form["complimentary_until"]}
+                placeholder="2026-04-01T12:30:00Z"
+                class="sa-input"
+              />
+            </div>
+          </div>
+
+          <div class="sa-detail-grid" style="margin-bottom: 16px;">
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Bonus Seats
+              </label>
+              <input
+                type="number"
+                name="workspace_billing[seat_bonus]"
+                value={@user.billing_override_form["seat_bonus"]}
+                min="0"
+                class="sa-input"
+                style="max-width: 200px;"
+              />
+            </div>
+            <div class="sa-detail-item">
+              <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+                Bonus Storage (GB)
+              </label>
+              <input
+                type="number"
+                name="workspace_billing[storage_bonus_gb]"
+                value={@user.billing_override_form["storage_bonus_gb"]}
+                min="0"
+                class="sa-input"
+                style="max-width: 200px;"
+              />
+            </div>
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label style="font-weight: 500; font-size: 0.875rem; display: block; margin-bottom: 4px;">
+              Internal Notes
+            </label>
+            <textarea
+              name="workspace_billing[internal_notes]"
+              rows="3"
+              class="sa-input"
+              style="width: 100%; min-height: 88px;"
+            >{@user.billing_override_form["internal_notes"]}</textarea>
+          </div>
+
+          <p style="font-size: 0.8rem; color: var(--sa-text-muted, #71717a); margin: 0 0 16px 0;">
+            Standard mode follows Stripe subscription state. Complimentary and manual modes use the
+            plan you set here and skip Stripe overage reporting.
+          </p>
+
+          <button type="submit" class="sa-btn">
+            Save Workspace Billing
+          </button>
+        </.form>
+      </div>
     </section>
     """
   end
@@ -658,4 +802,11 @@ defmodule AssistantWeb.Components.SettingsPage.UserDetail do
 
   defp spending_hard_cap?(nil), do: true
   defp spending_hard_cap?(%{hard_cap: hard_cap}), do: hard_cap
+
+  defp workspace_name(%{billing_summary: %{account_name: name}})
+       when is_binary(name) and name != "", do: name
+
+  defp workspace_name(_user), do: "Workspace"
+
+  defp format_storage_bytes(bytes), do: StorageAccounting.humanize_bytes(bytes)
 end

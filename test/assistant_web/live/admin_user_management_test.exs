@@ -6,6 +6,9 @@ defmodule AssistantWeb.AdminUserManagementTest do
 
   alias Assistant.Accounts
   alias Assistant.Accounts.SettingsUser
+  alias Assistant.Billing
+  alias Assistant.Repo
+  alias Assistant.Schemas.BillingAccount
 
   # ──────────────────────────────────────────────
   # Setup: admin user with full privileges
@@ -918,6 +921,86 @@ defmodule AssistantWeb.AdminUserManagementTest do
 
       assert html =~ "Spending limit removed"
       assert is_nil(Assistant.SpendingLimits.get_spending_limit(target.id))
+    end
+  end
+
+  describe "save_workspace_billing event" do
+    test "updates workspace billing overrides from the admin detail view", %{conn: conn} do
+      target = create_target_user(%{email: "workspace-billing@example.com"})
+      {:ok, {_, billing_account}} = Billing.ensure_billing_account(target)
+
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      html =
+        lv
+        |> form("#workspace-billing-form-#{target.id}", %{
+          "user_id" => target.id,
+          "workspace_billing" => %{
+            "plan" => "pro",
+            "billing_mode" => "complimentary",
+            "complimentary_until" => "2026-04-01T12:30:00Z",
+            "seat_bonus" => "2",
+            "storage_bonus_gb" => "3",
+            "internal_notes" => "Founder exception"
+          }
+        })
+        |> render_submit()
+
+      assert html =~ "Workspace billing updated."
+
+      billing_account = Repo.get!(BillingAccount, billing_account.id)
+      assert billing_account.plan == "pro"
+      assert billing_account.billing_mode == "complimentary"
+      assert billing_account.seat_bonus == 2
+      assert billing_account.storage_bonus_bytes == 3_000_000_000
+      assert billing_account.internal_notes == "Founder exception"
+      assert billing_account.complimentary_until == ~U[2026-04-01 12:30:00Z]
+    end
+
+    test "opening detail for a user without billing membership does not create a new billing account",
+         %{conn: conn} do
+      target = create_target_user(%{email: "no-billing-account@example.com"})
+      refute Repo.get!(SettingsUser, target.id).billing_account_id
+
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      lv
+      |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+      |> render_click()
+
+      refute Repo.get!(SettingsUser, target.id).billing_account_id
+    end
+
+    test "shows effective billing state separately from the editable override form", %{conn: conn} do
+      target = create_target_user(%{email: "expired-comp@example.com"})
+      {:ok, {_, billing_account}} = Billing.ensure_billing_account(target)
+
+      {:ok, _billing_account} =
+        billing_account
+        |> BillingAccount.changeset(%{
+          plan: "pro",
+          billing_mode: "complimentary",
+          complimentary_until: ~U[2026-03-01 00:00:00Z]
+        })
+        |> Repo.update()
+
+      {:ok, lv, _html} = live(conn, admin_path())
+      switch_to_users_tab(lv)
+
+      html =
+        lv
+        |> element("button[phx-click='edit_admin_user'][phx-value-id='#{target.id}']")
+        |> render_click()
+
+      assert html =~ "Billing Mode"
+      assert html =~ "Standard"
+      assert html =~ ~s(option value="complimentary" selected)
     end
   end
 

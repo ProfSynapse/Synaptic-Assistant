@@ -4,6 +4,7 @@ defmodule Assistant.Accounts do
   """
 
   import Ecto.Query, warn: false
+  alias Assistant.Billing
   alias Assistant.Repo
 
   alias Assistant.Accounts.{
@@ -13,6 +14,8 @@ defmodule Assistant.Accounts do
     SettingsUserNotifier,
     SettingsUserToken
   }
+
+  alias Assistant.Schemas.BillingAccount
 
   @managed_access_scopes [
     "chat",
@@ -210,6 +213,7 @@ defmodule Assistant.Accounts do
   def create_settings_user_from_admin(attrs, opts \\ []) do
     Repo.transact(fn ->
       email = normalize_email_param(Map.get(attrs, :email) || Map.get(attrs, "email"))
+      billing_account_id = Keyword.get(opts, :billing_account_id)
 
       if is_nil(email) or email == "" do
         {:error, :missing_email}
@@ -227,7 +231,7 @@ defmodule Assistant.Accounts do
                upsert_settings_user_allowlist_entry(allowlist_attrs, nil, transaction?: false) do
           case get_settings_user_by_email(email) do
             %SettingsUser{} = existing ->
-              {:ok, existing}
+              maybe_assign_existing_user_to_billing_account(existing, billing_account_id)
 
             nil ->
               full_name = Map.get(attrs, :full_name) || Map.get(attrs, "full_name")
@@ -237,20 +241,13 @@ defmodule Assistant.Accounts do
               |> Ecto.Changeset.change(
                 hashed_password: nil,
                 full_name: full_name,
-                confirmed_at: nil
+                confirmed_at: nil,
+                billing_account_id: billing_account_id
               )
               |> Repo.insert()
               |> case do
                 {:ok, settings_user} ->
-                  # Sync admin/scopes from allowlist
-                  case sync_settings_user_access_from_allowlist(settings_user) do
-                    {:ok, synced_user} ->
-                      maybe_send_invite(synced_user, opts)
-                      {:ok, synced_user}
-
-                    error ->
-                      error
-                  end
+                  handle_admin_created_settings_user(settings_user, billing_account_id, opts)
 
                 error ->
                   error
@@ -259,6 +256,89 @@ defmodule Assistant.Accounts do
         end
       end
     end)
+  end
+
+  defp handle_admin_created_settings_user(settings_user, billing_account_id, opts) do
+    case sync_settings_user_access_from_allowlist(settings_user) do
+      {:ok, synced_user} ->
+        billing_role = if synced_user.is_admin, do: "admin", else: "member"
+
+        result =
+          maybe_assign_new_user_to_billing_account(
+            synced_user,
+            billing_account_id,
+            billing_role
+          )
+
+        case result do
+          {:ok, assigned_user} ->
+            maybe_send_invite(assigned_user, opts)
+            {:ok, assigned_user}
+
+          error ->
+            error
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp maybe_assign_new_user_to_billing_account(settings_user, nil, _billing_role),
+    do: {:ok, settings_user}
+
+  defp maybe_assign_new_user_to_billing_account(settings_user, billing_account_id, billing_role) do
+    billing_account = Repo.get(BillingAccount, billing_account_id)
+
+    case billing_account do
+      nil ->
+        {:ok, settings_user}
+
+      %BillingAccount{} = billing_account ->
+        with {:ok, assigned_user} <-
+               Billing.assign_settings_user_to_account(
+                 settings_user,
+                 billing_account,
+                 billing_role
+               ) do
+          Billing.sync_subscription_quantity(billing_account.id)
+          {:ok, assigned_user}
+        end
+    end
+  end
+
+  defp maybe_assign_existing_user_to_billing_account(%SettingsUser{} = existing, nil),
+    do: {:ok, existing}
+
+  defp maybe_assign_existing_user_to_billing_account(
+         %SettingsUser{billing_account_id: existing_account_id},
+         billing_account_id
+       )
+       when is_binary(existing_account_id) and existing_account_id != "" and
+              existing_account_id != billing_account_id do
+    {:error, :billing_account_conflict}
+  end
+
+  defp maybe_assign_existing_user_to_billing_account(
+         %SettingsUser{} = existing,
+         billing_account_id
+       ) do
+    if existing.billing_account_id == billing_account_id do
+      {:ok, existing}
+    else
+      maybe_assign_new_user_to_billing_account(
+        existing,
+        billing_account_id,
+        existing_billing_role(existing)
+      )
+    end
+  end
+
+  defp existing_billing_role(%SettingsUser{} = settings_user) do
+    cond do
+      settings_user.is_admin -> "admin"
+      true -> "member"
+    end
   end
 
   defp maybe_send_invite(settings_user, opts) do
@@ -992,7 +1072,7 @@ defmodule Assistant.Accounts do
   Returns `{:ok, map}` or `{:error, :not_found}`.
   """
   def get_user_for_admin(settings_user_id) when is_binary(settings_user_id) do
-    case Repo.get(SettingsUser, settings_user_id) do
+    case SettingsUser |> Repo.get(settings_user_id) |> Repo.preload(:billing_account) do
       nil ->
         {:error, :not_found}
 
@@ -1014,7 +1094,8 @@ defmodule Assistant.Accounts do
            can_manage_model_defaults: su.can_manage_model_defaults,
            confirmed_at: su.confirmed_at,
            inserted_at: su.inserted_at,
-           updated_at: su.updated_at
+           updated_at: su.updated_at,
+           billing_account: su.billing_account
          }}
     end
   end
@@ -1099,8 +1180,12 @@ defmodule Assistant.Accounts do
         end)
 
       case result do
-        {:ok, {updated_user, expired_tokens}} -> {:ok, updated_user, expired_tokens}
-        error -> error
+        {:ok, {updated_user, expired_tokens}} ->
+          Billing.sync_subscription_quantity(updated_user.billing_account_id)
+          {:ok, updated_user, expired_tokens}
+
+        error ->
+          error
       end
     end
   end
@@ -1119,19 +1204,35 @@ defmodule Assistant.Accounts do
     if settings_user_id == actor_settings_user_id do
       {:error, :cannot_delete_self}
     else
-      Repo.transact(fn ->
-        case Repo.get(SettingsUser, settings_user_id) do
-          nil ->
-            {:error, :not_found}
+      result =
+        Repo.transact(fn ->
+          case Repo.get(SettingsUser, settings_user_id) do
+            nil ->
+              {:error, :not_found}
 
-          %SettingsUser{} = settings_user ->
-            if settings_user.is_admin and last_active_admin?() do
-              {:error, :last_admin}
-            else
-              Repo.delete(settings_user)
-            end
-        end
-      end)
+            %SettingsUser{} = settings_user ->
+              if settings_user.is_admin and last_active_admin?() do
+                {:error, :last_admin}
+              else
+                case Repo.delete(settings_user) do
+                  {:ok, deleted_user} ->
+                    {:ok, {settings_user.billing_account_id, deleted_user}}
+
+                  {:error, _changeset} = error ->
+                    error
+                end
+              end
+          end
+        end)
+
+      case result do
+        {:ok, {billing_account_id, deleted_user}} ->
+          Billing.sync_subscription_quantity(billing_account_id)
+          {:ok, deleted_user}
+
+        error ->
+          error
+      end
     end
   end
 

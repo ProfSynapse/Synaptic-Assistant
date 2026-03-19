@@ -386,6 +386,16 @@ defmodule Assistant.AccountsAdminTest do
       assert Map.has_key?(detail, :updated_at)
     end
 
+    test "does not create a billing account as a read side effect" do
+      user = settings_user_fixture()
+      refute Repo.get!(SettingsUser, user.id).billing_account_id
+
+      assert {:ok, detail} = Accounts.get_user_for_admin(user.id)
+
+      refute detail.billing_account
+      refute Repo.get!(SettingsUser, user.id).billing_account_id
+    end
+
     test "shows has_openrouter_key correctly" do
       user = settings_user_fixture()
       {:ok, _} = Accounts.save_openrouter_api_key(user, "sk-or-test")

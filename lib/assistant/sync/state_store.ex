@@ -21,6 +21,7 @@ defmodule Assistant.Sync.StateStore do
 
   import Ecto.Query
 
+  alias Assistant.Billing.Policy
   alias Assistant.Repo
   alias Assistant.Schemas.{SyncCursor, SyncedFile, SyncHistoryEntry, SyncScope}
 
@@ -114,9 +115,11 @@ defmodule Assistant.Sync.StateStore do
   """
   @spec create_synced_file(map()) :: {:ok, SyncedFile.t()} | {:error, Ecto.Changeset.t()}
   def create_synced_file(attrs) do
-    %SyncedFile{}
-    |> SyncedFile.changeset(attrs)
-    |> Repo.insert()
+    with :ok <- maybe_allow_synced_file_insert(attrs) do
+      %SyncedFile{}
+      |> SyncedFile.changeset(attrs)
+      |> Repo.insert()
+    end
   end
 
   @doc """
@@ -592,4 +595,11 @@ defmodule Assistant.Sync.StateStore do
 
   defp present_scope_value?(value) when is_binary(value), do: String.trim(value) != ""
   defp present_scope_value?(value), do: not is_nil(value)
+
+  defp maybe_allow_synced_file_insert(attrs) do
+    user_id = Map.get(attrs, :user_id) || Map.get(attrs, "user_id")
+    content = Map.get(attrs, :content) || Map.get(attrs, "content")
+
+    Policy.ensure_retained_write_allowed(user_id, Policy.synced_file_growth(nil, content))
+  end
 end
