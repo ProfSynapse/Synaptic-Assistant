@@ -4,6 +4,7 @@
 
 defmodule Assistant.Skills.Images.ListModelsTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Skills.Context
   alias Assistant.Skills.Images.ListModels

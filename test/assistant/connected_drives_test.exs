@@ -10,6 +10,7 @@
 
 defmodule Assistant.ConnectedDrivesTest do
   use Assistant.DataCase, async: true
+  @moduletag :external
 
   alias Assistant.ConnectedDrives
   alias Assistant.Schemas.ConnectedDrive

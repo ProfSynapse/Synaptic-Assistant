@@ -3,7 +3,10 @@ defmodule Assistant.Messages.Content do
 
   import Ecto.Query
 
+  require Logger
+
   alias Assistant.Encryption
+  alias Assistant.Encryption.{RepairWorker, Retry}
   alias Assistant.Repo
   alias Assistant.Schemas.Conversation
 
@@ -15,23 +18,19 @@ defmodule Assistant.Messages.Content do
     message_id = get_attr(attrs, :id) || Ecto.UUID.generate()
     attrs = put_attr(attrs, :id, message_id)
 
-    if hosted_vault_transit_mode?() do
-      case get_attr(attrs, :content) do
-        content when is_binary(content) ->
-          with {:ok, billing_account_id} <- billing_account_id_for_conversation(conversation_id),
-               {:ok, encrypted_payload} <-
-                 Encryption.encrypt(field_ref(billing_account_id, message_id), content) do
-            {:ok,
-             attrs
-             |> put_attr(:content, nil)
-             |> put_attr(:content_encrypted, encrypted_payload)}
-          end
+    case get_attr(attrs, :content) do
+      content when is_binary(content) ->
+        with {:ok, billing_account_id} <- billing_account_id_for_conversation(conversation_id),
+             {:ok, encrypted_payload} <-
+               Encryption.encrypt(field_ref(billing_account_id, message_id), content) do
+          {:ok,
+           attrs
+           |> put_attr(:content, nil)
+           |> put_attr(:content_encrypted, encrypted_payload)}
+        end
 
-        _ ->
-          {:ok, attrs}
-      end
-    else
-      {:ok, attrs}
+      _ ->
+        {:ok, attrs}
     end
   end
 
@@ -40,12 +39,8 @@ defmodule Assistant.Messages.Content do
 
   def hydrate_for_conversation(conversation_id, messages)
       when is_binary(conversation_id) and is_list(messages) do
-    if hosted_vault_transit_mode?() do
-      with {:ok, billing_account_id} <- billing_account_id_for_conversation(conversation_id) do
-        hydrate_for_billing_account(billing_account_id, messages)
-      end
-    else
-      {:ok, messages}
+    with {:ok, billing_account_id} <- billing_account_id_for_conversation(conversation_id) do
+      hydrate_for_billing_account(billing_account_id, messages)
     end
   end
 
@@ -66,17 +61,24 @@ defmodule Assistant.Messages.Content do
   defp hydrate_for_billing_account(_billing_account_id, []), do: {:ok, []}
 
   defp hydrate_for_billing_account(billing_account_id, messages) when is_list(messages) do
-    messages
-    |> Enum.reduce_while({:ok, []}, fn message, {:ok, hydrated} ->
-      case hydrate_message(billing_account_id, message) do
-        {:ok, hydrated_message} -> {:cont, {:ok, [hydrated_message | hydrated]}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, hydrated} -> {:ok, Enum.reverse(hydrated)}
-      {:error, reason} -> {:error, reason}
-    end
+    hydrated =
+      Enum.map(messages, fn message ->
+        case hydrate_message(billing_account_id, message) do
+          {:ok, hydrated_message} ->
+            hydrated_message
+
+          {:error, {:decrypt_failed, message_id, reason}} ->
+            Logger.warning(
+              "Decrypt failed for messages id=#{message_id} field=content, enqueueing repair",
+              error: inspect(reason)
+            )
+
+            enqueue_repair("Assistant.Schemas.Message", message_id)
+            %{message | content: nil}
+        end
+      end)
+
+    {:ok, hydrated}
   end
 
   defp hydrate_message(_billing_account_id, %{content: content} = message)
@@ -89,10 +91,12 @@ defmodule Assistant.Messages.Content do
          %{id: message_id, content_encrypted: payload} = message
        )
        when is_map(payload) do
-    with {:ok, plaintext} <-
-           Encryption.decrypt(field_ref(billing_account_id, message_id), payload) do
-      {:ok, %{message | content: plaintext}}
-    else
+    case Retry.with_retry(fn ->
+           Encryption.decrypt(field_ref(billing_account_id, message_id), payload)
+         end) do
+      {:ok, plaintext} ->
+        {:ok, %{message | content: plaintext}}
+
       {:error, reason} ->
         {:error, {:decrypt_failed, message_id, reason}}
     end
@@ -109,7 +113,12 @@ defmodule Assistant.Messages.Content do
         {:ok, billing_account_id}
 
       nil ->
-        {:error, :missing_billing_account_id}
+        if hosted_vault_transit_mode?() do
+          {:error, :missing_billing_account_id}
+        else
+          # Fallback for self-hosted / tests without billing accounts
+          {:ok, "local"}
+        end
     end
   end
 
@@ -127,6 +136,12 @@ defmodule Assistant.Messages.Content do
       field: @field,
       row_id: row_id
     }
+  end
+
+  defp enqueue_repair(schema, id) do
+    %{"schema" => schema, "id" => id}
+    |> RepairWorker.new()
+    |> Oban.insert()
   end
 
   defp get_attr(attrs, key) when is_atom(key) do

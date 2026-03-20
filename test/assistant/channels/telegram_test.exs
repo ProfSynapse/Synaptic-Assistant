@@ -5,6 +5,7 @@
 
 defmodule Assistant.Channels.TelegramTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Channels.Telegram
   alias Assistant.Channels.Message

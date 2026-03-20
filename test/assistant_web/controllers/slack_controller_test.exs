@@ -12,6 +12,7 @@ defmodule AssistantWeb.SlackControllerTest do
   # async: false — SlackAuth plug reads Application env at request time; concurrent
   # plug tests that delete/restore :slack_signing_secret cause race conditions.
   use AssistantWeb.ConnCase, async: false
+  @moduletag :external
 
   # Must match the secret in slack_auth_test.exs to avoid async race conditions
   # when both test files run concurrently and share Application env state.

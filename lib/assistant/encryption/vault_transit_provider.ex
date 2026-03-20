@@ -7,14 +7,35 @@ defmodule Assistant.Encryption.VaultTransitProvider do
 
   alias Assistant.Encryption.{Cache, Context}
 
+  require Logger
+
   @algorithm "aes_256_gcm"
   @tag_length 16
 
+  # Circuit breaker: 5 failures in 10s opens the circuit; resets after 30s.
+  @fuse_name :vault_transit
+  @fuse_opts {{:standard, 5, 10_000}, {:reset, 30_000}}
+
+  @doc """
+  Installs the Vault Transit circuit breaker fuse.
+
+  Idempotent — safe to call multiple times. Called automatically on first
+  `request/3` if not already installed, and explicitly during `configured?/0`.
+  """
+  @spec install_fuse() :: :ok
+  def install_fuse do
+    case :fuse.install(@fuse_name, @fuse_opts) do
+      :ok -> :ok
+      # Already installed — :fuse returns :reset for existing fuses
+      :reset -> :ok
+    end
+  end
+
   @impl true
   def configured? do
-    vault_config()
-    |> Keyword.get(:addr)
-    |> is_binary()
+    configured = vault_config() |> Keyword.get(:addr) |> is_binary()
+    if configured, do: install_fuse()
+    configured
   end
 
   @impl true
@@ -107,9 +128,10 @@ defmodule Assistant.Encryption.VaultTransitProvider do
   end
 
   defp unwrap_data_key(field_ref, wrapped_dek) do
+    tenant_id = Map.fetch!(field_ref, :billing_account_id)
     cache_key = :crypto.hash(:sha256, wrapped_dek)
 
-    case Cache.get(cache_key) do
+    case Cache.get(tenant_id, cache_key) do
       {:ok, dek} ->
         {:ok, dek}
 
@@ -123,13 +145,32 @@ defmodule Assistant.Encryption.VaultTransitProvider do
 
         with {:ok, %{"data" => %{"plaintext" => plaintext_b64}}} <- request(:post, path, body),
              {:ok, dek} <- Base.decode64(plaintext_b64) do
-          :ok = Cache.put(cache_key, dek)
+          :ok = Cache.put(tenant_id, cache_key, dek)
           {:ok, dek}
         end
     end
   end
 
   defp request(method, path, body) do
+    case :fuse.ask(@fuse_name, :sync) do
+      :blown ->
+        Logger.warning("Vault Transit circuit breaker OPEN — failing fast",
+          method: method,
+          path: path
+        )
+
+        {:error, :vault_circuit_open}
+
+      {:error, :not_found} ->
+        install_fuse()
+        do_request(method, path, body)
+
+      :ok ->
+        do_request(method, path, body)
+    end
+  end
+
+  defp do_request(method, path, body) do
     request =
       Req.new(
         base_url: Keyword.fetch!(vault_config(), :addr),
@@ -142,9 +183,11 @@ defmodule Assistant.Encryption.VaultTransitProvider do
         {:ok, body}
 
       {:ok, %Req.Response{status: status, body: body}} ->
+        :fuse.melt(@fuse_name)
         {:error, {:vault_error, status, body}}
 
       {:error, reason} ->
+        :fuse.melt(@fuse_name)
         {:error, {:vault_request_failed, reason}}
     end
   end

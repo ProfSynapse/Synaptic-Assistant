@@ -63,7 +63,8 @@ config :assistant, Oban,
     google_drive_sync: 5,
     maintenance: 3,
     space_context: 5,
-    embeddings: 5
+    embeddings: 5,
+    encryption_repair: 3
   ],
   plugins: [
     {Oban.Plugins.Cron,

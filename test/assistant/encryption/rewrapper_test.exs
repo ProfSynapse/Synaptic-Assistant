@@ -124,7 +124,7 @@ defmodule Assistant.Encryption.RewrapperTest do
     test "skips records without properly shaped params", %{bypass: _bypass} do
       {_user, _identity, conversation} = Assistant.ChannelFixtures.user_with_conversation_fixture()
 
-      {:ok, _log} = 
+      {:ok, _log} =
         %ExecutionLog{}
         |> ExecutionLog.changeset(%{
           skill_id: "test",
@@ -135,6 +135,125 @@ defmodule Assistant.Encryption.RewrapperTest do
 
       result = Rewrapper.rewrap_schema(ExecutionLog, :parameters_encrypted, dry_run: false)
       assert result == %{success: 0, failed: 0, skipped: 1}
+    end
+  end
+
+  describe "rewrap_schema/3 per-tenant scoping" do
+    setup %{bypass: _bypass} do
+      {_user, _identity, conversation} = Assistant.ChannelFixtures.user_with_conversation_fixture()
+
+      ba_a =
+        %Assistant.Schemas.BillingAccount{}
+        |> Assistant.Schemas.BillingAccount.changeset(%{name: "Tenant A", plan: "free"})
+        |> Repo.insert!()
+
+      ba_b =
+        %Assistant.Schemas.BillingAccount{}
+        |> Assistant.Schemas.BillingAccount.changeset(%{name: "Tenant B", plan: "free"})
+        |> Repo.insert!()
+
+      {:ok, conversation: conversation, tenant_a_id: ba_a.id, tenant_b_id: ba_b.id}
+    end
+
+    test "billing_account_id opt restricts rewrap to matching tenant only", %{
+      bypass: bypass,
+      conversation: conversation,
+      tenant_a_id: tenant_a_id,
+      tenant_b_id: tenant_b_id
+    } do
+      # Insert a log for tenant_a
+      {:ok, log_a} =
+        %ExecutionLog{}
+        |> ExecutionLog.changeset(%{
+          skill_id: "test-a",
+          conversation_id: conversation.id,
+          billing_account_id: tenant_a_id,
+          parameters_encrypted: %{
+            "wrapped_dek" => "vault:v1:tenant_a_dek",
+            "key_version" => 1,
+            "ciphertext" => "..."
+          }
+        })
+        |> Repo.insert()
+
+      # Insert a log for tenant_b
+      {:ok, log_b} =
+        %ExecutionLog{}
+        |> ExecutionLog.changeset(%{
+          skill_id: "test-b",
+          conversation_id: conversation.id,
+          billing_account_id: tenant_b_id,
+          parameters_encrypted: %{
+            "wrapped_dek" => "vault:v1:tenant_b_dek",
+            "key_version" => 1,
+            "ciphertext" => "..."
+          }
+        })
+        |> Repo.insert()
+
+      # Bypass returns a new wrapped_dek for any rewrap request
+      Bypass.expect(bypass, "POST", "/v1/transit/rewrap/test-key", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{
+          "data" => %{"ciphertext" => "vault:v3:rewrapped_dek"}
+        }))
+      end)
+
+      # Rewrap only tenant_a rows
+      result = Rewrapper.rewrap_schema(ExecutionLog, :parameters_encrypted,
+        dry_run: false,
+        billing_account_id: tenant_a_id
+      )
+
+      assert result.success == 1
+      assert result.failed == 0
+
+      # Verify tenant_a log was updated
+      reloaded_a = Repo.get(ExecutionLog, log_a.id)
+      assert reloaded_a.parameters_encrypted["wrapped_dek"] == "vault:v3:rewrapped_dek"
+      assert reloaded_a.parameters_encrypted["key_version"] == 3
+
+      # Verify tenant_b log was NOT touched (still has original wrapped_dek)
+      reloaded_b = Repo.get(ExecutionLog, log_b.id)
+      assert reloaded_b.parameters_encrypted["wrapped_dek"] == "vault:v1:tenant_b_dek"
+      assert reloaded_b.parameters_encrypted["key_version"] == 1
+    end
+
+    test "without billing_account_id opt, processes all tenants", %{
+      bypass: bypass,
+      conversation: conversation,
+      tenant_a_id: tenant_a_id,
+      tenant_b_id: tenant_b_id
+    } do
+      for {tenant_id, label} <- [{tenant_a_id, "a"}, {tenant_b_id, "b"}] do
+        %ExecutionLog{}
+        |> ExecutionLog.changeset(%{
+          skill_id: "test-#{label}",
+          conversation_id: conversation.id,
+          billing_account_id: tenant_id,
+          parameters_encrypted: %{
+            "wrapped_dek" => "vault:v1:#{label}_dek",
+            "key_version" => 1,
+            "ciphertext" => "..."
+          }
+        })
+        |> Repo.insert!()
+      end
+
+      Bypass.expect(bypass, "POST", "/v1/transit/rewrap/test-key", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{
+          "data" => %{"ciphertext" => "vault:v3:new_dek"}
+        }))
+      end)
+
+      result = Rewrapper.rewrap_schema(ExecutionLog, :parameters_encrypted, dry_run: false)
+
+      # Both tenants should be processed
+      assert result.success == 2
+      assert result.failed == 0
     end
   end
 end

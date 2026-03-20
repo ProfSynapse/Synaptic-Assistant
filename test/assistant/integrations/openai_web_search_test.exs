@@ -1,5 +1,6 @@
 defmodule Assistant.Integrations.OpenAIWebSearchTest do
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias Assistant.Integrations.OpenAI
 

@@ -1,14 +1,24 @@
 # test/assistant/task_manager/queries_test.exs — Smoke tests for TaskManager.Queries.
-#
-# Verifies the module compiles and the create_task/get_task round-trip works
-# against the real database via Ecto sandbox.
-#
-# Comprehensive unit tests are deferred to the TEST phase.
 
 defmodule Assistant.TaskManager.QueriesTest do
   use Assistant.DataCase, async: true
 
   alias Assistant.TaskManager.Queries
+  alias Assistant.Schemas.User
+
+  defp create_test_user do
+    %User{}
+    |> User.changeset(%{
+      external_id: "test-user-#{System.unique_integer([:positive])}",
+      channel: "test"
+    })
+    |> Repo.insert!()
+  end
+
+  setup do
+    user = create_test_user()
+    %{user: user}
+  end
 
   describe "module compilation" do
     test "module is loaded and has expected functions" do
@@ -30,28 +40,28 @@ defmodule Assistant.TaskManager.QueriesTest do
   end
 
   describe "create_task/1 and get_task/1 round-trip" do
-    test "creates a task with auto-generated short_id and retrieves it" do
-      attrs = %{title: "Test smoke task", description: "A smoke test task", priority: "high"}
-
+    test "creates a task with auto-generated short_id and retrieves it", %{user: user} do
+      attrs = %{creator_id: user.id, title: "Test smoke task", description: "A smoke test task", priority: "high"}
       assert {:ok, task} = Queries.create_task(attrs)
       assert task.title == "Test smoke task"
-      assert task.description == "A smoke test task"
       assert task.priority == "high"
       assert task.status == "todo"
       assert String.starts_with?(task.short_id, "T-")
+      # Description is virtual — preserved in the returned struct (not persisted to DB)
+      assert task.description == "A smoke test task"
 
-      # Fetch by UUID
       assert {:ok, fetched} = Queries.get_task(task.id)
       assert fetched.id == task.id
       assert fetched.title == "Test smoke task"
+      # get_task hydrates encrypted fields — description round-trips through encrypt/decrypt
+      assert fetched.description == "A smoke test task"
 
-      # Fetch by short_id
       assert {:ok, fetched_by_short} = Queries.get_task(task.short_id)
       assert fetched_by_short.id == task.id
     end
 
-    test "returns error for missing title" do
-      assert {:error, changeset} = Queries.create_task(%{description: "no title"})
+    test "returns error for missing title", %{user: user} do
+      assert {:error, changeset} = Queries.create_task(%{creator_id: user.id, description: "no title"})
       assert %{title: _} = errors_on(changeset)
     end
 
@@ -65,11 +75,10 @@ defmodule Assistant.TaskManager.QueriesTest do
   end
 
   describe "short_id sequential generation" do
-    test "generates incrementing short_ids" do
-      {:ok, t1} = Queries.create_task(%{title: "First task"})
-      {:ok, t2} = Queries.create_task(%{title: "Second task"})
+    test "generates incrementing short_ids", %{user: user} do
+      {:ok, t1} = Queries.create_task(%{creator_id: user.id, title: "First task"})
+      {:ok, t2} = Queries.create_task(%{creator_id: user.id, title: "Second task"})
 
-      # Extract numeric suffix
       num1 = extract_short_id_number(t1.short_id)
       num2 = extract_short_id_number(t2.short_id)
 

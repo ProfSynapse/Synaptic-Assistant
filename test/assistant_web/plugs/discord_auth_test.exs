@@ -7,6 +7,7 @@ defmodule AssistantWeb.Plugs.DiscordAuthTest do
   # async: false — tests modify Application env for :discord_public_key;
   # concurrent controller tests reading the same key causes race conditions.
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias AssistantWeb.Plugs.DiscordAuth
 

@@ -5,6 +5,7 @@
 
 defmodule Assistant.Channels.SlackTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Channels.Slack
   alias Assistant.Channels.Message

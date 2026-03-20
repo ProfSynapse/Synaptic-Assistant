@@ -12,11 +12,17 @@ defmodule Assistant.Analytics.TrajectoryExporterTest do
     # Clean up test directory before each test
     File.rm_rf!(@test_base_path)
     Application.put_env(:assistant, :trajectories_base_path, @test_base_path)
+    original_crypto = Application.get_env(:assistant, :content_crypto)
 
     on_exit(fn ->
       File.rm_rf!(@test_base_path)
       Application.delete_env(:assistant, :trajectories_base_path)
-      Application.delete_env(:assistant, :content_crypto)
+
+      if is_nil(original_crypto) do
+        Application.delete_env(:assistant, :content_crypto)
+      else
+        Application.put_env(:assistant, :content_crypto, original_crypto)
+      end
     end)
 
     :ok

@@ -6,6 +6,7 @@
 
 defmodule Assistant.Channels.GoogleChatTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Channels.GoogleChat
   alias Assistant.Channels.Message

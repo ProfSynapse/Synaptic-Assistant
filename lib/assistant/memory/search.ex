@@ -231,18 +231,9 @@ defmodule Assistant.Memory.Search do
     if Assistant.Encryption.mode() == :vault_transit do
       case Assistant.Memory.Content.billing_account_id_for_user(user_id) do
         {:ok, billing_account_id} ->
-          digests =
-            text
-            |> Assistant.Encryption.BlindIndex.tokenize()
-            |> Enum.map(&Assistant.Encryption.BlindIndex.generate_digest(&1, billing_account_id))
-
-          if Enum.empty?(digests) do
-            query
-          else
-            Enum.reduce(digests, query, fn digest, q ->
-              from me in q,
-                where: fragment("EXISTS (SELECT 1 FROM content_terms ct WHERE ct.owner_type = 'memory_entry' AND ct.owner_id = ? AND ct.term_digest = ?)", me.id, ^digest)
-            end)
+          case Assistant.Encryption.BlindIndex.matching_owner_ids(text, billing_account_id, "memory_entry") do
+            {:ok, []} -> from(me in query, where: false)
+            {:ok, ids} -> from(me in query, where: me.id in ^ids)
           end
 
         {:error, _} ->

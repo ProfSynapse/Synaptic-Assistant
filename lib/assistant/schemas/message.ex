@@ -14,7 +14,7 @@ defmodule Assistant.Schemas.Message do
 
   schema "messages" do
     field :role, :string
-    field :content, :string
+    field :content, :string, virtual: true
     field :content_encrypted, :map
     field :tool_calls, {:array, :map}
     field :tool_results, :map

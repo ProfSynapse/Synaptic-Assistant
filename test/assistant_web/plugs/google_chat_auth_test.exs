@@ -8,6 +8,7 @@
 
 defmodule AssistantWeb.Plugs.GoogleChatAuthTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias AssistantWeb.Plugs.GoogleChatAuth
 

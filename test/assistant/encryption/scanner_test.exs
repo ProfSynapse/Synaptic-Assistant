@@ -69,7 +69,7 @@ defmodule Assistant.Encryption.ScannerTest do
         |> Ecto.Changeset.change(%{parameters_encrypted: encrypted})
         |> Repo.update()
         
-      result = Scanner.scan(ExecutionLog, :parameters_encrypted, plaintext_field: :parameters)
+      result = Scanner.scan(ExecutionLog, :parameters_encrypted)
       
       assert result.valid == 1
       assert result.corrupted == 0
@@ -104,14 +104,16 @@ defmodule Assistant.Encryption.ScannerTest do
 
     test "repairs records if plaintext matches but ciphertext is corrupt and repair: true", %{conversation: conversation, billing_account: billing_account} do
       billing_id = billing_account.id
-      parameters = %{"fix" => "me"}
+      
+      # We use skill_id as the surrogate plaintext column because
+      # parameters was dropped from the DB!
+      skill_id = "test-skill-repair"
 
       {:ok, log} = 
         %ExecutionLog{}
         |> ExecutionLog.changeset(%{
-          skill_id: "test",
+          skill_id: skill_id,
           conversation_id: conversation.id,
-          parameters: parameters,
           billing_account_id: billing_id,
           parameters_encrypted: %{
             "ciphertext" => Base.encode64("corrupt"), # Valid base64 but fails GCM auth tag
@@ -124,7 +126,7 @@ defmodule Assistant.Encryption.ScannerTest do
         })
         |> Repo.insert()
 
-      result = Scanner.scan(ExecutionLog, :parameters_encrypted, plaintext_field: :parameters, repair: true)
+      result = Scanner.scan(ExecutionLog, :parameters_encrypted, plaintext_field: :skill_id, repair: true)
       
       assert result.valid == 0
       assert result.corrupted == 0
@@ -140,8 +142,8 @@ defmodule Assistant.Encryption.ScannerTest do
         row_id: log.id
       }
 
-      assert {:ok, json} = Assistant.Encryption.decrypt(field_ref, reloaded.parameters_encrypted)
-      assert Jason.decode!(json) == parameters
+      assert {:ok, binary} = Assistant.Encryption.decrypt(field_ref, reloaded.parameters_encrypted)
+      assert binary == skill_id
     end
   end
 end

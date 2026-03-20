@@ -5,6 +5,7 @@ defmodule Assistant.Transcripts do
 
   import Ecto.Query
 
+  alias Assistant.Encryption.BlindIndex
   alias Assistant.Messages.Content, as: MessageContent
   alias Assistant.Repo
   alias Assistant.Schemas.{Conversation, Message, Task, TaskHistory}
@@ -103,21 +104,69 @@ defmodule Assistant.Transcripts do
   defp maybe_filter_query(queryable, ""), do: queryable
 
   defp maybe_filter_query(queryable, query) do
-    pattern = "%#{query}%"
+    # Always allow searching by conversation ID prefix
+    id_pattern = "%#{query}%"
+    id_matches = where(queryable, [c], fragment("CAST(? AS text) ILIKE ?", c.id, ^id_pattern))
 
-    if hosted_vault_transit_mode?() do
-      where(queryable, [c], fragment("CAST(? AS text) ILIKE ?", c.id, ^pattern))
-    else
-      where(
-        queryable,
-        [c],
-        fragment("CAST(? AS text) ILIKE ?", c.id, ^pattern) or
-          fragment(
-            "EXISTS (SELECT 1 FROM messages m3 WHERE m3.conversation_id = ? AND COALESCE(m3.content, '') ILIKE ?)",
-            c.id,
-            ^pattern
-          )
+    # Also search via blind keyword index on message content
+    case search_conversations_by_blind_index(query) do
+      {:ok, []} ->
+        id_matches
+
+      {:ok, conversation_ids} ->
+        # Union: conversations matching by ID OR by message content
+        where(queryable, [c],
+          fragment("CAST(? AS text) ILIKE ?", c.id, ^id_pattern) or c.id in ^conversation_ids
+        )
+    end
+  end
+
+  # Searches content_terms for messages matching the query text, then maps
+  # the matching message IDs back to their conversation IDs.
+  defp search_conversations_by_blind_index(query_text) do
+    # We need a billing_account_id to generate digests. Since transcripts are
+    # an admin/settings view, we derive it from conversations' users. For now,
+    # generate digests using all known billing accounts that have indexed content.
+    # In practice, the settings UI is scoped to one org, so there's typically
+    # one billing_account_id.
+    case get_billing_account_id_for_index() do
+      nil ->
+        {:ok, []}
+
+      billing_account_id ->
+        case BlindIndex.matching_owner_ids(query_text, billing_account_id, "message") do
+          {:ok, []} ->
+            {:ok, []}
+
+          {:ok, message_ids} ->
+            conversation_ids =
+              from(m in Message,
+                where: m.id in ^message_ids,
+                select: m.conversation_id,
+                distinct: true
+              )
+              |> Repo.all()
+
+            {:ok, conversation_ids}
+        end
+    end
+  end
+
+  # Returns the billing_account_id to use for blind index digest generation.
+  # Falls back to "local" for self-hosted instances without billing accounts.
+  defp get_billing_account_id_for_index do
+    if MessageContent.hosted_vault_transit_mode?() do
+      # In hosted mode, look up a billing_account_id from the first conversation's user.
+      # All users in a hosted instance share the same billing account.
+      from(c in Conversation,
+        join: u in assoc(c, :user),
+        where: not is_nil(u.billing_account_id),
+        select: u.billing_account_id,
+        limit: 1
       )
+      |> Repo.one()
+    else
+      "local"
     end
   end
 
@@ -196,11 +245,7 @@ defmodule Assistant.Transcripts do
           last_active_at: c.last_active_at,
           message_count: count(m.id),
           last_message_at: max(m.inserted_at),
-          preview:
-            fragment(
-              "COALESCE((SELECT m2.content FROM messages m2 WHERE m2.conversation_id = ? ORDER BY m2.inserted_at DESC LIMIT 1), '')",
-              c.id
-            )
+          preview: ""
         }
       )
     end

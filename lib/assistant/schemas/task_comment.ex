@@ -10,7 +10,7 @@ defmodule Assistant.Schemas.TaskComment do
   @foreign_key_type :binary_id
 
   schema "task_comments" do
-    field :content, :string
+    field :content, :string, virtual: true
     field :content_encrypted, :map
 
     belongs_to :task, Assistant.Schemas.Task

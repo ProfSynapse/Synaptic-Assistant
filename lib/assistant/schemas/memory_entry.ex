@@ -14,7 +14,7 @@ defmodule Assistant.Schemas.MemoryEntry do
 
   schema "memory_entries" do
     field :title, :string
-    field :content, :string
+    field :content, :string, virtual: true
     field :content_encrypted, :map
     field :tags, {:array, :string}, default: []
     field :search_queries, {:array, :string}, default: []
@@ -45,6 +45,7 @@ defmodule Assistant.Schemas.MemoryEntry do
   @required_fields [:content, :title]
   @optional_fields [
     :tags,
+    :content_encrypted,
     :search_queries,
     :category,
     :source_type,

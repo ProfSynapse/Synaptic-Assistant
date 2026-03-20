@@ -17,14 +17,17 @@ defmodule Assistant.Encryption.Cache do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @spec get(binary()) :: {:ok, binary()} | :miss
-  def get(key) when is_binary(key) do
-    case :ets.lookup(@table, key) do
-      [{^key, value, expires_at}] ->
+  @spec get(binary(), binary()) :: {:ok, binary()} | :miss
+  def get(tenant_id, key) when is_binary(tenant_id) and is_binary(key) do
+    composite_key = {tenant_id, key}
+
+    case :ets.lookup(@table, composite_key) do
+      [{^composite_key, value, expires_at}] ->
         if System.monotonic_time(:millisecond) < expires_at do
           {:ok, value}
         else
-          :ets.delete(@table, key)
+          # Expired entry — return :miss and let the periodic pruner clean it up.
+          # We cannot delete here because the table is :protected (owner-write only).
           :miss
         end
 
@@ -33,14 +36,24 @@ defmodule Assistant.Encryption.Cache do
     end
   end
 
-  @spec put(binary(), binary()) :: :ok
-  def put(key, value) when is_binary(key) and is_binary(value) do
-    GenServer.cast(__MODULE__, {:put, key, value})
+  @spec put(binary(), binary(), binary()) :: :ok
+  def put(tenant_id, key, value)
+      when is_binary(tenant_id) and is_binary(key) and is_binary(value) do
+    GenServer.cast(__MODULE__, {:put, tenant_id, key, value})
+  end
+
+  @doc """
+  Removes all cached DEKs for a given tenant (billing_account_id).
+  Synchronous — blocks until the flush completes.
+  """
+  @spec flush_tenant(binary()) :: :ok
+  def flush_tenant(tenant_id) when is_binary(tenant_id) do
+    GenServer.call(__MODULE__, {:flush_tenant, tenant_id})
   end
 
   @impl true
   def init(_opts) do
-    :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+    :ets.new(@table, [:named_table, :protected, :set, read_concurrency: true])
 
     config =
       Application.get_env(:assistant, :content_crypto, [])
@@ -56,11 +69,18 @@ defmodule Assistant.Encryption.Cache do
   end
 
   @impl true
-  def handle_cast({:put, key, value}, %{ttl_ms: ttl_ms, max_entries: max_entries} = state) do
+  def handle_cast({:put, tenant_id, key, value}, %{ttl_ms: ttl_ms, max_entries: max_entries} = state) do
+    composite_key = {tenant_id, key}
     expires_at = System.monotonic_time(:millisecond) + ttl_ms
-    :ets.insert(@table, {key, value, expires_at})
+    :ets.insert(@table, {composite_key, value, expires_at})
     prune_if_needed(max_entries)
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_call({:flush_tenant, tenant_id}, _from, state) do
+    :ets.match_delete(@table, {{tenant_id, :_}, :_, :_})
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -81,9 +101,9 @@ defmodule Assistant.Encryption.Cache do
 
     @table
     |> :ets.tab2list()
-    |> Enum.each(fn {key, _value, expires_at} ->
+    |> Enum.each(fn {composite_key, _value, expires_at} ->
       if expires_at <= now do
-        :ets.delete(@table, key)
+        :ets.delete(@table, composite_key)
       end
     end)
   end

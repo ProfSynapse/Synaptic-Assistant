@@ -10,6 +10,7 @@ defmodule Assistant.Integrations.LLMRouterSpendingTest do
     - nil user_id -> no check (system calls)
   """
   use Assistant.DataCase, async: true
+  @moduletag :external
 
   alias Assistant.Integrations.LLMRouter
   alias Assistant.Schemas.{SpendingLimit, UsageRecord}

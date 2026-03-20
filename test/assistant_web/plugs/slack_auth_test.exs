@@ -7,6 +7,7 @@ defmodule AssistantWeb.Plugs.SlackAuthTest do
   # async: false — tests modify Application env for :slack_signing_secret;
   # concurrent controller tests reading the same key causes race conditions.
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias AssistantWeb.Plugs.SlackAuth
 

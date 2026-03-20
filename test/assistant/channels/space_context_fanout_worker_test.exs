@@ -139,6 +139,8 @@ defmodule Assistant.Channels.SpaceContextFanoutWorkerTest do
           order_by: [asc: m.inserted_at]
         )
         |> Repo.all()
+        
+      messages = Assistant.Messages.Content.hydrate_for_conversation!(conv.id, messages)
 
       # Should have exactly 2 system messages (question + response)
       assert length(messages) == 2

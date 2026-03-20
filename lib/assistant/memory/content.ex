@@ -3,7 +3,10 @@ defmodule Assistant.Memory.Content do
 
   import Ecto.Query
 
+  require Logger
+
   alias Assistant.Encryption
+  alias Assistant.Encryption.{RepairWorker, Retry}
   alias Assistant.Repo
   alias Assistant.Schemas.User
 
@@ -13,17 +16,19 @@ defmodule Assistant.Memory.Content do
   @spec prepare_attrs(binary() | nil, map()) :: {:ok, map()} | {:error, term()}
   def prepare_attrs(user_id, attrs)
       when (is_binary(user_id) or is_nil(user_id)) and is_map(attrs) do
-    if hosted_mode?() and not is_nil(user_id) do
+    if not is_nil(user_id) do
       case get_attr(attrs, :content) do
         content when is_binary(content) ->
           entry_id = get_attr(attrs, :id) || Ecto.UUID.generate()
           attrs = put_attr(attrs, :id, entry_id)
 
+          title = get_attr(attrs, :title) || derive_title(content)
+          attrs = put_attr(attrs, :title, title)
+
           with {:ok, billing_account_id} <- billing_account_id_for_user(user_id),
                {:ok, encrypted_payload} <-
                  Encryption.encrypt(field_ref(billing_account_id, entry_id), content) do
-            # Dual-writing plaintext, just like messages should theoretically do when dual writing is enabled
-            {:ok, put_attr(attrs, :content_encrypted, encrypted_payload)}
+            {:ok, attrs |> put_attr(:content_encrypted, encrypted_payload)}
           end
 
         _ ->
@@ -38,7 +43,7 @@ defmodule Assistant.Memory.Content do
   def hydrate([]), do: {:ok, []}
 
   def hydrate(entries) when is_list(entries) do
-    if hosted_mode?() do
+    if true do
       # Group by user_id to minimize user queries
       entries_by_user = Enum.group_by(entries, & &1.user_id)
 
@@ -89,20 +94,26 @@ defmodule Assistant.Memory.Content do
     end
   end
 
-  defp hosted_mode?, do: Encryption.hosted_mode?()
 
   defp hydrate_for_billing_account(billing_account_id, entries) when is_list(entries) do
-    entries
-    |> Enum.reduce_while({:ok, []}, fn entry, {:ok, hydrated} ->
-      case hydrate_entry(billing_account_id, entry) do
-        {:ok, hydrated_entry} -> {:cont, {:ok, [hydrated_entry | hydrated]}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, hydrated} -> {:ok, Enum.reverse(hydrated)}
-      {:error, reason} -> {:error, reason}
-    end
+    hydrated =
+      Enum.map(entries, fn entry ->
+        case hydrate_entry(billing_account_id, entry) do
+          {:ok, hydrated_entry} ->
+            hydrated_entry
+
+          {:error, {:decrypt_failed, entry_id, reason}} ->
+            Logger.warning(
+              "Decrypt failed for memory_entries id=#{entry_id} field=content, enqueueing repair",
+              error: inspect(reason)
+            )
+
+            enqueue_repair("Assistant.Schemas.MemoryEntry", entry_id)
+            %{entry | content: nil}
+        end
+      end)
+
+    {:ok, hydrated}
   end
 
   defp hydrate_entry(
@@ -110,13 +121,12 @@ defmodule Assistant.Memory.Content do
          %{id: entry_id, content_encrypted: payload, content: _content} = entry
        )
        when is_map(payload) do
-    # If content is already a string and not empty, it means we dual-wrote and have plaintext.
-    # Note: wait, if it's dual written but not fetched from DB? Ecto fetches whatever is in DB.
-    # If the DB has plaintext, we don't *need* to decrypt unless we want to verify.
-    # Let's prefer the decrypted value to ensure the feature is fully active.
-    with {:ok, plaintext} <- Encryption.decrypt(field_ref(billing_account_id, entry_id), payload) do
-      {:ok, %{entry | content: plaintext}}
-    else
+    case Retry.with_retry(fn ->
+           Encryption.decrypt(field_ref(billing_account_id, entry_id), payload)
+         end) do
+      {:ok, plaintext} ->
+        {:ok, %{entry | content: plaintext}}
+
       {:error, reason} ->
         {:error, {:decrypt_failed, entry_id, reason}}
     end
@@ -124,6 +134,7 @@ defmodule Assistant.Memory.Content do
 
   defp hydrate_entry(_billing_account_id, entry), do: {:ok, entry}
 
+  def billing_account_id_for_user(nil), do: {:error, :missing_billing_account_id}
   def billing_account_id_for_user(user_id) do
     user_id
     |> billing_account_query()
@@ -133,7 +144,12 @@ defmodule Assistant.Memory.Content do
         {:ok, billing_account_id}
 
       nil ->
-        {:error, :missing_billing_account_id}
+        if Encryption.mode() == :vault_transit do
+          {:error, :missing_billing_account_id}
+        else
+          # Consistent fallback for self-hosted / local dev without billing accounts
+          {:ok, "local"}
+        end
     end
   end
 
@@ -160,5 +176,22 @@ defmodule Assistant.Memory.Content do
     attrs
     |> Map.put(key, value)
     |> Map.delete(Atom.to_string(key))
+  end
+
+  defp enqueue_repair(schema, id) do
+    %{"schema" => schema, "id" => id}
+    |> RepairWorker.new()
+    |> Oban.insert()
+  end
+
+  defp derive_title(content) do
+    content
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+    |> String.slice(0, 160)
+    |> case do
+      "" -> "Untitled memory"
+      title -> title
+    end
   end
 end

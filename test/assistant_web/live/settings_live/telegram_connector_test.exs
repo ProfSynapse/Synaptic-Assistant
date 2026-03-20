@@ -1,5 +1,6 @@
 defmodule AssistantWeb.SettingsLive.TelegramConnectorTest do
   use AssistantWeb.ConnCase, async: false
+  @moduletag :external
 
   import Phoenix.LiveViewTest
 

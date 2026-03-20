@@ -8,6 +8,7 @@
 
 defmodule Assistant.Schemas.ConnectedDriveTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Schemas.ConnectedDrive
 

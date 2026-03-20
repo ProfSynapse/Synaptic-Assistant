@@ -6,6 +6,7 @@
 
 defmodule Assistant.Skills.Files.SearchTest do
   use Assistant.DataCase, async: true
+  @moduletag :external
 
   alias Assistant.Schemas.User
   alias Assistant.Skills.Files.Search

@@ -1,5 +1,6 @@
 defmodule Assistant.Integrations.Web.UrlPolicyTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Integrations.Web.UrlPolicy
 

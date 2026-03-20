@@ -216,6 +216,8 @@ defmodule Assistant.Memory.Store do
   def batch_append_messages(conversation_id, messages) when is_list(messages) do
     now = DateTime.utc_now()
     user_id = conversation_user_id(conversation_id)
+    # Capture plaintext content before encryption
+    plaintext_by_index = messages |> Enum.with_index() |> Map.new(fn {m, idx} -> {idx, extract_plaintext_content(m)} end)
 
     with {:ok, prepared_messages} <- prepare_message_batch(conversation_id, messages),
          growth_bytes <-
@@ -255,6 +257,15 @@ defmodule Assistant.Memory.Store do
             end)
             |> Enum.sort_by(fn {{:message, idx}, _msg} -> idx end)
             |> Enum.map(fn {_key, msg} -> msg end)
+
+          # Index each message's plaintext content into the blind index
+          Enum.with_index(inserted)
+          |> Enum.each(fn {msg, idx} ->
+            maybe_index_message(msg.id, Map.get(plaintext_by_index, idx), conversation_id)
+          end)
+
+          inserted =
+            inserted
             |> then(&MessageContent.hydrate_for_conversation!(conversation_id, &1))
 
           {:ok, inserted}
@@ -288,6 +299,7 @@ defmodule Assistant.Memory.Store do
   @spec append_message(binary(), map()) :: {:ok, Message.t()} | {:error, term()}
   def append_message(conversation_id, attrs) do
     now = DateTime.utc_now()
+    plaintext_content = extract_plaintext_content(attrs)
 
     with {:ok, prepared_attrs} <- MessageContent.prepare_attrs(conversation_id, attrs),
          {message_id, message_attrs} <-
@@ -309,6 +321,7 @@ defmodule Assistant.Memory.Store do
       |> Repo.transaction()
       |> case do
         {:ok, %{message: message}} ->
+          maybe_index_message(message.id, plaintext_content, conversation_id)
           {:ok, MessageContent.hydrate_for_conversation!(conversation_id, [message]) |> hd()}
 
         {:error, :message, changeset, _changes} ->
@@ -528,10 +541,15 @@ defmodule Assistant.Memory.Store do
              Policy.memory_entry_retained_bytes(attrs)
            ),
          {:ok, attrs} <- Assistant.Memory.Content.prepare_attrs(user_id, attrs) do
-      if Assistant.Encryption.mode() == :vault_transit do
-        Ecto.Multi.new()
-        |> Ecto.Multi.insert(:entry, MemoryEntry.changeset(%MemoryEntry{}, attrs))
-        |> Ecto.Multi.run(:index, fn _repo, %{entry: entry} ->
+      entry_id = Map.get(attrs, :id) || Map.get(attrs, "id")
+      struct = if entry_id, do: %MemoryEntry{id: entry_id}, else: %MemoryEntry{}
+
+      Ecto.Multi.new()
+      |> Ecto.Multi.insert(:entry, MemoryEntry.changeset(struct, attrs))
+      |> Ecto.Multi.run(:index, fn _repo, %{entry: entry} ->
+        if is_nil(user_id) do
+          {:ok, nil}
+        else
           case Assistant.Memory.Content.billing_account_id_for_user(user_id) do
             {:ok, billing_account_id} ->
               plaintext_content = Map.get(attrs, :content) || Map.get(attrs, "content") || ""
@@ -541,16 +559,12 @@ defmodule Assistant.Memory.Store do
             {:error, reason} ->
               {:error, reason}
           end
-        end)
-        |> Repo.transaction()
-        |> case do
-          {:ok, %{entry: entry}} -> {:ok, entry}
-          {:error, _name, value, _changes} -> {:error, value}
         end
-      else
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(attrs)
-        |> Repo.insert()
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{entry: entry}} -> {:ok, entry}
+        {:error, _name, value, _changes} -> {:error, value}
       end
     end
   end
@@ -764,5 +778,38 @@ defmodule Assistant.Memory.Store do
       end
 
     from me in query, where: me.importance >= ^min_decimal
+  end
+
+  # ---------------------------------------------------------------------------
+  # Blind Index Helpers (message content indexing)
+  # ---------------------------------------------------------------------------
+
+  defp extract_plaintext_content(attrs) when is_map(attrs) do
+    Map.get(attrs, :content) || Map.get(attrs, "content")
+  end
+
+  defp maybe_index_message(_message_id, nil, _conversation_id), do: :ok
+  defp maybe_index_message(_message_id, "", _conversation_id), do: :ok
+
+  defp maybe_index_message(message_id, plaintext_content, conversation_id) do
+    with {:ok, billing_account_id} <- billing_account_id_for_conversation(conversation_id) do
+      Assistant.Encryption.BlindIndex.index_content(
+        "message",
+        message_id,
+        plaintext_content,
+        billing_account_id
+      )
+    end
+  rescue
+    e ->
+      Logger.warning("Failed to index message #{message_id} for blind search: #{inspect(e)}")
+      :ok
+  end
+
+  defp billing_account_id_for_conversation(conversation_id) do
+    case conversation_user_id(conversation_id) do
+      nil -> {:error, :no_user}
+      user_id -> Assistant.Memory.Content.billing_account_id_for_user(user_id)
+    end
   end
 end

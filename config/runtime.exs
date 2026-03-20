@@ -152,6 +152,32 @@ content_crypto_config =
 
 config :assistant, :content_crypto, content_crypto_config
 
+# Blind index key — used for HMAC-based searchable encryption digests.
+# Required in production; optional in dev/test (test.exs provides a test-only key).
+if config_env() == :prod do
+  blind_index_key =
+    System.get_env("BLIND_INDEX_KEY") ||
+      raise """
+      environment variable BLIND_INDEX_KEY is missing.
+      This key is used for HMAC-based blind index digests over encrypted data.
+      Generate one: :crypto.strong_rand_bytes(32) |> Base.encode64()
+      """
+
+  if byte_size(blind_index_key) < 32 do
+    raise """
+    BLIND_INDEX_KEY must be at least 32 bytes.
+    Current length: #{byte_size(blind_index_key)} bytes.
+    Generate a proper key: :crypto.strong_rand_bytes(32) |> Base.encode64()
+    """
+  end
+
+  config :assistant, :blind_index_key, blind_index_key
+else
+  if blind_index_key = System.get_env("BLIND_INDEX_KEY") do
+    config :assistant, :blind_index_key, blind_index_key
+  end
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

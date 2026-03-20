@@ -98,7 +98,10 @@ defmodule Assistant.TaskManager.Queries do
     user_id = Map.get(attrs, :creator_id) || Map.get(attrs, "creator_id")
 
     with {:ok, attrs} <- Assistant.TaskManager.Content.prepare_task_attrs(user_id, attrs) do
-      %Task{}
+      task_id = Map.get(attrs, :id) || Map.get(attrs, "id")
+      struct = if task_id, do: %Task{id: task_id}, else: %Task{}
+      
+      struct
       |> Task.changeset(attrs)
       |> Repo.insert()
       |> case do

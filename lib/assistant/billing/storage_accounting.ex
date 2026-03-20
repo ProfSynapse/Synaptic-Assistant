@@ -35,15 +35,13 @@ defmodule Assistant.Billing.StorageAccounting do
   end
 
   defmacro message_size_expr(
-             content_field,
              content_encrypted_field,
              tool_calls_field,
              tool_results_field
            ) do
     quote do
       fragment(
-        "coalesce(octet_length(?), 0) + coalesce(octet_length(to_jsonb(?)::text), 0) + coalesce(octet_length(to_jsonb(?)::text), 0) + coalesce(octet_length(to_jsonb(?)::text), 0)",
-        unquote(content_field),
+        "coalesce(octet_length(to_jsonb(?)::text), 0) + coalesce(octet_length(to_jsonb(?)::text), 0) + coalesce(octet_length(to_jsonb(?)::text), 0)",
         unquote(content_encrypted_field),
         unquote(tool_calls_field),
         unquote(tool_results_field)
@@ -51,12 +49,12 @@ defmodule Assistant.Billing.StorageAccounting do
     end
   end
 
-  defmacro memory_entry_size_expr(title_field, content_field) do
+  defmacro memory_entry_size_expr(title_field, content_encrypted_field) do
     quote do
       fragment(
-        "coalesce(octet_length(?), 0) + coalesce(octet_length(?), 0)",
+        "coalesce(octet_length(?), 0) + coalesce(octet_length(to_jsonb(?)::text), 0)",
         unquote(title_field),
-        unquote(content_field)
+        unquote(content_encrypted_field)
       )
     end
   end

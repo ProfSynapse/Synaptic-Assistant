@@ -31,7 +31,7 @@ defmodule Assistant.Encryption do
 
   @spec mode() :: mode()
   def mode do
-    Application.get_env(:assistant, :content_crypto, [])
+    (Application.get_env(:assistant, :content_crypto) || [])
     |> Keyword.get(:mode, :local_cloak)
   end
 

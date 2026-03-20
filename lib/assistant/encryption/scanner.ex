@@ -15,28 +15,43 @@ defmodule Assistant.Encryption.Scanner do
   Example:
       Assistant.Encryption.Scanner.scan(Assistant.Schemas.ExecutionLog, :parameters_encrypted, plaintext_field: :parameters, repair: false)
   """
+  @default_batch_size 200
+
   def scan(schema_mod, encrypted_field, opts \\ []) do
     plaintext_field = Keyword.get(opts, :plaintext_field)
     repair? = Keyword.get(opts, :repair, false)
+    batch_size = Keyword.get(opts, :batch_size, @default_batch_size)
 
+    initial_acc = %{valid: 0, corrupted: 0, repaired: 0, skipped: 0, failures: []}
+
+    do_batched_scan(schema_mod, encrypted_field, plaintext_field, repair?, batch_size, initial_acc, nil)
+  end
+
+  defp do_batched_scan(schema_mod, encrypted_field, plaintext_field, repair?, batch_size, acc, last_id) do
     query =
       from s in schema_mod,
         where: not is_nil(field(s, ^encrypted_field)),
-        order_by: [asc: :id]
+        order_by: [asc: :id],
+        limit: ^batch_size
 
-    Repo.transaction(
-      fn ->
-        query
-        |> Repo.stream()
-        |> Enum.reduce(%{valid: 0, corrupted: 0, repaired: 0, skipped: 0, failures: []}, fn record, acc ->
-          process_record(record, schema_mod, encrypted_field, plaintext_field, repair?, acc)
-        end)
-      end,
-      timeout: :infinity
-    )
-    |> case do
-      {:ok, results} -> results
-      {:error, reason} -> {:error, reason}
+    query = if last_id, do: where(query, [s], s.id > ^last_id), else: query
+
+    rows = Repo.all(query)
+
+    case rows do
+      [] ->
+        acc
+
+      rows ->
+        new_acc =
+          Enum.reduce(rows, acc, fn record, inner_acc ->
+            process_record(record, schema_mod, encrypted_field, plaintext_field, repair?, inner_acc)
+          end)
+
+        new_last_id = List.last(rows).id
+        Logger.info("Scanner: processed batch of #{length(rows)}, last_id=#{new_last_id}")
+
+        do_batched_scan(schema_mod, encrypted_field, plaintext_field, repair?, batch_size, new_acc, new_last_id)
     end
   end
 
@@ -89,6 +104,8 @@ defmodule Assistant.Encryption.Scanner do
   end
 
   defp handle_corrupted(record, field_ref, plaintext_binary, encrypted_field, _plaintext_field, repair?, acc) do
+    table = field_ref.table
+
     if repair? do
       case Encryption.encrypt(field_ref, plaintext_binary) do
         {:ok, new_encrypted_payload} ->
@@ -96,11 +113,22 @@ defmodule Assistant.Encryption.Scanner do
           |> Ecto.Changeset.change(%{encrypted_field => new_encrypted_payload})
           |> Repo.update()
           |> case do
-            {:ok, _} -> Map.update!(acc, :repaired, &(&1 + 1))
-            _ -> Map.update!(acc, :corrupted, &(&1 + 1)) # failed to repair
+            {:ok, _} ->
+              Map.update!(acc, :repaired, &(&1 + 1))
+
+            {:error, changeset} ->
+              Logger.warning("Scanner: failed to save repaired ciphertext for #{table} id=#{record.id}",
+                error: inspect(changeset.errors)
+              )
+
+              Map.update!(acc, :corrupted, &(&1 + 1))
           end
-          
-        _ ->
+
+        {:error, reason} ->
+          Logger.warning("Scanner: failed to re-encrypt for repair on #{table} id=#{record.id}",
+            error: inspect(reason)
+          )
+
           Map.update!(acc, :corrupted, &(&1 + 1))
       end
     else

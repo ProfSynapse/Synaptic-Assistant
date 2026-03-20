@@ -12,6 +12,7 @@
 defmodule AssistantWeb.OpenRouterOAuthControllerTest do
   # async: false — modifies global Application env for openrouter_keys_url.
   use AssistantWeb.ConnCase, async: false
+  @moduletag :external
 
   alias Assistant.Accounts
 

@@ -190,7 +190,6 @@ defmodule Assistant.Billing.Metering do
       select:
         type(
           StorageAccounting.message_size_expr(
-            m.content,
             m.content_encrypted,
             m.tool_calls,
             m.tool_results
@@ -211,7 +210,7 @@ defmodule Assistant.Billing.Metering do
     from me in MemoryEntry,
       join: u in assoc(me, :user),
       where: u.billing_account_id == ^billing_account_id,
-      select: type(StorageAccounting.memory_entry_size_expr(me.title, me.content), :integer)
+      select: type(StorageAccounting.memory_entry_size_expr(me.title, me.content_encrypted), :integer)
   end
 
   defp normalize_byte_total(%Decimal{} = value), do: Decimal.to_integer(value)

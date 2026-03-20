@@ -5,6 +5,7 @@
 
 defmodule Assistant.Channels.DiscordTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Channels.Discord
   alias Assistant.Channels.Message

@@ -13,10 +13,10 @@ defmodule Assistant.Schemas.ExecutionLog do
 
   schema "execution_logs" do
     field :skill_id, :string
-    field :parameters, :map, default: %{}
-    field :result, :map
+    field :parameters, :map, virtual: true, default: %{}
+    field :result, :map, virtual: true
     field :status, :string, default: "pending"
-    field :error_message, :string
+    field :error_message, :string, virtual: true
     field :duration_ms, :integer
     field :started_at, :utc_datetime_usec
     field :completed_at, :utc_datetime_usec

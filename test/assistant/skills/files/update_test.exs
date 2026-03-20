@@ -1,5 +1,6 @@
 defmodule Assistant.Skills.Files.UpdateTest do
   use Assistant.DataCase, async: false
+  @moduletag :external
 
   alias Assistant.Skills.Files.Update
   alias Assistant.Skills.Result

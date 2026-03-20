@@ -34,14 +34,10 @@ defmodule Assistant.Billing.MeteringTest do
         |> Conversation.changeset(%{channel: "chat", user_id: user_one.id})
         |> Repo.insert()
 
-      {:ok, _message} =
-        %Message{}
-        |> Message.changeset(%{
-          role: "assistant",
-          conversation_id: conversation.id,
-          content: "hello"
-        })
-        |> Repo.insert()
+      {:ok, _message} = Assistant.Memory.Store.append_message(conversation.id, %{
+        role: "assistant", 
+        content: "hello"
+      })
 
       {:ok, _synced_file} =
         %SyncedFile{}
@@ -57,14 +53,11 @@ defmodule Assistant.Billing.MeteringTest do
         })
         |> Repo.insert()
 
-      {:ok, _memory_entry} =
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{
-          user_id: user_two.id,
-          title: "memory",
-          content: "remember"
-        })
-        |> Repo.insert()
+      {:ok, _memory_entry} = Assistant.Memory.Store.create_memory_entry(%{
+        user_id: user_two.id,
+        title: "memory",
+        content: "remember"
+      })
 
       assert {:ok, usage} = Metering.current_usage(billing_account.id)
 
@@ -73,8 +66,13 @@ defmodule Assistant.Billing.MeteringTest do
       assert usage.seat_count == 1
       assert usage.included_bytes == 10_000_000_000
       assert usage.synced_file_bytes == byte_size("drive")
-      assert usage.message_bytes == byte_size("hello")
-      assert usage.memory_bytes == byte_size("memory") + byte_size("remember")
+      assert usage.message_bytes > byte_size("hello")
+      # Encryption adds a fixed overhead (JSON payload structure with ciphertext,
+      # nonce, tag, key_version, algorithm, aad_version). For short messages the
+      # overhead dominates, but total should stay under 500 bytes for a 5-byte
+      # plaintext. This catches bugs that would inflate encrypted size by 100x.
+      assert usage.message_bytes < 500
+      assert usage.memory_bytes > byte_size("memory") + byte_size("remember")
 
       assert usage.total_bytes ==
                usage.synced_file_bytes + usage.message_bytes + usage.memory_bytes

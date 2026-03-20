@@ -1,5 +1,6 @@
 defmodule AssistantWeb.StripeWebhookControllerTest do
   use AssistantWeb.ConnCase, async: false
+  @moduletag :external
 
   alias Assistant.Billing
   alias Assistant.Repo

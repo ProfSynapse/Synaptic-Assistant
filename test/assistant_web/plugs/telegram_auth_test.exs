@@ -7,6 +7,7 @@ defmodule AssistantWeb.Plugs.TelegramAuthTest do
   # async: false — tests modify Application env for :telegram_webhook_secret;
   # concurrent controller tests reading the same key causes race conditions.
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias AssistantWeb.Plugs.TelegramAuth
 

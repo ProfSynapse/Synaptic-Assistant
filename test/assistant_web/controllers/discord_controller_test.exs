@@ -8,6 +8,7 @@ defmodule AssistantWeb.DiscordControllerTest do
   # async: false — DiscordAuth plug reads Application env at request time; concurrent
   # plug tests that delete/restore :discord_public_key cause race conditions.
   use AssistantWeb.ConnCase, async: false
+  @moduletag :external
 
   # Generate a test Ed25519 keypair for signing test payloads.
   @private_key_raw :crypto.strong_rand_bytes(32)

@@ -8,6 +8,7 @@
 
 defmodule Assistant.Integrations.OpenRouterTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Integrations.OpenRouter
 

@@ -14,7 +14,7 @@ defmodule Assistant.Memory.ContextBuilderTest do
 
   alias Assistant.Memory.ContextBuilder
   alias Assistant.Memory.Store
-  alias Assistant.Schemas.{MemoryEntry, User}
+  alias Assistant.Schemas.User
 
   defp create_test_user do
     %User{}
@@ -23,6 +23,11 @@ defmodule Assistant.Memory.ContextBuilderTest do
       channel: "test"
     })
     |> Repo.insert!()
+  end
+
+  defp create_entry(attrs) do
+    {:ok, entry} = Store.create_memory_entry(attrs)
+    entry
   end
 
   describe "module compilation" do
@@ -113,13 +118,11 @@ defmodule Assistant.Memory.ContextBuilderTest do
       user = create_test_user()
 
       # Create a memory that should match via FTS
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "User strongly prefers dark mode in all interfaces",
         user_id: user.id,
         category: "preference"
       })
-      |> Repo.insert!()
 
       # Use explicit query param to bypass summary lookup
       {:ok, result} = ContextBuilder.build_context(nil, user.id, query: "dark mode")
@@ -145,13 +148,11 @@ defmodule Assistant.Memory.ContextBuilderTest do
 
       Store.update_summary(conv.id, "Working on deployment tasks.", "test/model")
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "Deployment requires Docker and Kubernetes",
         user_id: user.id,
         tags: ["deployment", "infrastructure"]
       })
-      |> Repo.insert!()
 
       {:ok, result} = ContextBuilder.build_context(conv.id, user.id)
 
@@ -164,12 +165,10 @@ defmodule Assistant.Memory.ContextBuilderTest do
     test "accepts explicit query override via opts" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "The user works at Acme Corporation as a senior engineer",
         user_id: user.id
       })
-      |> Repo.insert!()
 
       # Explicit query bypasses conversation summary lookup
       {:ok, result} = ContextBuilder.build_context(nil, user.id, query: "Acme Corporation")
@@ -182,12 +181,10 @@ defmodule Assistant.Memory.ContextBuilderTest do
 
       # Create several memories
       for i <- 1..5 do
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{
+        create_entry(%{
           content: "Memory entry number #{i} about testing patterns",
           user_id: user.id
         })
-        |> Repo.insert!()
       end
 
       {:ok, result} =
@@ -215,12 +212,10 @@ defmodule Assistant.Memory.ContextBuilderTest do
 
       Store.update_summary(conv.id, "Discussing database migration strategies.", "test/model")
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "Previous migration used Ecto Multi for atomicity",
         user_id: user.id
       })
-      |> Repo.insert!()
 
       {:ok, result} = ContextBuilder.build_context(conv.id, user.id)
 

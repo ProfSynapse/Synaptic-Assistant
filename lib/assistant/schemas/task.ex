@@ -17,7 +17,7 @@ defmodule Assistant.Schemas.Task do
   schema "tasks" do
     field :short_id, :string
     field :title, :string
-    field :description, :string
+    field :description, :string, virtual: true
     field :description_encrypted, :map
     field :status, :string, default: "todo"
     field :priority, :string, default: "medium"

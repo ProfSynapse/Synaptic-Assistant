@@ -8,6 +8,7 @@
 
 defmodule Assistant.Integrations.Google.Drive.ScopingTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Integrations.Google.Drive.Scoping
 
