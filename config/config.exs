@@ -5,6 +5,9 @@
 
 import Config
 
+config :petal_components, :error_translator_function,
+  {AssistantWeb.CoreComponents, :translate_error}
+
 config :assistant, :scopes,
   settings_user: [
     default: true,

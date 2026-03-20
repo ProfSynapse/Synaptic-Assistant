@@ -78,11 +78,14 @@ defmodule AssistantWeb.CoreComponents do
   end
 
   @doc false
-  def translate_error({message, opts}) do
+  def translate_error({message, opts}) when is_binary(message) do
     Regex.replace(~r"%{(\w+)}", message, fn _, key ->
       opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
     end)
   end
 
   def translate_error(message) when is_binary(message), do: message
+
+  # Catch-all for non-standard error formats (e.g. atom lists from constraint errors)
+  def translate_error(other), do: inspect(other)
 end
