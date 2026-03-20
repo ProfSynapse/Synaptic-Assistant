@@ -82,38 +82,64 @@ defmodule AssistantWeb.SettingsUserLive.Login do
       </section>
 
       <section :if={@live_action == :magic} class="sa-auth-card sa-auth-login-card">
-        <h1 class="sa-auth-title">Magic Link Login</h1>
-        <p class="sa-auth-subtitle">Enter your email and we will send a one-time sign-in link.</p>
+        <div :if={!@email_sent}>
+          <h1 class="sa-auth-title">Magic Link Login</h1>
+          <p class="sa-auth-subtitle">Enter your email and we will send a one-time sign-in link.</p>
 
-        <div :if={local_mail_adapter?()} class="sa-auth-alert">
-          <.icon name="hero-information-circle" class="size-6 shrink-0" />
-          <div>
-            <p>Local mail adapter is active.</p>
-            <p>
-              View delivered emails in <.link href="/dev/mailbox">/dev/mailbox</.link>.
-            </p>
+          <div :if={local_mail_adapter?()} class="sa-auth-alert">
+            <.icon name="hero-information-circle" class="size-6 shrink-0" />
+            <div>
+              <p>Local mail adapter is active.</p>
+              <p>
+                View delivered emails in <.link href="/dev/mailbox">/dev/mailbox</.link>.
+              </p>
+            </div>
           </div>
+
+          <.form
+            :let={f}
+            for={@form}
+            id="login_form_magic"
+            action={~p"/settings_users/log-in"}
+            phx-submit="submit_magic"
+          >
+            <.field
+              readonly={!!@current_scope}
+              field={f[:email]}
+              type="email"
+              label="Email"
+              autocomplete="email"
+              required
+              no_margin
+              phx-mounted={JS.focus()}
+            />
+            <.button class="w-full sa-auth-primary-btn">Send Sign-In Link</.button>
+          </.form>
         </div>
 
-        <.form
-          :let={f}
-          for={@form}
-          id="login_form_magic"
-          action={~p"/settings_users/log-in"}
-          phx-submit="submit_magic"
-        >
-          <.field
-            readonly={!!@current_scope}
-            field={f[:email]}
-            type="email"
-            label="Email"
-            autocomplete="email"
-            required
-            no_margin
-            phx-mounted={JS.focus()}
-          />
-          <.button class="w-full sa-auth-primary-btn">Send Sign-In Link</.button>
-        </.form>
+        <div :if={@email_sent}>
+          <div class="flex justify-center mb-4">
+            <.icon name="hero-check-circle" class="size-12 text-emerald-400" />
+          </div>
+          <h1 class="sa-auth-title">Check your inbox</h1>
+          <p class="sa-auth-subtitle">
+            We sent a sign-in link to <strong>{@submitted_email}</strong>. It expires in 10 minutes.
+          </p>
+
+          <div :if={local_mail_adapter?()} class="sa-auth-alert">
+            <.icon name="hero-information-circle" class="size-6 shrink-0" />
+            <div>
+              <p>Local mail adapter is active.</p>
+              <p>
+                View delivered emails in <.link href="/dev/mailbox">/dev/mailbox</.link>.
+              </p>
+            </div>
+          </div>
+
+          <button phx-click="reset_magic" class="w-full sa-auth-primary-btn mt-4" style="background: transparent; border: 1px solid rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);">
+            Try a different email
+          </button>
+        </div>
 
         <div class="sa-auth-secondary-links">
           <.link navigate={~p"/settings_users/log-in"} class="sa-auth-inline-link">
@@ -152,7 +178,7 @@ defmodule AssistantWeb.SettingsUserLive.Login do
 
         form = to_form(%{"email" => email}, as: "settings_user")
 
-        {:ok, assign(socket, form: form, trigger_submit: false)}
+        {:ok, assign(socket, form: form, trigger_submit: false, email_sent: false, submitted_email: nil)}
     end
   end
 
@@ -169,13 +195,11 @@ defmodule AssistantWeb.SettingsUserLive.Login do
       )
     end
 
-    info =
-      "If your email is in our system, you will receive instructions for logging in shortly."
+    {:noreply, assign(socket, email_sent: true, submitted_email: email)}
+  end
 
-    {:noreply,
-     socket
-     |> put_flash(:info, info)
-     |> push_navigate(to: ~p"/settings_users/log-in")}
+  def handle_event("reset_magic", _params, socket) do
+    {:noreply, assign(socket, email_sent: false, submitted_email: nil)}
   end
 
   defp local_mail_adapter? do
