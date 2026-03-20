@@ -98,18 +98,21 @@ defmodule AssistantWeb.SettingsUserLive.Registration do
   def handle_event("save", %{"settings_user" => settings_user_params}, socket) do
     case Accounts.register_settings_user(settings_user_params) do
       {:ok, settings_user} ->
-        {:ok, _} =
-          Accounts.deliver_login_instructions(
-            settings_user,
-            &url(~p"/settings_users/log-in/#{&1}")
-          )
+        flash_message =
+          case Accounts.deliver_login_instructions(
+                 settings_user,
+                 &url(~p"/settings_users/log-in/#{&1}")
+               ) do
+            {:ok, _} ->
+              "An email was sent to #{settings_user.email}, please access it to confirm your account."
+
+            {:error, _reason} ->
+              "Account created! You can use the magic link to sign in — check back if you don't receive a confirmation email."
+          end
 
         {:noreply,
          socket
-         |> put_flash(
-           :info,
-           "An email was sent to #{settings_user.email}, please access it to confirm your account."
-         )
+         |> put_flash(:info, flash_message)
          |> push_navigate(to: ~p"/settings_users/log-in")}
 
       {:error, %Ecto.Changeset{} = changeset} ->
