@@ -96,7 +96,10 @@ defmodule AssistantWeb.SettingsUserLive.Registration do
 
   @impl true
   def handle_event("save", %{"settings_user" => settings_user_params}, socket) do
-    case Accounts.register_settings_user(settings_user_params) do
+    result = Accounts.register_settings_user(settings_user_params)
+    require Logger
+    Logger.warning("[REGISTRATION DEBUG] params=#{inspect(settings_user_params)} result=#{inspect(result)}")
+    case result do
       {:ok, settings_user} ->
         flash_message =
           case Accounts.deliver_login_instructions(
