@@ -23,6 +23,7 @@ defmodule Assistant.Schemas.Conversation do
 
     # Continuous compaction fields
     field :summary, :string
+    field :summary_encrypted, :map
     field :summary_version, :integer, default: 0
     field :summary_model, :string
 
@@ -48,6 +49,7 @@ defmodule Assistant.Schemas.Conversation do
     :status,
     :metadata,
     :summary,
+    :summary_encrypted,
     :summary_version,
     :summary_model,
     :last_compacted_message_id,

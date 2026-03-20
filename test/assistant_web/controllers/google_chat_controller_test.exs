@@ -1,5 +1,6 @@
 defmodule AssistantWeb.GoogleChatControllerTest do
   use AssistantWeb.ConnCase, async: false
+  @moduletag :external
 
   alias AssistantWeb.GoogleChatController
 

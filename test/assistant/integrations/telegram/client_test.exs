@@ -6,6 +6,7 @@
 
 defmodule Assistant.Integrations.Telegram.ClientTest do
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias Assistant.IntegrationSettings.Cache
   alias Assistant.Integrations.Telegram.Client

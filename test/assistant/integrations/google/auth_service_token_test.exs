@@ -22,6 +22,7 @@
 defmodule Assistant.Integrations.Google.AuthServiceTokenTest do
   # async: false — modifies global Application env and shared ETS table
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias Assistant.Integrations.Google.Auth
 

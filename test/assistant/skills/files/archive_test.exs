@@ -1,5 +1,6 @@
 defmodule Assistant.Skills.Files.ArchiveTest do
   use Assistant.DataCase, async: false
+  @moduletag :external
 
   alias Assistant.Skills.Files.Archive
   alias Assistant.Skills.Result

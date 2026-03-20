@@ -41,6 +41,7 @@ defmodule Assistant.Memory.Compaction do
   alias Assistant.Config.Loader, as: ConfigLoader
   alias Assistant.Config.PromptLoader
   alias Assistant.Integrations.LLMRouter
+  alias Assistant.Messages.Content, as: MessageContent
   alias Assistant.Memory.Store
 
   @default_token_budget 2048
@@ -160,6 +161,7 @@ defmodule Assistant.Memory.Compaction do
           limit: ^limit
         )
         |> Assistant.Repo.all()
+        |> then(&MessageContent.hydrate_for_conversation!(conversation_id, &1))
     end
   end
 

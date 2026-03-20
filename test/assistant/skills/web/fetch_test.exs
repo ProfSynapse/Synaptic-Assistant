@@ -1,5 +1,6 @@
 defmodule Assistant.Skills.Web.FetchTest do
   use Assistant.DataCase, async: false
+  @moduletag :external
 
   alias Assistant.Skills.Context
   alias Assistant.Skills.Result

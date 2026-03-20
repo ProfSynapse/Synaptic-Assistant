@@ -8,6 +8,7 @@ defmodule AssistantWeb.TelegramControllerTest do
   # async: false — TelegramAuth plug reads Application env at request time; concurrent
   # plug tests that delete/restore :telegram_webhook_secret cause race conditions.
   use AssistantWeb.ConnCase, async: false
+  @moduletag :external
 
   alias Assistant.IntegrationSettings.Cache
   alias Assistant.Repo

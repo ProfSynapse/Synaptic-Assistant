@@ -1,5 +1,6 @@
 defmodule Assistant.Integrations.Google.DriveTrashTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Integrations.Google.Drive
 

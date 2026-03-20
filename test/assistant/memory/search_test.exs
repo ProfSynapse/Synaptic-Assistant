@@ -8,6 +8,7 @@ defmodule Assistant.Memory.SearchTest do
   use Assistant.DataCase, async: true
 
   alias Assistant.Memory.Search
+  alias Assistant.Memory.Store
   alias Assistant.Schemas.{MemoryEntity, MemoryEntry, User}
 
   describe "module compilation" do
@@ -30,6 +31,11 @@ defmodule Assistant.Memory.SearchTest do
     |> Repo.insert!()
   end
 
+  defp create_entry(attrs) do
+    {:ok, entry} = Store.create_memory_entry(attrs)
+    entry
+  end
+
   describe "search_memories/2" do
     test "returns {:ok, []} when no entries exist" do
       user = create_test_user()
@@ -39,13 +45,11 @@ defmodule Assistant.Memory.SearchTest do
     test "returns {:ok, entries} for matching FTS query" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "The user prefers dark mode for all interfaces",
         user_id: user.id,
         category: "preference"
       })
-      |> Repo.insert!()
 
       assert {:ok, results} = Search.search_memories(user.id, query: "dark mode")
       assert length(results) == 1
@@ -55,14 +59,12 @@ defmodule Assistant.Memory.SearchTest do
     test "matches a memory by title" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         title: "Dark mode preference",
         content: "The user prefers dark mode for all interfaces",
         user_id: user.id,
         category: "preference"
       })
-      |> Repo.insert!()
 
       assert {:ok, results} = Search.search_memories(user.id, query: "preference")
       assert length(results) == 1
@@ -72,21 +74,17 @@ defmodule Assistant.Memory.SearchTest do
     test "filters by tags" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "Meeting notes from standup",
         user_id: user.id,
         tags: ["meeting", "standup"]
       })
-      |> Repo.insert!()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "User likes coffee",
         user_id: user.id,
         tags: ["preference"]
       })
-      |> Repo.insert!()
 
       assert {:ok, results} = Search.search_memories(user.id, tags: ["meeting"])
       assert length(results) == 1
@@ -97,9 +95,7 @@ defmodule Assistant.Memory.SearchTest do
       user = create_test_user()
 
       for i <- 1..5 do
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{content: "entry #{i}", user_id: user.id})
-        |> Repo.insert!()
+        create_entry(%{content: "entry #{i}", user_id: user.id})
       end
 
       assert {:ok, results} = Search.search_memories(user.id, limit: 2)
@@ -116,13 +112,11 @@ defmodule Assistant.Memory.SearchTest do
     test "returns entries matching all specified tags" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "tagged entry",
         user_id: user.id,
         tags: ["alpha", "beta", "gamma"]
       })
-      |> Repo.insert!()
 
       assert {:ok, results} = Search.search_by_tags(user.id, ["alpha", "beta"])
       assert length(results) == 1
@@ -134,9 +128,7 @@ defmodule Assistant.Memory.SearchTest do
       user = create_test_user()
 
       for i <- 1..3 do
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{content: "recent #{i}", user_id: user.id})
-        |> Repo.insert!()
+        create_entry(%{content: "recent #{i}", user_id: user.id})
       end
 
       assert {:ok, results} = Search.get_recent_entries(user.id, 2)
@@ -193,21 +185,17 @@ defmodule Assistant.Memory.SearchTest do
     test "combines FTS query with category filter" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "User prefers dark mode for coding",
         user_id: user.id,
         category: "preference"
       })
-      |> Repo.insert!()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "Dark mode configuration for terminal",
         user_id: user.id,
         category: "technical"
       })
-      |> Repo.insert!()
 
       assert {:ok, results} =
                Search.search_memories(user.id, query: "dark mode", category: "preference")
@@ -219,21 +207,17 @@ defmodule Assistant.Memory.SearchTest do
     test "filters by minimum importance threshold" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "Low importance fact about colors",
         user_id: user.id,
         importance: Decimal.new("0.20")
       })
-      |> Repo.insert!()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "High importance fact about deadlines",
         user_id: user.id,
         importance: Decimal.new("0.90")
       })
-      |> Repo.insert!()
 
       assert {:ok, results} = Search.search_memories(user.id, importance_min: 0.5)
       assert length(results) == 1
@@ -244,19 +228,15 @@ defmodule Assistant.Memory.SearchTest do
       user1 = create_test_user()
       user2 = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "User one favorite programming language is Elixir",
         user_id: user1.id
       })
-      |> Repo.insert!()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "User two favorite programming language is Python",
         user_id: user2.id
       })
-      |> Repo.insert!()
 
       assert {:ok, results} = Search.search_memories(user1.id, query: "programming language")
       assert length(results) == 1
@@ -266,17 +246,11 @@ defmodule Assistant.Memory.SearchTest do
     test "returns results ordered by recency when no FTS query" do
       user = create_test_user()
 
-      {:ok, _} =
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{content: "older entry about testing", user_id: user.id})
-        |> Repo.insert()
+      create_entry(%{content: "older entry about testing", user_id: user.id})
 
       Process.sleep(5)
 
-      {:ok, _} =
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{content: "newer entry about testing", user_id: user.id})
-        |> Repo.insert()
+      create_entry(%{content: "newer entry about testing", user_id: user.id})
 
       assert {:ok, results} = Search.search_memories(user.id)
       assert length(results) == 2
@@ -287,13 +261,10 @@ defmodule Assistant.Memory.SearchTest do
     test "touches accessed_at on returned entries" do
       user = create_test_user()
 
-      {:ok, entry} =
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{
-          content: "Testing accessed at timestamp tracking",
-          user_id: user.id
-        })
-        |> Repo.insert()
+      entry = create_entry(%{
+        content: "Testing accessed at timestamp tracking",
+        user_id: user.id
+      })
 
       original_accessed_at = entry.accessed_at
 
@@ -314,21 +285,17 @@ defmodule Assistant.Memory.SearchTest do
     test "requires ALL specified tags to match (AND semantics)" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "has only alpha",
         user_id: user.id,
         tags: ["alpha"]
       })
-      |> Repo.insert!()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "has alpha and beta",
         user_id: user.id,
         tags: ["alpha", "beta"]
       })
-      |> Repo.insert!()
 
       # Searching for both alpha AND beta should only return the second entry
       assert {:ok, results} = Search.search_by_tags(user.id, ["alpha", "beta"])
@@ -339,13 +306,11 @@ defmodule Assistant.Memory.SearchTest do
     test "returns {:ok, []} when tag combination doesn't match any entry" do
       user = create_test_user()
 
-      %MemoryEntry{}
-      |> MemoryEntry.changeset(%{
+      create_entry(%{
         content: "has different tags",
         user_id: user.id,
         tags: ["x", "y"]
       })
-      |> Repo.insert!()
 
       assert {:ok, []} = Search.search_by_tags(user.id, ["nonexistent_tag"])
     end
@@ -427,17 +392,11 @@ defmodule Assistant.Memory.SearchTest do
     test "returns entries most recent first" do
       user = create_test_user()
 
-      {:ok, _} =
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{content: "older", user_id: user.id})
-        |> Repo.insert()
+      create_entry(%{content: "older", user_id: user.id})
 
       Process.sleep(5)
 
-      {:ok, _} =
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{content: "newer", user_id: user.id})
-        |> Repo.insert()
+      create_entry(%{content: "newer", user_id: user.id})
 
       assert {:ok, results} = Search.get_recent_entries(user.id, 10)
       assert length(results) == 2
@@ -449,9 +408,7 @@ defmodule Assistant.Memory.SearchTest do
       user = create_test_user()
 
       for i <- 1..5 do
-        %MemoryEntry{}
-        |> MemoryEntry.changeset(%{content: "entry #{i}", user_id: user.id})
-        |> Repo.insert!()
+        create_entry(%{content: "entry #{i}", user_id: user.id})
       end
 
       assert {:ok, results} = Search.get_recent_entries(user.id, 2)

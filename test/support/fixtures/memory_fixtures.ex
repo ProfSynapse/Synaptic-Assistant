@@ -40,7 +40,6 @@ defmodule Assistant.MemoryFixtures do
     MemoryEntity,
     MemoryEntityMention,
     MemoryEntityRelation,
-    MemoryEntry,
     User
   }
 
@@ -94,9 +93,8 @@ defmodule Assistant.MemoryFixtures do
       source_conversation_id: Keyword.get(opts, :conversation_id)
     }
 
-    %MemoryEntry{}
-    |> MemoryEntry.changeset(attrs)
-    |> Repo.insert!()
+    {:ok, entry} = Assistant.Memory.Store.create_memory_entry(attrs)
+    entry
   end
 
   @doc "Creates an entity for the given user."

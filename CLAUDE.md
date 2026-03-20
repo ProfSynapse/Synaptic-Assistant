@@ -6,9 +6,9 @@ The global PACT Orchestrator is loaded from `~/.claude/CLAUDE.md`.
 <!-- SESSION_START -->
 ## Current Session
 <!-- Auto-managed by session_init hook. Overwritten each session. -->
-- Resume: `claude --resume 7924bf74-0590-4ef3-858f-c84d6cf15d78`
-- Team: `pact-7924bf74`
-- Started: 2026-03-19 14:51:53 UTC
+- Resume: `claude --resume 10600d40-673f-48f3-a790-437a320b52d2`
+- Team: `pact-10600d40`
+- Started: 2026-03-20 12:25:03 UTC
 <!-- SESSION_END -->
 
 ## Retrieved Context

@@ -29,6 +29,7 @@ defmodule Assistant.MemoryExplorer do
           id: m.id,
           title: m.title,
           content: m.content,
+          content_encrypted: m.content_encrypted,
           tags: m.tags,
           category: m.category,
           source_type: m.source_type,
@@ -52,6 +53,7 @@ defmodule Assistant.MemoryExplorer do
       |> maybe_filter_since(since)
 
     Repo.all(memory_query)
+    |> Assistant.Memory.Content.hydrate!()
     |> Enum.map(fn memory ->
       Map.put(memory, :preview, truncate_preview(memory.content))
     end)
@@ -64,6 +66,8 @@ defmodule Assistant.MemoryExplorer do
         {:error, :not_found}
 
       memory ->
+        memory = Assistant.Memory.Content.hydrate!(memory)
+
         {:ok,
          %{
            id: memory.id,
@@ -136,7 +140,12 @@ defmodule Assistant.MemoryExplorer do
 
   defp maybe_filter_query(queryable, query) do
     pattern = "%#{query}%"
-    where(queryable, [m], ilike(m.title, ^pattern) or ilike(m.content, ^pattern))
+
+    if hosted_vault_transit_mode?() do
+      where(queryable, [m], ilike(m.title, ^pattern))
+    else
+      where(queryable, [m], ilike(m.title, ^pattern) or ilike(m.content, ^pattern))
+    end
   end
 
   defp maybe_filter_category(queryable, ""), do: queryable
@@ -174,6 +183,10 @@ defmodule Assistant.MemoryExplorer do
   end
 
   defp truncate_preview(_), do: ""
+
+  defp hosted_vault_transit_mode? do
+    Assistant.Encryption.mode() == :vault_transit
+  end
 
   defp normalize_text(value) when is_binary(value), do: String.trim(value)
   defp normalize_text(value) when is_atom(value), do: value |> Atom.to_string() |> String.trim()

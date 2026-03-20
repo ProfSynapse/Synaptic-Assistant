@@ -95,19 +95,28 @@ defmodule Assistant.TaskManager.Queries do
   def create_task(attrs) do
     attrs = Map.put_new(attrs, :short_id, generate_short_id())
 
-    %Task{}
-    |> Task.changeset(attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, task} ->
-        {:ok, task}
+    user_id = Map.get(attrs, :creator_id) || Map.get(attrs, "creator_id")
 
-      {:error, %Ecto.Changeset{errors: errors} = changeset} ->
-        if short_id_conflict?(errors) do
-          retry_create_with_new_short_id(attrs, @max_short_id_retries)
-        else
-          {:error, changeset}
-        end
+    with {:ok, attrs} <- Assistant.TaskManager.Content.prepare_task_attrs(user_id, attrs) do
+      task_id = Map.get(attrs, :id) || Map.get(attrs, "id")
+      struct = if task_id, do: %Task{id: task_id}, else: %Task{}
+      
+      struct
+      |> Task.changeset(attrs)
+      |> Repo.insert()
+      |> case do
+        {:ok, task} ->
+          {:ok, task}
+
+        {:error, %Ecto.Changeset{errors: errors} = changeset} ->
+          if short_id_conflict?(errors) do
+            retry_create_with_new_short_id(attrs, @max_short_id_retries)
+          else
+            {:error, changeset}
+          end
+      end
+    else
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -165,7 +174,7 @@ defmodule Assistant.TaskManager.Queries do
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
-      task -> {:ok, task}
+      task -> {:ok, Assistant.TaskManager.Content.hydrate_tasks!(task)}
     end
   end
 
@@ -177,7 +186,7 @@ defmodule Assistant.TaskManager.Queries do
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
-      task -> {:ok, task}
+      task -> {:ok, Assistant.TaskManager.Content.hydrate_tasks!(task)}
     end
   end
 
@@ -240,20 +249,26 @@ defmodule Assistant.TaskManager.Queries do
   end
 
   defp do_update_task(task, attrs) do
-    changeset = Task.changeset(task, attrs)
-    changes = changeset.changes
+    user_id = task.creator_id
 
-    multi =
-      Multi.new()
-      |> Multi.update(:task, changeset)
-      |> add_history_entries(task, changes, attrs)
+    with {:ok, attrs} <- Assistant.TaskManager.Content.prepare_task_attrs(user_id, attrs) do
+      changeset = Task.changeset(task, attrs)
+      changes = changeset.changes
 
-    case Repo.transaction(multi) do
-      {:ok, %{task: updated_task}} ->
-        {:ok, updated_task}
+      multi =
+        Multi.new()
+        |> Multi.update(:task, changeset)
+        |> add_history_entries(task, changes, attrs)
 
-      {:error, :task, changeset, _changes} ->
-        {:error, changeset}
+      case Repo.transaction(multi) do
+        {:ok, %{task: updated_task}} ->
+          {:ok, Assistant.TaskManager.Content.hydrate_tasks!(updated_task)}
+
+        {:error, :task, changeset, _changes} ->
+          {:error, changeset}
+      end
+    else
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -574,9 +589,23 @@ defmodule Assistant.TaskManager.Queries do
   def add_comment(task_id, attrs) do
     attrs = Map.put(attrs, :task_id, task_id)
 
-    %TaskComment{}
-    |> TaskComment.changeset(attrs)
-    |> Repo.insert()
+    user_id = Map.get(attrs, :author_id) || Map.get(attrs, "author_id") || get_task_creator(task_id)
+
+    with {:ok, attrs} <- Assistant.TaskManager.Content.prepare_comment_attrs(user_id, attrs) do
+      %TaskComment{}
+      |> TaskComment.changeset(attrs)
+      |> Repo.insert()
+      |> case do
+        {:ok, comment} -> {:ok, Assistant.TaskManager.Content.hydrate_comments!(comment)}
+        {:error, changeset} -> {:error, changeset}
+      end
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp get_task_creator(task_id) do
+    from(t in Task, where: t.id == ^task_id, select: t.creator_id) |> Repo.one()
   end
 
   @spec add_comment(String.t(), map(), String.t()) ::
@@ -609,6 +638,7 @@ defmodule Assistant.TaskManager.Queries do
       preload: [:author]
     )
     |> Repo.all()
+    |> Assistant.TaskManager.Content.hydrate_comments!()
   end
 
   # --------------------------------------------------------------------

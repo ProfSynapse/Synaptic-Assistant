@@ -9,6 +9,7 @@
 
 defmodule Assistant.Skills.HubSpot.HelpersTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Skills.HubSpot.Helpers
   alias Assistant.Skills.Result

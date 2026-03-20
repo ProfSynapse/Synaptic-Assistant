@@ -131,11 +131,15 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
     test "conversations survive pseudo-user upgrade" do
       email = "conv-survive-#{System.unique_integer([:positive])}@example.com"
 
-      # Create a pseudo-user with a conversation
+      # Create settings_user first so we have a billing_account_id
+      settings_user = settings_user_fixture(%{email: email})
+
+      # Create a pseudo-user with a conversation, matching the billing_account_id
       pseudo_user =
         chat_user_fixture(%{
           channel: "settings",
-          external_id: "settings:conv_#{System.unique_integer([:positive])}"
+          external_id: "settings:conv_#{System.unique_integer([:positive])}",
+          billing_account_id: settings_user.billing_account_id
         })
 
       now = DateTime.utc_now()
@@ -168,8 +172,6 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
         })
 
       # Link settings_user to pseudo
-      settings_user = settings_user_fixture(%{email: email})
-
       settings_user =
         settings_user
         |> Ecto.Changeset.change(%{user_id: pseudo_user.id})
@@ -179,11 +181,14 @@ defmodule AssistantWeb.SettingsLive.EnsureLinkedUserTest do
       assert user_id == real_user.id
 
       # Conversation should now belong to the real user
-      updated_conv = Repo.get!(Conversation, conv.id)
+      updated_conv = Assistant.Repo.get!(Conversation, conv.id)
       assert updated_conv.user_id == real_user.id
 
       # Messages should still be there
-      messages = Assistant.Memory.Store.list_messages(conv.id, limit: 10, order: :asc)
+      messages =
+        Assistant.Memory.Store.list_messages(conv.id, limit: 10, order: :asc)
+        |> then(&Assistant.Messages.Content.hydrate_for_conversation!(conv.id, &1))
+
       assert length(messages) == 2
       assert hd(messages).content == "Hello before upgrade"
     end

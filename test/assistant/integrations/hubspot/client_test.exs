@@ -11,6 +11,7 @@
 
 defmodule Assistant.Integrations.HubSpot.ClientTest do
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias Assistant.Integrations.HubSpot.Client
 

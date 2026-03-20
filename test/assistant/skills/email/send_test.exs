@@ -6,6 +6,7 @@
 
 defmodule Assistant.Skills.Email.SendTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Skills.Email.Send
   alias Assistant.Skills.Context

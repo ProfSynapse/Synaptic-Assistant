@@ -6,6 +6,7 @@
 
 defmodule Assistant.Skills.Calendar.UpdateTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Skills.Calendar.Update
   alias Assistant.Skills.Context

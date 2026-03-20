@@ -1,5 +1,6 @@
 defmodule Assistant.Skills.Web.SearchTest do
   use Assistant.DataCase, async: false
+  @moduletag :external
 
   import Assistant.AccountsFixtures
   import Assistant.ChannelFixtures

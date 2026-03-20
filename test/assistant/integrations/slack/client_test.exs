@@ -6,6 +6,7 @@
 
 defmodule Assistant.Integrations.Slack.ClientTest do
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias Assistant.Integrations.Slack.Client
 

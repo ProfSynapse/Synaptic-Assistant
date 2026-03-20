@@ -15,6 +15,7 @@
 defmodule Assistant.Integrations.Google.ChatAuthTest do
   # async: false — modifies global Application env
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias Assistant.Integrations.Google.Chat
 

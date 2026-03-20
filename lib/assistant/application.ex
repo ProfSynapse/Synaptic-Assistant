@@ -11,6 +11,10 @@ defmodule Assistant.Application do
 
   @impl true
   def start(_type, _args) do
+    content_crypto_mode =
+      Application.get_env(:assistant, :content_crypto, [])
+      |> Keyword.get(:mode, :local_cloak)
+
     children =
       Enum.reject(
         [
@@ -19,6 +23,9 @@ defmodule Assistant.Application do
 
           # Prompt template loader (after Config.Loader — reads priv/config/prompts/*.yaml)
           Assistant.Config.PromptLoader,
+
+          # Hosted content encryption cache (only needed for Vault Transit mode)
+          if(content_crypto_mode == :vault_transit, do: Assistant.Encryption.Cache),
 
           # Encryption vault (must start before Repo consumers that use Cloak types)
           Assistant.Vault,

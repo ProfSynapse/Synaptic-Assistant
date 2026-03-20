@@ -10,6 +10,7 @@
 
 defmodule Assistant.Skills.HubSpot.Contacts.CreateTest do
   use ExUnit.Case, async: false
+  @moduletag :external
 
   alias Assistant.Skills.HubSpot.Contacts.Create
   alias Assistant.Skills.Context

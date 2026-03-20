@@ -1,0 +1,250 @@
+defmodule Assistant.Encryption.VaultTransitProvider do
+  @moduledoc """
+  Vault Transit-backed envelope encryption provider for hosted deployments.
+  """
+
+  @behaviour Assistant.Encryption.Provider
+
+  alias Assistant.Encryption.{Cache, Context}
+
+  require Logger
+
+  @algorithm "aes_256_gcm"
+  @tag_length 16
+
+  # Circuit breaker: 5 failures in 10s opens the circuit; resets after 30s.
+  @fuse_name :vault_transit
+  @fuse_opts {{:standard, 5, 10_000}, {:reset, 30_000}}
+
+  @doc """
+  Installs the Vault Transit circuit breaker fuse.
+
+  Idempotent — safe to call multiple times. Called automatically on first
+  `request/3` if not already installed, and explicitly during `configured?/0`.
+  """
+  @spec install_fuse() :: :ok
+  def install_fuse do
+    case :fuse.install(@fuse_name, @fuse_opts) do
+      :ok -> :ok
+      # Already installed — :fuse returns :reset for existing fuses
+      :reset -> :ok
+    end
+  end
+
+  @impl true
+  def configured? do
+    configured = vault_config() |> Keyword.get(:addr) |> is_binary()
+    if configured, do: install_fuse()
+    configured
+  end
+
+  @impl true
+  def encrypt(field_ref, plaintext, _opts) when is_binary(plaintext) do
+    with {:ok, data_key} <- generate_data_key(field_ref) do
+      nonce = :crypto.strong_rand_bytes(12)
+      aad = Context.aad(field_ref)
+
+      {ciphertext, tag} =
+        :crypto.crypto_one_time_aead(
+          :aes_256_gcm,
+          data_key.plaintext,
+          nonce,
+          plaintext,
+          aad,
+          @tag_length,
+          true
+        )
+
+      {:ok,
+       %{
+         ciphertext: Base.encode64(ciphertext),
+         nonce: Base.encode64(nonce),
+         tag: Base.encode64(tag),
+         wrapped_dek: data_key.wrapped_dek,
+         key_version: data_key.key_version,
+         algorithm: @algorithm,
+         aad_version: Context.aad_version()
+       }}
+    end
+  end
+
+  @impl true
+  def decrypt(field_ref, encrypted_payload, _opts) when is_map(encrypted_payload) do
+    with {:ok, wrapped_dek} <- fetch_string_field(encrypted_payload, :wrapped_dek),
+         {:ok, dek} <- unwrap_data_key(field_ref, wrapped_dek),
+         {:ok, ciphertext} <- decode_field(encrypted_payload, :ciphertext),
+         {:ok, nonce} <- decode_field(encrypted_payload, :nonce),
+         {:ok, tag} <- decode_field(encrypted_payload, :tag) do
+      aad = Context.aad(field_ref)
+
+      case :crypto.crypto_one_time_aead(:aes_256_gcm, dek, nonce, ciphertext, aad, tag, false) do
+        plaintext when is_binary(plaintext) -> {:ok, plaintext}
+        :error -> {:error, :decrypt_failed}
+      end
+    end
+  end
+
+  @doc """
+  Rewraps a wrapped data key with the latest version of the transit key.
+  Does not change the app-local ciphertext, only the `wrapped_dek` and `key_version`.
+  """
+  @spec rewrap(Assistant.Encryption.field_ref(), String.t()) ::
+          {:ok, %{wrapped_dek: String.t(), key_version: integer()}} | {:error, term()}
+  def rewrap(field_ref, wrapped_dek) do
+    path = "/v1/#{transit_mount()}/rewrap/#{transit_key()}"
+
+    body = %{
+      ciphertext: wrapped_dek,
+      context: Context.derivation_context(field_ref)
+    }
+
+    with {:ok, %{"data" => %{"ciphertext" => new_wrapped_dek}}} <- request(:post, path, body) do
+      {:ok,
+       %{
+         wrapped_dek: new_wrapped_dek,
+         key_version: key_version_from_ciphertext(new_wrapped_dek)
+       }}
+    end
+  end
+
+  defp generate_data_key(field_ref) do
+    path = "/v1/#{transit_mount()}/datakey/plaintext/#{transit_key()}"
+
+    body = %{
+      bits: 256,
+      context: Context.derivation_context(field_ref)
+    }
+
+    with {:ok, %{"data" => %{"plaintext" => plaintext_b64, "ciphertext" => wrapped_dek}}} <-
+           request(:post, path, body),
+         {:ok, plaintext} <- Base.decode64(plaintext_b64) do
+      {:ok,
+       %{
+         plaintext: plaintext,
+         wrapped_dek: wrapped_dek,
+         key_version: key_version_from_ciphertext(wrapped_dek)
+       }}
+    end
+  end
+
+  defp unwrap_data_key(field_ref, wrapped_dek) do
+    tenant_id = Map.fetch!(field_ref, :billing_account_id)
+    cache_key = :crypto.hash(:sha256, wrapped_dek)
+
+    case Cache.get(tenant_id, cache_key) do
+      {:ok, dek} ->
+        {:ok, dek}
+
+      :miss ->
+        path = "/v1/#{transit_mount()}/decrypt/#{transit_key()}"
+
+        body = %{
+          ciphertext: wrapped_dek,
+          context: Context.derivation_context(field_ref)
+        }
+
+        with {:ok, %{"data" => %{"plaintext" => plaintext_b64}}} <- request(:post, path, body),
+             {:ok, dek} <- Base.decode64(plaintext_b64) do
+          :ok = Cache.put(tenant_id, cache_key, dek)
+          {:ok, dek}
+        end
+    end
+  end
+
+  defp request(method, path, body) do
+    case :fuse.ask(@fuse_name, :sync) do
+      :blown ->
+        Logger.warning("Vault Transit circuit breaker OPEN — failing fast",
+          method: method,
+          path: path
+        )
+
+        {:error, :vault_circuit_open}
+
+      {:error, :not_found} ->
+        install_fuse()
+        do_request(method, path, body)
+
+      :ok ->
+        do_request(method, path, body)
+    end
+  end
+
+  defp do_request(method, path, body) do
+    request =
+      Req.new(
+        base_url: Keyword.fetch!(vault_config(), :addr),
+        headers: request_headers(),
+        receive_timeout: Keyword.get(vault_config(), :timeout_ms, 5_000)
+      )
+
+    case Req.request(request, method: method, url: path, json: body) do
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 and is_map(body) ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        :fuse.melt(@fuse_name)
+        {:error, {:vault_error, status, body}}
+
+      {:error, reason} ->
+        :fuse.melt(@fuse_name)
+        {:error, {:vault_request_failed, reason}}
+    end
+  end
+
+  defp request_headers do
+    vault_config()
+    |> Enum.reduce([], fn
+      {:token, token}, headers when is_binary(token) ->
+        [{"x-vault-token", token} | headers]
+
+      {:namespace, namespace}, headers when is_binary(namespace) ->
+        [{"x-vault-namespace", namespace} | headers]
+
+      _entry, headers ->
+        headers
+    end)
+  end
+
+  defp vault_config do
+    Application.get_env(:assistant, :content_crypto, [])
+    |> Keyword.get(:vault, [])
+  end
+
+  defp transit_mount do
+    Keyword.get(vault_config(), :transit_mount, "transit")
+  end
+
+  defp transit_key do
+    Keyword.get(vault_config(), :transit_key, "assistant-content")
+  end
+
+  defp key_version_from_ciphertext("vault:v" <> rest) do
+    case Integer.parse(rest) do
+      {version, _} when version >= 0 -> version
+      _ -> 0
+    end
+  end
+
+  defp key_version_from_ciphertext(_), do: 0
+
+  defp decode_field(payload, key) do
+    with {:ok, value} <- fetch_string_field(payload, key) do
+      case Base.decode64(value) do
+        {:ok, decoded} -> {:ok, decoded}
+        :error -> {:error, {:invalid_base64, key}}
+      end
+    end
+  end
+
+  defp fetch_string_field(payload, key) do
+    string_key = to_string(key)
+    atom_key = try do String.to_existing_atom(string_key) rescue _ -> key end
+    
+    case payload do
+      %{^atom_key => value} when is_binary(value) -> {:ok, value}
+      %{^string_key => value} when is_binary(value) -> {:ok, value}
+      _ -> {:error, {:missing_field, key}}
+    end
+  end
+end

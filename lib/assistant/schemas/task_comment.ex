@@ -10,7 +10,8 @@ defmodule Assistant.Schemas.TaskComment do
   @foreign_key_type :binary_id
 
   schema "task_comments" do
-    field :content, :string
+    field :content, :string, virtual: true
+    field :content_encrypted, :map
 
     belongs_to :task, Assistant.Schemas.Task
     belongs_to :author, Assistant.Schemas.User
@@ -20,7 +21,8 @@ defmodule Assistant.Schemas.TaskComment do
   end
 
   @required_fields [:content, :task_id]
-  @optional_fields [:author_id, :source_conversation_id]
+  @optional_fields [
+    :content_encrypted,:author_id, :source_conversation_id]
 
   def changeset(comment, attrs) do
     comment

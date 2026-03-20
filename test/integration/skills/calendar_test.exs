@@ -11,6 +11,7 @@
 
 defmodule Assistant.Integration.Skills.CalendarTest do
   use ExUnit.Case, async: false
+  @moduletag :external
 
   import Assistant.Integration.Helpers
 

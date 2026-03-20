@@ -5,6 +5,7 @@
 
 defmodule Assistant.Skills.Images.GenerateTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Skills.Context
   alias Assistant.Skills.Images.Generate

@@ -122,6 +122,7 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorkerTest do
         |> Ecto.Query.where([m], m.user_id == ^user.id)
         |> Ecto.Query.where([m], m.category == "agent_transcript")
         |> Repo.all()
+        |> Assistant.Memory.Content.hydrate!()
 
       assert length(entries) == 1
       entry = hd(entries)
@@ -150,6 +151,7 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorkerTest do
         Assistant.Schemas.MemoryEntry
         |> Ecto.Query.where([m], m.user_id == ^user.id)
         |> Repo.one!()
+        |> Assistant.Memory.Content.hydrate!()
 
       # Nil mission should not add a mission section
       refute entry.content =~ "Mission:"
@@ -171,6 +173,7 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorkerTest do
         Assistant.Schemas.MemoryEntry
         |> Ecto.Query.where([m], m.user_id == ^user.id)
         |> Repo.one!()
+        |> Assistant.Memory.Content.hydrate!()
 
       refute entry.content =~ "Mission:"
     end
@@ -190,6 +193,7 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorkerTest do
         Assistant.Schemas.MemoryEntry
         |> Ecto.Query.where([m], m.user_id == ^user.id)
         |> Repo.one!()
+        |> Assistant.Memory.Content.hydrate!()
 
       assert entry.content =~ "(no transcript)"
     end
@@ -209,6 +213,7 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorkerTest do
         Assistant.Schemas.MemoryEntry
         |> Ecto.Query.where([m], m.user_id == ^user.id)
         |> Repo.one!()
+        |> Assistant.Memory.Content.hydrate!()
 
       assert entry.content =~ "(empty transcript)"
     end
@@ -228,6 +233,7 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorkerTest do
         Assistant.Schemas.MemoryEntry
         |> Ecto.Query.where([m], m.user_id == ^user.id)
         |> Repo.one!()
+        |> Assistant.Memory.Content.hydrate!()
 
       assert entry.content =~ "Status: completed"
       assert "status:completed" in entry.tags
@@ -248,6 +254,7 @@ defmodule Assistant.Scheduler.Workers.MemorySaveWorkerTest do
         Assistant.Schemas.MemoryEntry
         |> Ecto.Query.where([m], m.user_id == ^user.id)
         |> Repo.one!()
+        |> Assistant.Memory.Content.hydrate!()
 
       assert entry.content =~ "Status: failed"
       assert "status:failed" in entry.tags

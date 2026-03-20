@@ -10,6 +10,7 @@
 
 defmodule Assistant.Integrations.Google.GmailTest do
   use ExUnit.Case, async: true
+  @moduletag :external
 
   alias Assistant.Integrations.Google.Gmail
 

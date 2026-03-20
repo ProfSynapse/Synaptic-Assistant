@@ -73,13 +73,14 @@ defmodule Assistant.Memory.Search do
     base = from(me in MemoryEntry, where: me.user_id == ^user_id)
 
     base
-    |> maybe_fts(query_text)
+    |> maybe_fts(query_text, user_id)
     |> maybe_filter_tags(tags)
     |> maybe_filter_category(category)
     |> maybe_filter_importance(importance_min)
-    |> apply_ordering(query_text)
+    |> apply_ordering(query_text, user_id)
     |> limit(^limit)
     |> Repo.all()
+    |> Assistant.Memory.Content.hydrate!()
     |> touch_accessed_at()
     |> then(&{:ok, &1})
   end
@@ -110,6 +111,7 @@ defmodule Assistant.Memory.Search do
       order_by: [desc: me.inserted_at]
     )
     |> Repo.all()
+    |> Assistant.Memory.Content.hydrate!()
     |> touch_accessed_at()
     |> then(&{:ok, &1})
   end
@@ -140,6 +142,7 @@ defmodule Assistant.Memory.Search do
       limit: ^limit
     )
     |> Repo.all()
+    |> Assistant.Memory.Content.hydrate!()
     |> then(&{:ok, &1})
   end
 
@@ -221,12 +224,25 @@ defmodule Assistant.Memory.Search do
   # Private: FTS helpers
   # ---------------------------------------------------------------------------
 
-  defp maybe_fts(query, nil), do: query
-  defp maybe_fts(query, ""), do: query
+  defp maybe_fts(query, nil, _user_id), do: query
+  defp maybe_fts(query, "", _user_id), do: query
 
-  defp maybe_fts(query, text) do
-    from me in query,
-      where: fragment("? @@ plainto_tsquery('english', ?)", me.search_text, ^text)
+  defp maybe_fts(query, text, user_id) do
+    if Assistant.Encryption.mode() == :vault_transit do
+      case Assistant.Memory.Content.billing_account_id_for_user(user_id) do
+        {:ok, billing_account_id} ->
+          case Assistant.Encryption.BlindIndex.matching_owner_ids(text, billing_account_id, "memory_entry") do
+            {:ok, []} -> from(me in query, where: false)
+            {:ok, ids} -> from(me in query, where: me.id in ^ids)
+          end
+
+        {:error, _} ->
+          from me in query, where: false
+      end
+    else
+      from me in query,
+        where: fragment("? @@ plainto_tsquery('english', ?)", me.search_text, ^text)
+    end
   end
 
   defp maybe_filter_tags(query, nil), do: query
@@ -257,19 +273,23 @@ defmodule Assistant.Memory.Search do
 
   # When FTS query is provided, rank by ts_rank descending.
   # Otherwise, fall back to inserted_at descending (most recent first).
-  defp apply_ordering(query, nil) do
+  defp apply_ordering(query, nil, _user_id) do
     from me in query, order_by: [desc: me.inserted_at]
   end
 
-  defp apply_ordering(query, "") do
+  defp apply_ordering(query, "", _user_id) do
     from me in query, order_by: [desc: me.inserted_at]
   end
 
-  defp apply_ordering(query, text) do
-    from me in query,
-      order_by: [
-        desc: fragment("ts_rank(?, plainto_tsquery('english', ?))", me.search_text, ^text)
-      ]
+  defp apply_ordering(query, text, _user_id) do
+    if Assistant.Encryption.mode() == :vault_transit do
+      from me in query, order_by: [desc: me.inserted_at]
+    else
+      from me in query,
+        order_by: [
+          desc: fragment("ts_rank(?, plainto_tsquery('english', ?))", me.search_text, ^text)
+        ]
+    end
   end
 
   # ---------------------------------------------------------------------------

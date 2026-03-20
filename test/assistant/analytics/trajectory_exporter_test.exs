@@ -2,7 +2,7 @@
 # trajectory export I/O.
 
 defmodule Assistant.Analytics.TrajectoryExporterTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Assistant.Analytics.TrajectoryExporter
 
@@ -12,10 +12,17 @@ defmodule Assistant.Analytics.TrajectoryExporterTest do
     # Clean up test directory before each test
     File.rm_rf!(@test_base_path)
     Application.put_env(:assistant, :trajectories_base_path, @test_base_path)
+    original_crypto = Application.get_env(:assistant, :content_crypto)
 
     on_exit(fn ->
       File.rm_rf!(@test_base_path)
       Application.delete_env(:assistant, :trajectories_base_path)
+
+      if is_nil(original_crypto) do
+        Application.delete_env(:assistant, :content_crypto)
+      else
+        Application.put_env(:assistant, :content_crypto, original_crypto)
+      end
     end)
 
     :ok
@@ -72,6 +79,35 @@ defmodule Assistant.Analytics.TrajectoryExporterTest do
 
     test "handles nil gracefully without crashing" do
       assert :ok = TrajectoryExporter.export_turn(%{})
+    end
+
+    test "does not write plaintext trajectory files in hosted mode" do
+      Application.put_env(:assistant, :content_crypto, mode: :vault_transit)
+
+      attrs = %{
+        conversation_id: "conv-hosted",
+        user_id: "user-hosted",
+        user_message: "Hello",
+        assistant_response: "Hi!",
+        messages: [
+          %{role: "user", content: "Hello"},
+          %{role: "assistant", content: "Hi!"}
+        ]
+      }
+
+      assert :ok = TrajectoryExporter.export_turn(attrs)
+
+      path = TrajectoryExporter.trajectory_path("user-hosted", "conv-hosted")
+      refute File.exists?(path)
+    end
+  end
+
+  describe "export_conversation/2" do
+    test "is disabled in hosted mode" do
+      Application.put_env(:assistant, :content_crypto, mode: :vault_transit)
+
+      assert {:error, :disabled_in_hosted_mode} =
+               TrajectoryExporter.export_conversation("any-conversation-id")
     end
   end
 
