@@ -70,7 +70,7 @@ defmodule AssistantWeb.Components.SettingsPage do
         <div class="sa-sidebar-footer">
           <form method="post" action={~p"/settings_users/log-out"}>
             <input type="hidden" name="_method" value="delete" />
-            <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+            <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
             <button type="submit" class="sa-sidebar-link" title="Log Out">
               <.icon name="hero-arrow-right-on-rectangle" class="h-4 w-4" />
               <span :if={!@sidebar_collapsed}>Log Out</span>
