@@ -282,7 +282,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
       true ->
         assign(socket,
           can_bootstrap_admin: can_bootstrap,
-          managed_scopes: Accounts.managed_access_scopes(),
+          managed_scopes: [],
           allowlist_form: to_form(%{}, as: "allowlist_entry"),
           allowlist_entries: [],
           admin_settings_users: [],
@@ -709,17 +709,20 @@ defmodule AssistantWeb.SettingsLive.Loaders do
 
   defp load_onboarding(socket) do
     settings_user = Context.current_settings_user(socket)
+    current_scope = socket.assigns[:current_scope]
+    can_configure? = Scope.can_configure_integrations?(current_scope)
 
     dismissed? = not is_nil(settings_user) and not is_nil(settings_user.onboarding_dismissed_at)
 
     admin_complete? = settings_user != nil and settings_user.is_admin == true
 
     llm_complete? =
-      settings_user != nil and
-        (present?(settings_user.openrouter_api_key) or
-           present?(settings_user.openai_api_key))
+      system_llm_key_configured?() or
+        (settings_user != nil and
+           (present?(settings_user.openrouter_api_key) or
+              present?(settings_user.openai_api_key)))
 
-    channel_complete? = channel_configured?()
+    channel_complete? = if can_configure?, do: channel_configured?(), else: true
 
     items = [
       %{
@@ -748,6 +751,11 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     |> assign(:onboarding_checklist_items, items)
     |> assign(:onboarding_all_complete?, all_complete?)
     |> assign(:onboarding_dismissed?, dismissed?)
+  end
+
+  defp system_llm_key_configured? do
+    present?(Application.get_env(:assistant, :openrouter_api_key)) or
+      present?(Application.get_env(:assistant, :openai_api_key))
   end
 
   defp channel_configured? do

@@ -1388,15 +1388,20 @@ defmodule AssistantWeb.SettingsLive.Events do
   end
 
   def handle_event("dismiss_onboarding", _params, socket) do
-    settings_user = Context.current_settings_user(socket)
-    now = DateTime.utc_now(:second)
+    case Context.current_settings_user(socket) do
+      nil ->
+        {:noreply, socket}
 
-    case Accounts.update_settings_user_onboarding_dismissed(settings_user, now) do
-      {:ok, _updated} ->
-        {:noreply, assign(socket, :onboarding_dismissed?, true)}
+      settings_user ->
+        now = DateTime.utc_now(:second)
 
-      {:error, _changeset} ->
-        {:noreply, put_flash(socket, :error, "Could not dismiss checklist.")}
+        case Accounts.update_settings_user_onboarding_dismissed(settings_user, now) do
+          {:ok, _updated} ->
+            {:noreply, assign(socket, :onboarding_dismissed?, true)}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Could not dismiss checklist.")}
+        end
     end
   end
 

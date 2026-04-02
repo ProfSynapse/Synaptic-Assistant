@@ -43,8 +43,8 @@ defmodule Assistant.Accounts do
   a matching allowlist entry.
   """
   def bootstrap_admin_access(%SettingsUser{} = settings_user) do
-    if admin_bootstrap_available?() do
-      Repo.transact(fn ->
+    Repo.transact(fn ->
+      if admin_bootstrap_available?() do
         with {:ok, _entry} <-
                upsert_settings_user_allowlist_entry(
                  %{
@@ -62,10 +62,10 @@ defmodule Assistant.Accounts do
         else
           {:error, _} = error -> error
         end
-      end)
-    else
-      {:error, :bootstrap_closed}
-    end
+      else
+        {:error, :bootstrap_closed}
+      end
+    end)
   end
 
   @doc """
