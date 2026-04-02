@@ -44,4 +44,17 @@ defmodule Assistant.Accounts.Scope do
   end
 
   def for_settings_user(nil), do: nil
+
+  @doc """
+  Returns true if the scope holder can configure workspace integrations.
+
+  Admins always can. Non-admins can if their billing_role is "owner" or "admin".
+  """
+  def can_configure_integrations?(%__MODULE__{admin?: true}), do: true
+
+  def can_configure_integrations?(%__MODULE__{settings_user: %{billing_role: role}})
+      when role in ["owner", "admin"],
+      do: true
+
+  def can_configure_integrations?(_), do: false
 end

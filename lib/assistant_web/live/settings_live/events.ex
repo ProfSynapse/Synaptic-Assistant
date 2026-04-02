@@ -46,16 +46,22 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   def handle_event("switch_admin_tab", %{"tab" => tab}, socket)
       when tab in ~w(integrations models users policies) do
-    socket = assign(socket, :admin_tab, tab)
+    is_admin = socket.assigns.current_scope.admin?
 
-    socket =
-      if tab == "policies" do
-        Loaders.load_admin_policies(socket)
-      else
-        socket
-      end
+    if tab != "integrations" and not is_admin do
+      {:noreply, socket}
+    else
+      socket = assign(socket, :admin_tab, tab)
 
-    {:noreply, socket}
+      socket =
+        if tab == "policies" do
+          Loaders.load_admin_policies(socket)
+        else
+          socket
+        end
+
+      {:noreply, socket}
+    end
   end
 
   def handle_event("set_policy_preset", %{"preset" => preset}, socket) do
@@ -1379,6 +1385,24 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   def handle_event("save_profile", %{"profile" => params}, socket) do
     Profile.save_profile(socket, params, flash?: true)
+  end
+
+  def handle_event("dismiss_onboarding", _params, socket) do
+    case Context.current_settings_user(socket) do
+      nil ->
+        {:noreply, socket}
+
+      settings_user ->
+        now = DateTime.utc_now(:second)
+
+        case Accounts.update_settings_user_onboarding_dismissed(settings_user, now) do
+          {:ok, _updated} ->
+            {:noreply, assign(socket, :onboarding_dismissed?, true)}
+
+          {:error, _changeset} ->
+            {:noreply, put_flash(socket, :error, "Could not dismiss checklist.")}
+        end
+    end
   end
 
   def handle_event("autosave_profile", %{"profile" => params}, socket) do

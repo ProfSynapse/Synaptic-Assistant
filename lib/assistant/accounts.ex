@@ -43,8 +43,8 @@ defmodule Assistant.Accounts do
   a matching allowlist entry.
   """
   def bootstrap_admin_access(%SettingsUser{} = settings_user) do
-    if admin_bootstrap_available?() do
-      Repo.transact(fn ->
+    Repo.transact(fn ->
+      if admin_bootstrap_available?() do
         with {:ok, _entry} <-
                upsert_settings_user_allowlist_entry(
                  %{
@@ -62,10 +62,10 @@ defmodule Assistant.Accounts do
         else
           {:error, _} = error -> error
         end
-      end)
-    else
-      {:error, :bootstrap_closed}
-    end
+      else
+        {:error, :bootstrap_closed}
+      end
+    end)
   end
 
   @doc """
@@ -535,6 +535,15 @@ defmodule Assistant.Accounts do
   def update_settings_user_profile(settings_user, attrs) do
     settings_user
     |> SettingsUser.profile_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Sets `onboarding_dismissed_at` to dismiss the getting-started checklist.
+  """
+  def update_settings_user_onboarding_dismissed(%SettingsUser{} = settings_user, %DateTime{} = at) do
+    settings_user
+    |> Ecto.Changeset.change(onboarding_dismissed_at: at)
     |> Repo.update()
   end
 

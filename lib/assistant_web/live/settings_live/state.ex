@@ -4,6 +4,8 @@ defmodule AssistantWeb.SettingsLive.State do
   import Phoenix.Component, only: [assign: 3, assign_new: 3, to_form: 2]
   import Phoenix.LiveView, only: [push_navigate: 2, put_flash: 3]
 
+  alias Assistant.Accounts
+  alias Assistant.Accounts.Scope
   alias AssistantWeb.Components.SettingsPage.Helpers, as: PageHelpers
   alias AssistantWeb.SettingsLive.Data
   alias AssistantWeb.SettingsLive.Loaders
@@ -127,6 +129,9 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:telegram_connect_url, nil)
     |> assign(:telegram_bot_username, nil)
     |> assign(:telegram_connect_expires_at, nil)
+    |> assign(:onboarding_checklist_items, [])
+    |> assign(:onboarding_all_complete?, false)
+    |> assign(:onboarding_dismissed?, true)
     |> Loaders.load_profile()
     |> Loaders.load_orchestrator_prompt()
   end
@@ -146,18 +151,11 @@ defmodule AssistantWeb.SettingsLive.State do
 
   defp handle_section(socket, params) do
     section = Data.normalize_section(Map.get(params, "section", "profile"))
-
-    is_admin =
-      case socket.assigns[:current_scope] do
-        %{settings_user: %{is_admin: true}} -> true
-        _ -> false
-      end
-
     current_scope = socket.assigns[:current_scope]
     section_scope = section_scope_name(section)
 
     cond do
-      section == "admin" and not is_admin ->
+      section == "admin" and not admin_section_allowed?(current_scope) ->
         socket
         |> put_flash(:error, "You do not have permission to access admin.")
         |> push_navigate(to: "/settings")
@@ -203,15 +201,10 @@ defmodule AssistantWeb.SettingsLive.State do
 
   defp handle_admin_integration(socket, params) do
     integration_group = Map.get(params, "integration_group")
-
-    is_admin =
-      case socket.assigns[:current_scope] do
-        %{settings_user: %{is_admin: true}} -> true
-        _ -> false
-      end
+    current_scope = socket.assigns[:current_scope]
 
     cond do
-      not is_admin ->
+      not admin_section_allowed?(current_scope) ->
         socket
         |> put_flash(:error, "You do not have permission to access admin.")
         |> push_navigate(to: "/settings")
@@ -235,4 +228,11 @@ defmodule AssistantWeb.SettingsLive.State do
   end
 
   defp section_scope_name(section), do: PageHelpers.section_scope(section)
+
+  # Allow access to admin section when:
+  # 1. Bootstrap exception: no admins exist yet (self-closing gate)
+  # 2. Workspace owner/admin: user can configure integrations
+  defp admin_section_allowed?(current_scope) do
+    Accounts.admin_bootstrap_available?() or Scope.can_configure_integrations?(current_scope)
+  end
 end
