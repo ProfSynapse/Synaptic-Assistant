@@ -188,10 +188,14 @@ defmodule AssistantWeb.WorkspaceLive do
           </nav>
 
           <div class="sa-sidebar-footer">
-            <.link href={~p"/settings_users/log-out"} method="delete" class="sa-sidebar-link" title="Log Out">
-              <.icon name="hero-arrow-right-on-rectangle" class="h-4 w-4" />
-              <span :if={!@sidebar_collapsed}>Log Out</span>
-            </.link>
+            <form method="post" action={~p"/settings_users/log-out"}>
+              <input type="hidden" name="_method" value="delete" />
+              <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+              <button type="submit" class="sa-sidebar-link" title="Log Out">
+                <.icon name="hero-arrow-right-on-rectangle" class="h-4 w-4" />
+                <span :if={!@sidebar_collapsed}>Log Out</span>
+              </button>
+            </form>
           </div>
         </aside>
 
