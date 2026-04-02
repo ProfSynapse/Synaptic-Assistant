@@ -22,3 +22,4 @@ In plain language:
 - Each version automatically converts to Apache 2.0 two years after that version is made available.
 
 If you need commercial rights beyond the FSL terms, contact the project maintainers.
+
