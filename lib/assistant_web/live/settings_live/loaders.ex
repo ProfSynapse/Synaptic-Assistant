@@ -464,9 +464,9 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   end
 
   def load_admin_integration_settings(socket, integration_group) do
-    settings_user = Context.current_settings_user(socket)
+    current_scope = socket.assigns[:current_scope]
 
-    if settings_user && settings_user.is_admin do
+    if Scope.can_configure_integrations?(current_scope) do
       assign(socket, :integration_settings, integration_settings_for_group(integration_group))
     else
       assign(socket, :integration_settings, [])

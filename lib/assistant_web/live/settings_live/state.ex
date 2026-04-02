@@ -129,6 +129,9 @@ defmodule AssistantWeb.SettingsLive.State do
     |> assign(:telegram_connect_url, nil)
     |> assign(:telegram_bot_username, nil)
     |> assign(:telegram_connect_expires_at, nil)
+    |> assign(:onboarding_checklist_items, [])
+    |> assign(:onboarding_all_complete?, false)
+    |> assign(:onboarding_dismissed?, true)
     |> Loaders.load_profile()
     |> Loaders.load_orchestrator_prompt()
   end
