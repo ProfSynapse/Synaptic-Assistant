@@ -46,16 +46,22 @@ defmodule AssistantWeb.SettingsLive.Events do
 
   def handle_event("switch_admin_tab", %{"tab" => tab}, socket)
       when tab in ~w(integrations models users policies) do
-    socket = assign(socket, :admin_tab, tab)
+    is_admin = socket.assigns.current_scope.admin?
 
-    socket =
-      if tab == "policies" do
-        Loaders.load_admin_policies(socket)
-      else
-        socket
-      end
+    if tab != "integrations" and not is_admin do
+      {:noreply, socket}
+    else
+      socket = assign(socket, :admin_tab, tab)
 
-    {:noreply, socket}
+      socket =
+        if tab == "policies" do
+          Loaders.load_admin_policies(socket)
+        else
+          socket
+        end
+
+      {:noreply, socket}
+    end
   end
 
   def handle_event("set_policy_preset", %{"preset" => preset}, socket) do
