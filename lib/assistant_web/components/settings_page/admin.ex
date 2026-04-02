@@ -36,16 +36,14 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
       </.button>
     </section>
 
-    <section :if={@current_scope.settings_user.is_admin} class="space-y-6">
+    <section
+      :if={Assistant.Accounts.Scope.can_configure_integrations?(@current_scope)}
+      class="space-y-6"
+    >
       <nav class="sa-admin-tabs" role="tablist">
         <button
           :for={
-            {tab_id, tab_label} <- [
-              {"integrations", "Integrations"},
-              {"models", "Models"},
-              {"users", "Users"},
-              {"policies", "Policies"}
-            ]
+            {tab_id, tab_label} <- admin_tabs_for(@current_scope)
           }
           type="button"
           role="tab"
@@ -109,7 +107,7 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
         </div>
       </div>
 
-      <div :if={@admin_tab == "models"}>
+      <div :if={@admin_tab == "models" and @current_scope.admin?}>
         <div class="space-y-6">
           <.admin_model_providers {assigns} />
           <.admin_role_defaults {assigns} />
@@ -117,11 +115,11 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
         </div>
       </div>
 
-      <div :if={@admin_tab == "policies"}>
+      <div :if={@admin_tab == "policies" and @current_scope.admin?}>
         <.policies_section {assigns} />
       </div>
 
-      <div :if={@admin_tab == "users"} class="space-y-6">
+      <div :if={@admin_tab == "users" and @current_scope.admin?} class="space-y-6">
         <.user_detail_section
           :if={@current_admin_user}
           user={@current_admin_user}
@@ -539,6 +537,19 @@ defmodule AssistantWeb.Components.SettingsPage.Admin do
   end
 
   defp managed_integration_catalog(_), do: []
+
+  defp admin_tabs_for(%{admin?: true}) do
+    [
+      {"integrations", "Integrations"},
+      {"models", "Models"},
+      {"users", "Users"},
+      {"policies", "Policies"}
+    ]
+  end
+
+  defp admin_tabs_for(_scope) do
+    [{"integrations", "Integrations"}]
+  end
 
   defp google_chat_service_account_fields do
     [

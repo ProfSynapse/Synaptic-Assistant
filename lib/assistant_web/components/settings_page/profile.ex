@@ -5,10 +5,17 @@ defmodule AssistantWeb.Components.SettingsPage.Profile do
 
   alias Assistant.Deployment
   alias AssistantWeb.Components.SettingsPage.Helpers
+  alias AssistantWeb.Components.SettingsPage.Onboarding
 
   def profile_section(assigns) do
     ~H"""
     <section class="sa-section-stack">
+      <Onboarding.onboarding_checklist
+        checklist_items={@onboarding_checklist_items}
+        all_complete?={@onboarding_all_complete?}
+        onboarding_dismissed?={@onboarding_dismissed?}
+      />
+
       <article class="sa-card">
         <h2>Account</h2>
         <p class="sa-muted">Manage your profile and account settings.</p>

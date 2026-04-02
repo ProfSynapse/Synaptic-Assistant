@@ -6,6 +6,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   require Logger
 
   alias Assistant.Accounts
+  alias Assistant.Accounts.Scope
   alias Assistant.Billing
   alias Assistant.Billing.StorageAccounting
   alias Assistant.Accounts.{SettingsUser, SettingsUserAllowlistEntry}
@@ -37,7 +38,7 @@ defmodule AssistantWeb.SettingsLive.Loaders do
   @policy_default_presets ["permissive", "default", "strict"]
 
   def load_section_data(socket, "profile"),
-    do: socket |> load_profile() |> load_orchestrator_prompt()
+    do: socket |> load_profile() |> load_orchestrator_prompt() |> load_onboarding()
 
   def load_section_data(socket, "workflows"), do: reload_workflows(socket)
   def load_section_data(socket, "analytics"), do: load_analytics(socket)
@@ -227,46 +228,68 @@ defmodule AssistantWeb.SettingsLive.Loaders do
 
   def load_admin(socket) do
     settings_user = Context.current_settings_user(socket)
+    current_scope = socket.assigns[:current_scope]
     can_bootstrap = Accounts.admin_bootstrap_available?()
+    is_admin = settings_user && settings_user.is_admin
 
-    if settings_user && settings_user.is_admin do
-      blank_form =
-        %SettingsUserAllowlistEntry{}
-        |> Accounts.change_settings_user_allowlist_entry(%{
-          active: true,
-          is_admin: false,
-          scopes: []
-        })
-        |> to_form(as: "allowlist_entry")
+    cond do
+      # Full admin: all data (users, models, integrations, allowlist)
+      is_admin ->
+        blank_form =
+          %SettingsUserAllowlistEntry{}
+          |> Accounts.change_settings_user_allowlist_entry(%{
+            active: true,
+            is_admin: false,
+            scopes: []
+          })
+          |> to_form(as: "allowlist_entry")
 
-      all_users = Accounts.list_settings_users_for_admin()
-      search = socket.assigns[:admin_user_search] || ""
+        all_users = Accounts.list_settings_users_for_admin()
+        search = socket.assigns[:admin_user_search] || ""
 
-      socket
-      |> assign(
-        managed_scopes: Accounts.managed_access_scopes(),
-        can_bootstrap_admin: can_bootstrap,
-        allowlist_form: blank_form,
-        allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
-        admin_settings_users: Accounts.list_admin_settings_users(),
-        admin_users_with_keys: all_users,
-        filtered_admin_users: filter_admin_users(all_users, search),
-        integration_settings: IntegrationSettings.list_all()
-      )
-      |> load_admin_model_data()
-      |> load_models()
-      |> maybe_refresh_current_admin_user()
-    else
-      assign(socket,
-        can_bootstrap_admin: can_bootstrap,
-        managed_scopes: Accounts.managed_access_scopes(),
-        allowlist_form: to_form(%{}, as: "allowlist_entry"),
-        allowlist_entries: [],
-        admin_settings_users: [],
-        admin_users_with_keys: [],
-        filtered_admin_users: [],
-        integration_settings: []
-      )
+        socket
+        |> assign(
+          managed_scopes: Accounts.managed_access_scopes(),
+          can_bootstrap_admin: can_bootstrap,
+          allowlist_form: blank_form,
+          allowlist_entries: Accounts.list_settings_user_allowlist_entries(),
+          admin_settings_users: Accounts.list_admin_settings_users(),
+          admin_users_with_keys: all_users,
+          filtered_admin_users: filter_admin_users(all_users, search),
+          integration_settings: IntegrationSettings.list_all()
+        )
+        |> load_admin_model_data()
+        |> load_models()
+        |> maybe_refresh_current_admin_user()
+
+      # Workspace owner: integration settings + connection status only
+      Scope.can_configure_integrations?(current_scope) ->
+        socket
+        |> assign(
+          can_bootstrap_admin: can_bootstrap,
+          managed_scopes: [],
+          allowlist_form: to_form(%{}, as: "allowlist_entry"),
+          allowlist_entries: [],
+          admin_settings_users: [],
+          admin_users_with_keys: [],
+          filtered_admin_users: [],
+          integration_settings: IntegrationSettings.list_all()
+        )
+        |> load_workspace_enabled_groups()
+        |> load_connection_status()
+
+      # No access: minimal assigns for bootstrap display
+      true ->
+        assign(socket,
+          can_bootstrap_admin: can_bootstrap,
+          managed_scopes: Accounts.managed_access_scopes(),
+          allowlist_form: to_form(%{}, as: "allowlist_entry"),
+          allowlist_entries: [],
+          admin_settings_users: [],
+          admin_users_with_keys: [],
+          filtered_admin_users: [],
+          integration_settings: []
+        )
     end
   end
 
@@ -682,6 +705,56 @@ defmodule AssistantWeb.SettingsLive.Loaders do
     |> assign(:profile_form, to_form(profile, as: :profile))
     |> assign(:billing_summary, billing_snapshot.billing_summary)
     |> assign(:billing_storage, billing_storage)
+  end
+
+  defp load_onboarding(socket) do
+    settings_user = Context.current_settings_user(socket)
+
+    dismissed? = not is_nil(settings_user) and not is_nil(settings_user.onboarding_dismissed_at)
+
+    admin_complete? = settings_user != nil and settings_user.is_admin == true
+
+    llm_complete? =
+      settings_user != nil and
+        (present?(settings_user.openrouter_api_key) or
+           present?(settings_user.openai_api_key))
+
+    channel_complete? = channel_configured?()
+
+    items = [
+      %{
+        label: "Claim admin access",
+        complete?: admin_complete?,
+        link: "/settings/admin",
+        action: "Go to Admin"
+      },
+      %{
+        label: "Connect an LLM provider",
+        complete?: llm_complete?,
+        link: "/settings/apps",
+        action: "Connect"
+      },
+      %{
+        label: "Connect a messaging channel",
+        complete?: channel_complete?,
+        link: "/settings/apps",
+        action: "Connect"
+      }
+    ]
+
+    all_complete? = Enum.all?(items, & &1.complete?)
+
+    socket
+    |> assign(:onboarding_checklist_items, items)
+    |> assign(:onboarding_all_complete?, all_complete?)
+    |> assign(:onboarding_dismissed?, dismissed?)
+  end
+
+  defp channel_configured? do
+    Enum.any?(
+      ~w(telegram_bot_token discord_bot_token slack_bot_token)a,
+      fn key -> present?(IntegrationSettings.get(key)) end
+    )
   end
 
   defp billing_storage_summary(%{storage_policy: policy, billing_account: billing_account}) do

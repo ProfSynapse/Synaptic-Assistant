@@ -28,6 +28,7 @@ defmodule Assistant.Accounts.SettingsUser do
     field :openai_auth_type, :string
     field :disabled_at, :utc_datetime
     field :billing_role, :string, default: "member"
+    field :onboarding_dismissed_at, :utc_datetime
 
     belongs_to :user, Assistant.Schemas.User
     belongs_to :billing_account, Assistant.Schemas.BillingAccount

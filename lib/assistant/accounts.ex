@@ -539,6 +539,15 @@ defmodule Assistant.Accounts do
   end
 
   @doc """
+  Sets `onboarding_dismissed_at` to dismiss the getting-started checklist.
+  """
+  def update_settings_user_onboarding_dismissed(%SettingsUser{} = settings_user, %DateTime{} = at) do
+    settings_user
+    |> Ecto.Changeset.change(onboarding_dismissed_at: at)
+    |> Repo.update()
+  end
+
+  @doc """
   Updates the per-user model default overrides for a settings_user.
   """
   def update_settings_user_model_defaults(%SettingsUser{} = settings_user, defaults)

@@ -17,15 +17,16 @@ defmodule AssistantWeb.Components.SettingsPage.Helpers do
 
   @doc """
   Returns nav items filtered by user role and scope privileges.
-  Admin tab only shown to admins. Other sections gated by scope visibility.
+  Admin tab shown to admins and workspace owners who can configure integrations.
+  Other sections gated by scope visibility.
   """
   def nav_items_for(current_scope) when is_map(current_scope) do
-    is_admin = current_scope.admin?
+    alias Assistant.Accounts.Scope
 
     nav_items()
     |> Enum.filter(fn {section, _label} ->
       case section do
-        "admin" -> is_admin
+        "admin" -> Scope.can_configure_integrations?(current_scope)
         _ -> scope_visible?(section_scope(section), current_scope)
       end
     end)

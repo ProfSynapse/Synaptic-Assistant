@@ -30,7 +30,10 @@ defmodule AssistantWeb.SettingsLive.ProfileBillingTest do
         profile_form: to_form(socket.assigns.profile, as: :profile),
         billing_summary: socket.assigns.billing_summary,
         billing_storage: socket.assigns.billing_storage,
-        orchestrator_prompt_html: "<p>Prompt</p>"
+        orchestrator_prompt_html: "<p>Prompt</p>",
+        onboarding_checklist_items: [],
+        onboarding_all_complete?: true,
+        onboarding_dismissed?: true
       )
 
     assert html =~ "Workspace Billing"
@@ -66,7 +69,10 @@ defmodule AssistantWeb.SettingsLive.ProfileBillingTest do
           plan_note: "Manual override active.",
           metering_available?: true
         },
-        orchestrator_prompt_html: "<p>Prompt</p>"
+        orchestrator_prompt_html: "<p>Prompt</p>",
+        onboarding_checklist_items: [],
+        onboarding_all_complete?: true,
+        onboarding_dismissed?: true
       )
 
     assert html =~ "internal billing override"
@@ -106,7 +112,10 @@ defmodule AssistantWeb.SettingsLive.ProfileBillingTest do
           plan_note: "Free workspaces stop taking on new retained storage once they hit 25 MB.",
           metering_available?: true
         },
-        orchestrator_prompt_html: "<p>Prompt</p>"
+        orchestrator_prompt_html: "<p>Prompt</p>",
+        onboarding_checklist_items: [],
+        onboarding_all_complete?: true,
+        onboarding_dismissed?: true
       )
 
     assert html =~ "self-hosted"
