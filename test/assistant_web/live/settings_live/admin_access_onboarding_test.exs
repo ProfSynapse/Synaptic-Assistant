@@ -6,6 +6,7 @@ defmodule AssistantWeb.SettingsLive.AdminAccessOnboardingTest do
 
   alias Assistant.Accounts
   alias Assistant.Accounts.SettingsUser
+  alias Assistant.IntegrationSettings
   alias Assistant.Repo
 
   # ─────────────────────────────────────────────────
@@ -281,10 +282,11 @@ defmodule AssistantWeb.SettingsLive.AdminAccessOnboardingTest do
       user = settings_user_fixture()
       conn = log_in_settings_user(conn, user)
 
-      {:ok, lv, html} = live(conn, ~p"/settings")
+      {:ok, _lv, html} = live(conn, ~p"/settings")
 
-      # Before claiming, admin item should be incomplete
+      # Before claiming, admin item should be incomplete — shows action link, no "Done"
       assert html =~ "Claim admin access"
+      assert html =~ "Go to Admin"
 
       # Navigate to admin and claim
       {:ok, lv, _html} = live(conn, ~p"/settings/admin")
@@ -293,9 +295,63 @@ defmodule AssistantWeb.SettingsLive.AdminAccessOnboardingTest do
       # Navigate back to profile to check checklist
       {:ok, _lv, html} = live(conn, ~p"/settings")
 
-      # The admin item should now show as complete (check icon rendered)
-      # "Claim admin access" should still appear but with "Done" status
+      # The admin item should now show as complete with "Done" status and check icon
       assert html =~ "Claim admin access"
+      assert html =~ "sa-onboarding-done"
+      assert html =~ "Done"
+      assert html =~ "hero-check-circle"
+    end
+
+    test "checklist shows LLM item as complete when user has openrouter key", %{conn: conn} do
+      user = settings_user_fixture()
+
+      user
+      |> Ecto.Changeset.change(%{openrouter_api_key: "sk-or-test-key"})
+      |> Repo.update!()
+
+      conn = log_in_settings_user(conn, user)
+      {:ok, _lv, html} = live(conn, ~p"/settings")
+
+      assert html =~ "Getting Started"
+      # LLM item should show as complete
+      assert html =~ "Connect an LLM provider"
+      assert html =~ "Done"
+    end
+
+    test "checklist shows channel item as complete when a channel is configured", %{conn: conn} do
+      user = settings_user_fixture()
+      {:ok, _} = IntegrationSettings.put(:telegram_bot_token, "test-bot-token-123")
+
+      conn = log_in_settings_user(conn, user)
+      {:ok, _lv, html} = live(conn, ~p"/settings")
+
+      assert html =~ "Getting Started"
+      # Channel item should show as complete
+      assert html =~ "Connect a messaging channel"
+      assert html =~ "Done"
+    end
+
+    test "checklist auto-hides when all items are complete", %{conn: conn} do
+      user = settings_user_fixture()
+
+      # Complete admin: claim bootstrap
+      make_admin(user)
+
+      # Complete LLM: set openrouter key
+      user =
+        user
+        |> Ecto.Changeset.change(%{openrouter_api_key: "sk-or-test-key"})
+        |> Repo.update!()
+
+      # Complete channel: configure telegram
+      {:ok, _} = IntegrationSettings.put(:telegram_bot_token, "test-bot-token-123")
+
+      conn = log_in_settings_user(conn, user)
+      {:ok, _lv, html} = live(conn, ~p"/settings")
+
+      # Checklist should NOT render when all items are complete
+      refute html =~ "Getting Started"
+      refute html =~ "sa-onboarding-card"
     end
   end
 
